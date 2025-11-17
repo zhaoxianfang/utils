@@ -1,0 +1,38 @@
+{
+  "name": "zxf/util",
+  "description": "无业务逻辑的通用工具包和通用函数集",
+  "type": "library",
+  "keywords": ["util", "func", "zxf" ,"php", "工具"],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "zxf",
+      "email": "zxf@example.com",
+      "homepage": "https://yoc.cn"
+    }
+  ],
+  "require": {
+    "php": "^8.1"
+  },
+  "require-dev": {
+  },
+  "autoload": {
+    "psr-4": {
+      "zxf\\Util\\": "src/Util/"
+    },
+    "files": [
+      "src/funcs/helpers.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "zxf\\Util\\Tests\\": "util/"
+    }
+  },
+  "config": {
+    "sort-packages": true,
+    "optimize-autoloader": true
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
