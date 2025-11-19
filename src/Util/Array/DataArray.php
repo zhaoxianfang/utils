@@ -22,7 +22,7 @@ use InvalidArgumentException;
  * echo $data['user.name']; // John (通过数组访问)
  * echo $data->get('list.*.name'); // 通配符查找
  *
- * @see https://weisifang.com/docs/doc/9_312 DataArray使用文档
+ * @see https://weisifang.com/docs/doc/6_203 DataArray使用文档
  */
 class DataArray implements ArrayAccess, Countable, IteratorAggregate, JsonSerializable
 {
