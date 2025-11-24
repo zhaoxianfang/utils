@@ -1,5 +1,7 @@
 <?php
 
+namespace zxf\Util\Crypto;
+
 /**
  * AES加密解密类 - 企业级最终优化版
  * 支持多种加密模式、填充方式、密钥长度和认证加密

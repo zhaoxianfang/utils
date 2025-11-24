@@ -1,5 +1,7 @@
 <?php
 
+namespace zxf\Util\Crypto;
+
 /**
  * RSA加密解密类 - 企业级最终优化版
  * 支持密钥生成、加密、解密、签名、验证和文件操作
