@@ -2,8 +2,13 @@
 
 namespace zxf\Util\Crypto;
 
+use Exception;
+use InvalidArgumentException;
+use OpenSSLAsymmetricKey;
+use RuntimeException;
+
 /**
- * RSA加密解密类 - 企业级最终优化版
+ * RSA加密解密类
  * 支持密钥生成、加密、解密、签名、验证和文件操作
  * 基于PHP 8.2+ openssl扩展实现，包含完整的错误处理和调试功能
  *
@@ -18,12 +23,12 @@ namespace zxf\Util\Crypto;
  *
  * @package Crypto
  * @author Security Team
- * @version 7.0.0
+ * @version 1.0.0
  * @license MIT
- * @created 2024-01-01
- * @updated 2024-01-15
+ * @created 2026-01-01
+ * @updated 2026-01-15
  */
-class RSACrypto
+class RSA
 {
     /**
      * @var OpenSSLAsymmetricKey|null 私钥资源
@@ -129,12 +134,12 @@ class RSACrypto
      * @param bool $debugMode 调试模式开关（默认false）
      *
      * @throws InvalidArgumentException 当参数验证失败时抛出
-     * @throws RuntimeException 当加密器初始化失败时抛出
+     * @throws RuntimeException|Exception 当加密器初始化失败时抛出
      *
      * 使用示例：
-     * $rsa = new RSACrypto($privateKey, $publicKey, 2048, 'sha256', true);
-     * $rsa = new RSACrypto(null, $publicKey, 2048, 'sha256'); // 仅公钥模式
-     * $rsa = new RSACrypto($privateKey, null, 2048, 'sha256'); // 仅私钥模式
+     * $rsa = new RSA($privateKey, $publicKey, 2048, 'sha256', true);
+     * $rsa = new RSA(null, $publicKey, 2048, 'sha256'); // 仅公钥模式
+     * $rsa = new RSA($privateKey, null, 2048, 'sha256'); // 仅私钥模式
      */
     public function __construct(
         ?string $privateKey = null,
@@ -882,7 +887,7 @@ class RSACrypto
             $this->logDebug("AES密钥和IV加密完成");
 
             // 使用AES加密文件内容
-            $aes = new AESCrypto($aesKey, 'aes-256-cbc', $aesIV);
+            $aes = new AES($aesKey, 'aes-256-cbc', $aesIV);
             $tempEncryptedFile = $outputFile . '.aes.tmp';
 
             $success = $aes->encryptFile($inputFile, $tempEncryptedFile, $chunkSize, $enableCompression, $enableIntegrityCheck);
@@ -1042,7 +1047,7 @@ class RSACrypto
             $aesKey = $this->decryptSingleBlockBinary($encryptedAesKey, OPENSSL_PKCS1_OAEP_PADDING);
             $aesIV = $this->decryptSingleBlockBinary($encryptedAesIV, OPENSSL_PKCS1_OAEP_PADDING);
 
-            $aes = new AESCrypto($aesKey, 'aes-256-cbc', $aesIV);
+            $aes = new AES($aesKey, 'aes-256-cbc', $aesIV);
 
             $this->logDebug("AES密钥和IV解密成功");
 
@@ -1564,7 +1569,7 @@ class RSACrypto
      * @return array 支持的哈希算法
      *
      * 使用示例：
-     * $algorithms = RSACrypto::getSupportedHashAlgorithms();
+     * $algorithms = RSA::getSupportedHashAlgorithms();
      */
     public static function getSupportedHashAlgorithms(): array
     {
@@ -1577,7 +1582,7 @@ class RSACrypto
      * @return array 支持的密钥长度
      *
      * 使用示例：
-     * $keySizes = RSACrypto::getSupportedKeySizes();
+     * $keySizes = RSA::getSupportedKeySizes();
      */
     public static function getSupportedKeySizes(): array
     {
@@ -1590,7 +1595,7 @@ class RSACrypto
      * @return array 支持的填充方式
      *
      * 使用示例：
-     * $paddings = RSACrypto::getSupportedPaddings();
+     * $paddings = RSA::getSupportedPaddings();
      */
     public static function getSupportedPaddings(): array
     {
@@ -1648,7 +1653,7 @@ class RSACrypto
      * @throws RuntimeException 当密钥生成失败时抛出
      *
      * 使用示例：
-     * $keyPair = RSACrypto::createKeyPair(2048, 'mypassword', 'sha256');
+     * $keyPair = RSA::createKeyPair(2048, 'mypassword', 'sha256');
      */
     public static function createKeyPair(
         int $keySize = 2048,
@@ -1683,7 +1688,7 @@ class RSACrypto
      * @throws RuntimeException 当密钥加载失败时抛出
      *
      * 使用示例：
-     * $rsa = RSACrypto::createFromKey($privateKey, $publicKey, 'sha256', 'mypassword');
+     * $rsa = RSA::createFromKey($privateKey, $publicKey, 'sha256', 'mypassword');
      */
     public static function createFromKey(
         string $privateKey,
@@ -1718,7 +1723,7 @@ class RSACrypto
      * @return self RSA实例
      *
      * 使用示例：
-     * $rsa = RSACrypto::createFromPublicKey($publicKey, 2048, 'sha256');
+     * $rsa = RSA::createFromPublicKey($publicKey, 2048, 'sha256');
      */
     public static function createFromPublicKey(
         string $publicKey,
@@ -1936,7 +1941,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：导出密钥为各种格式
+     * 导出密钥为各种格式
      *
      * @param string $format 密钥格式（PEM, PKCS12, JWK）
      * @param string $passphrase 密码（可选）
@@ -2051,7 +2056,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：验证证书
+     * 验证证书
      *
      * @param string $certificate 证书字符串
      * @return bool 验证结果
@@ -2079,7 +2084,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：批量加密文件
+     * 批量加密文件
      *
      * @param array $files 文件路径数组
      * @param string $outputDir 输出目录
@@ -2156,7 +2161,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：批量解密文件
+     * 批量解密文件
      *
      * @param array $files 文件路径数组
      * @param string $outputDir 输出目录
@@ -2231,7 +2236,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：密钥对强度测试
+     * 密钥对强度测试
      *
      * @param int $iterations 测试迭代次数
      * @return array 强度测试结果
@@ -2308,7 +2313,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：更改哈希算法
+     * 更改哈希算法
      *
      * @param string $newHashAlg 新哈希算法
      * @return void
@@ -2327,7 +2332,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：启用/禁用调试模式
+     * 启用/禁用调试模式
      *
      * @param bool $enabled 是否启用调试模式
      * @return void
@@ -2342,7 +2347,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：获取密钥使用统计
+     * 获取密钥使用统计
      *
      * @return array 密钥使用统计
      *
@@ -2371,7 +2376,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：安全擦除敏感数据
+     * 安全擦除敏感数据
      *
      * @return void
      *
@@ -2385,7 +2390,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：导出加密配置
+     * 导出加密配置
      *
      * @return array 加密配置
      *
@@ -2406,7 +2411,7 @@ class RSACrypto
     }
 
     /**
-     * 新功能：从配置导入
+     * 从配置导入
      *
      * @param array $config 加密配置
      * @return static 新的RSA实例
@@ -2414,7 +2419,7 @@ class RSACrypto
      * @throws InvalidArgumentException 当配置无效时抛出
      *
      * 使用示例：
-     * $newRsa = RSACrypto::fromConfig($config);
+     * $newRsa = RSA::fromConfig($config);
      */
     public static function fromConfig(array $config): self
     {

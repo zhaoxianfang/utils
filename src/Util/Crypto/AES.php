@@ -2,8 +2,12 @@
 
 namespace zxf\Util\Crypto;
 
+use Exception;
+use InvalidArgumentException;
+use RuntimeException;
+
 /**
- * AES加密解密类 - 企业级最终优化版
+ * AES加密解密类
  * 支持多种加密模式、填充方式、密钥长度和认证加密
  * 基于PHP 8.2+ openssl扩展实现，包含完整的错误处理和调试功能
  *
@@ -19,10 +23,10 @@ namespace zxf\Util\Crypto;
  * @author Security Team
  * @version 7.0.0
  * @license MIT
- * @created 2024-01-01
- * @updated 2024-01-15
+ * @created 2026-01-01
+ * @updated 2026-01-15
  */
-class AESCrypto
+class AES
 {
     /**
      * @var string 加密密钥（二进制格式）
@@ -141,7 +145,7 @@ class AESCrypto
      * @throws RuntimeException 当加密器初始化失败时抛出
      *
      * 使用示例：
-     * $aes = new AESCrypto($key, 'aes-256-cbc', null, true);
+     * $aes = new AES($key, 'aes-256-cbc', null, true);
      */
     public function __construct(
         string $key,
@@ -1482,7 +1486,7 @@ class AESCrypto
      * @throws RuntimeException 当密钥生成失败时抛出
      *
      * 使用示例：
-     * $key = AESCrypto::generateKey('aes-256-cbc');
+     * $key = AES::generateKey('aes-256-cbc');
      */
     public static function generateKey(string $method = 'aes-256-cbc'): string
     {
@@ -1517,7 +1521,7 @@ class AESCrypto
      * @throws InvalidArgumentException 当参数无效时抛出
      *
      * 使用示例：
-     * $key = AESCrypto::generateKeyFromPassword('mypassword', 'somesalt', 'aes-256-cbc', 100000);
+     * $key = AES::generateKeyFromPassword('mypassword', 'somesalt', 'aes-256-cbc', 100000);
      */
     public static function generateKeyFromPassword(
         string $password,
@@ -1556,7 +1560,7 @@ class AESCrypto
      * @return array 支持的加密方法
      *
      * 使用示例：
-     * $methods = AESCrypto::getSupportedMethods();
+     * $methods = AES::getSupportedMethods();
      */
     public static function getSupportedMethods(): array
     {
@@ -1759,7 +1763,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：加密字符串到文件
+     * 加密字符串到文件
      *
      * @param string $data 要加密的字符串数据
      * @param string $outputFile 输出文件路径
@@ -1835,7 +1839,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：从文件解密字符串
+     * 从文件解密字符串
      *
      * @param string $inputFile 输入文件路径
      * @return string 解密后的字符串
@@ -1897,7 +1901,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：批量加密文件
+     * 批量加密文件
      *
      * @param array $files 文件路径数组
      * @param string $outputDir 输出目录
@@ -1974,7 +1978,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：批量解密文件
+     * 批量解密文件
      *
      * @param array $files 文件路径数组
      * @param string $outputDir 输出目录
@@ -2049,7 +2053,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：获取文件加密信息
+     * 获取文件加密信息
      *
      * @param string $filePath 文件路径
      * @return array 文件加密信息
@@ -2057,7 +2061,7 @@ class AESCrypto
      * @throws InvalidArgumentException 当文件不存在时抛出
      *
      * 使用示例：
-     * $info = AESCrypto::getFileEncryptionInfo('encrypted.enc');
+     * $info = AES::getFileEncryptionInfo('encrypted.enc');
      */
     public static function getFileEncryptionInfo(string $filePath): array
     {
@@ -2108,7 +2112,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：更改加密密钥
+     * 更改加密密钥
      *
      * @param string $newKey 新密钥
      * @return void
@@ -2127,7 +2131,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：更改加密方法
+     * 更改加密方法
      *
      * @param string $newMethod 新加密方法
      * @param string|null $newIV 新初始化向量
@@ -2162,7 +2166,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：启用/禁用调试模式
+     * 启用/禁用调试模式
      *
      * @param bool $enabled 是否启用调试模式
      * @return void
@@ -2177,7 +2181,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：性能测试
+     * 性能测试
      *
      * @param int $dataSize 测试数据大小（字节）
      * @param int $iterations 迭代次数
@@ -2217,7 +2221,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：安全擦除敏感数据
+     * 安全擦除敏感数据
      *
      * @return void
      *
@@ -2252,7 +2256,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：导出加密配置
+     * 导出加密配置
      *
      * @return array 加密配置
      *
@@ -2273,7 +2277,7 @@ class AESCrypto
     }
 
     /**
-     * 新功能：从配置导入
+     * 从配置导入
      *
      * @param array $config 加密配置
      * @return static 新的AES实例
@@ -2281,7 +2285,7 @@ class AESCrypto
      * @throws InvalidArgumentException 当配置无效时抛出
      *
      * 使用示例：
-     * $newAes = AESCrypto::fromConfig($config);
+     * $newAes = AES::fromConfig($config);
      */
     public static function fromConfig(array $config): self
     {

@@ -2,8 +2,13 @@
 
 namespace zxf\Util\Crypto;
 
+use Exception;
+use InvalidArgumentException;
+use OpenSSLAsymmetricKey;
+use RuntimeException;
+
 /**
- * ECC（椭圆曲线加密）类 - 企业级最终优化版
+ * ECC（椭圆曲线加密）类
  * 支持密钥生成、ECDH密钥交换、签名、验证和文件操作
  * 基于PHP 8.2+ openssl扩展实现，包含完整的错误处理和调试功能
  *
@@ -18,12 +23,12 @@ namespace zxf\Util\Crypto;
  *
  * @package Crypto
  * @author Security Team
- * @version 7.0.0
+ * @version 1.0.0
  * @license MIT
- * @created 2024-01-01
- * @updated 2024-01-15
+ * @created 2026-01-01
+ * @updated 2026-01-15
  */
-class ECCCrypto
+class ECC
 {
     /**
      * @var OpenSSLAsymmetricKey|null 私钥资源
@@ -134,9 +139,9 @@ class ECCCrypto
      * @throws RuntimeException 当加密器初始化失败时抛出
      *
      * 使用示例：
-     * $ecc = new ECCCrypto($privateKey, $publicKey, 'prime256v1', '', true);
-     * $ecc = new ECCCrypto(null, $publicKey, 'prime256v1'); // 仅公钥模式
-     * $ecc = new ECCCrypto($privateKey, null, 'prime256v1'); // 仅私钥模式
+     * $ecc = new ECC($privateKey, $publicKey, 'prime256v1', '', true);
+     * $ecc = new ECC(null, $publicKey, 'prime256v1'); // 仅公钥模式
+     * $ecc = new ECC($privateKey, null, 'prime256v1'); // 仅私钥模式
      */
     public function __construct(
         ?string $privateKey = null,
@@ -1013,7 +1018,7 @@ class ECCCrypto
      * @return array 支持的曲线
      *
      * 使用示例：
-     * $curves = ECCCrypto::getSupportedCurves();
+     * $curves = ECC::getSupportedCurves();
      */
     public static function getSupportedCurves(): array
     {
@@ -1026,7 +1031,7 @@ class ECCCrypto
      * @return array 支持的签名算法
      *
      * 使用示例：
-     * $algorithms = ECCCrypto::getSupportedSignatureAlgorithms();
+     * $algorithms = ECC::getSupportedSignatureAlgorithms();
      */
     public static function getSupportedSignatureAlgorithms(): array
     {
@@ -1073,7 +1078,7 @@ class ECCCrypto
      * @throws RuntimeException 当密钥生成失败时抛出
      *
      * 使用示例：
-     * $keyPair = ECCCrypto::createKeyPair('prime256v1', 'mypassword');
+     * $keyPair = ECC::createKeyPair('prime256v1', 'mypassword');
      */
     public static function createKeyPair(
         string $curveName = 'prime256v1',
@@ -1113,7 +1118,7 @@ class ECCCrypto
      * @throws RuntimeException 当密钥加载失败时抛出
      *
      * 使用示例：
-     * $ecc = ECCCrypto::createFromKey($privateKey, $publicKey, 'mypassword');
+     * $ecc = ECC::createFromKey($privateKey, $publicKey, 'mypassword');
      */
     public static function createFromKey(
         string $privateKey,
@@ -1148,7 +1153,7 @@ class ECCCrypto
      * @throws RuntimeException 当公钥加载失败时抛出
      *
      * 使用示例：
-     * $ecc = ECCCrypto::createFromPublicKey($publicKey, 'prime256v1');
+     * $ecc = ECC::createFromPublicKey($publicKey, 'prime256v1');
      */
     public static function createFromPublicKey(
         string $publicKey,
@@ -1345,7 +1350,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：导出密钥为各种格式
+     * 导出密钥为各种格式
      *
      * @param string $format 密钥格式（PEM, JWK）
      * @param string $passphrase 密码（可选）
@@ -1414,7 +1419,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：从JWK导入密钥
+     * 从JWK导入密钥
      *
      * @param array $jwk JWK格式的密钥
      * @param string $passphrase 密码（可选）
@@ -1423,7 +1428,7 @@ class ECCCrypto
      * @throws InvalidArgumentException 当JWK格式无效时抛出
      *
      * 使用示例：
-     * $ecc = ECCCrypto::createFromJWK($jwkData, 'mypassword');
+     * $ecc = ECC::createFromJWK($jwkData, 'mypassword');
      */
     public static function createFromJWK(array $jwk, string $passphrase = ''): self
     {
@@ -1472,7 +1477,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：批量签名文件
+     * 批量签名文件
      *
      * @param array $files 文件路径数组
      * @param string $signatureAlg 签名算法
@@ -1540,7 +1545,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：批量验证文件签名
+     * 批量验证文件签名
      *
      * @param array $filesWithSignatures 文件路径和签名的关联数组
      * @param string $signatureAlg 签名算法
@@ -1608,7 +1613,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：密钥对强度测试
+     * 密钥对强度测试
      *
      * @param int $iterations 测试迭代次数
      * @return array 强度测试结果
@@ -1683,7 +1688,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：生成证书签名请求
+     * 生成证书签名请求
      *
      * @param array $dn 主题信息
      * @param array $options 额外选项
@@ -1726,7 +1731,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：验证证书
+     * 验证证书
      *
      * @param string $certificate 证书字符串
      * @return bool 验证结果
@@ -1754,7 +1759,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：更改曲线
+     * 更改曲线
      *
      * @param string $newCurveName 新曲线名称
      * @return void
@@ -1788,7 +1793,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：启用/禁用调试模式
+     * 启用/禁用调试模式
      *
      * @param bool $enabled 是否启用调试模式
      * @return void
@@ -1803,7 +1808,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：获取曲线安全信息
+     * 获取曲线安全信息
      *
      * @return array 曲线安全信息
      *
@@ -1869,7 +1874,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：安全擦除敏感数据
+     * 安全擦除敏感数据
      *
      * @return void
      *
@@ -1883,7 +1888,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：导出加密配置
+     * 导出加密配置
      *
      * @return array 加密配置
      *
@@ -1904,7 +1909,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：从配置导入
+     * 从配置导入
      *
      * @param array $config 加密配置
      * @return static 新的ECC实例
@@ -1912,7 +1917,7 @@ class ECCCrypto
      * @throws InvalidArgumentException 当配置无效时抛出
      *
      * 使用示例：
-     * $newEcc = ECCCrypto::fromConfig($config);
+     * $newEcc = ECC::fromConfig($config);
      */
     public static function fromConfig(array $config): self
     {
@@ -1935,7 +1940,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：ECDH密钥交换协议
+     * ECDH密钥交换协议
      *
      * @param string $peerPublicKey 对端公钥
      * @param string $salt 盐值
@@ -1968,7 +1973,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：验证密钥兼容性
+     * 验证密钥兼容性
      *
      * @param self $other 另一个ECC实例
      * @return bool 是否兼容
@@ -1982,7 +1987,7 @@ class ECCCrypto
     }
 
     /**
-     * 新功能：获取密钥使用统计
+     * 获取密钥使用统计
      *
      * @return array 密钥使用统计
      *
