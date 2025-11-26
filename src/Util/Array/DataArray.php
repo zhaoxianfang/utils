@@ -2311,7 +2311,7 @@ class DataArray implements
     /**
      * 将多维数组展平为一维数组
      *
-     * @param string $delimiter 键名分隔符
+     * @param string|null $delimiter 键名分隔符
      * @return static 新的DataArray实例
      */
     public function flatten(string $delimiter = null): static
@@ -2346,7 +2346,7 @@ class DataArray implements
     /**
      * 将扁平数组转换为嵌套数组
      *
-     * @param string $delimiter 键名分隔符
+     * @param string|null $delimiter 键名分隔符
      * @return static 新的DataArray实例
      */
     public function unflatten(string $delimiter = null): static

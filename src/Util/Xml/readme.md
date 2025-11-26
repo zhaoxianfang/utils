@@ -76,10 +76,10 @@ $config = [
     'encoding' => 'UTF-8', // 文档编码
     'rootName' => 'WeChat:Message', // 根节点名称
     'namespaces' => [ // 命名空间
-        'WeChat' => 'http://wechat.example.com/ns',
+        'WeChat' => 'https://wechat.example.com/ns',
         'xs' => 'http://www.w3.org/2001/XMLSchema'
     ],
-    'defaultNamespace' => 'http://wechat.example.com/dfns', // 默认命名空间
+    'defaultNamespace' => 'https://wechat.example.com/dfns', // 默认命名空间
     'rootAttributes' => [ // 根元素属性
         'created' => date('Y-m-d H:i:s')
     ],
@@ -114,7 +114,7 @@ echo $xml;
 
 ```xml
 <?xml version="1.1" encoding="UTF-8"?>
-<WeChat:Message created="2025-05-08 01:52:21" xmlns:WeChat="http://wechat.example.com/ns"
+<WeChat:Message created="2025-05-08 01:52:21" xmlns:WeChat="https://wechat.example.com/ns"
                 xmlns:xs="http://www.w3.org/2001/XMLSchema" from="user123" to="server001">
     <MsgType><![CDATA[event]]></MsgType>
     <Event><![CDATA[subscribe]]></Event>

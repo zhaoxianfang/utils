@@ -1502,8 +1502,7 @@ class AES
         $length = $keyLengths[$method] ?? $keyLengths[$prefix] ?? 32;
 
         try {
-            $key = random_bytes($length);
-            return $key;
+            return random_bytes($length);
         } catch (Exception $e) {
             throw new RuntimeException('随机密钥生成失败: ' . $e->getMessage());
         }
@@ -1550,8 +1549,7 @@ class AES
         $prefix = substr($method, 0, 7);
         $length = $keyLengths[$prefix] ?? 32;
 
-        $key = hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true);
-        return $key;
+        return hash_pbkdf2('sha256', $password, $salt, $iterations, $length, true);
     }
 
     /**

@@ -956,7 +956,6 @@ class RSA
         }
 
         // 尝试多次覆盖文件内容
-        $success = true;
         $fileSize = filesize($filePath);
 
         if ($fileSize > 0) {

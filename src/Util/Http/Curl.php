@@ -368,7 +368,7 @@ class Curl
     /**
      * 复制句柄
      *
-     * @return false|resource
+     * @return \CurlHandle|false
      *
      * @throws Exception
      */
@@ -804,7 +804,7 @@ class Curl
         return $body;
     }
 
-    private function parserResponse()
+    private function parserResponse(): static
     {
         $content = curl_exec($this->ch);
 

@@ -70,7 +70,7 @@ class Request
      *
      * @return $this
      */
-    private function init()
+    private function init(): static
     {
         // 一、基础的、逻辑较简单的放在最前面优先获取
         // 获取请求方法（GET、POST等）
@@ -656,9 +656,9 @@ class Request
      *
      *
      * @param  string  $format  返回时间格式 默认 'Y-m-d H:i:s'
-     * @return int|float
+     * @return string
      */
-    public function time(string $format = '')
+    public function time(string $format = ''): string
     {
         $format = (! empty($format) && is_string($format)) ? $format : 'Y-m-d H:i:s';
 

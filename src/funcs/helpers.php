@@ -1064,9 +1064,7 @@ if (! function_exists('json_decode_plus')) {
         $json = preg_replace('/,\s*([}\]])/', '$1', $json);
 
         // 修复缺失的引号
-        $json = preg_replace('/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/', '$1"$2"$3', $json);
-
-        return $json;
+        return preg_replace('/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)(\s*:)/', '$1"$2"$3', $json);
     }
 }
 
@@ -1833,7 +1831,7 @@ if (! function_exists('img_to_base64')) {
 if (! function_exists('base64_to_image')) {
     /**
      * base64图片转文件图片
-     * base64_to_image($row['cover'],"./uploads/images")
+     * base64_to_image($row['cover'],'./uploads/images')
      */
     function base64_to_image($base64_image_content, $path): bool|string
     {
