@@ -1376,7 +1376,7 @@ if (! function_exists('stream_output')) {
 
             // 重新设置 Header
             // 如果使用的是 Apache 或 Nginx，设置适当的头部信息以避免服务器端缓冲
-            header('Content-Type: text/plain; charset=UTF-8');
+            header('Content-Type: text/html; charset=UTF-8');
             header('Cache-Control: no-cache');
             header('Connection: keep-alive');
             header('X-Accel-Buffering: no'); // 禁用 nginx 的输出缓冲
