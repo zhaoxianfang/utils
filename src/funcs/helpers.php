@@ -1340,157 +1340,193 @@ if (!function_exists('stream_output')) {
      * 数据流方式操作数据，不用等待操作结束才打印数据
      *
      * @param Closure $callback ($next)
+     *                  示例：
      *                      $next() 执行下一个回调函数
-     *                      $next('string') 输出普通文本
+     *                  1. 简单字符串输出
+     *                      $next('string')输出普通文本
+     *                  2. 带类型的消息输出
      *                      $next->info('信息消息') 等输出带样式的文本
      *                      $next->error('错误消息'); // 错误级别输出
      *                      $next->warning('警告消息'); // 警告级别输出
      *                      $next->success('成功消息'); // 成功级别输出
+     *                  3. 多参数输出
+     *                      $next('消息1', '消息2', '消息3');
+     *                      $next->info('信息1', '信息2', '信息3');
+     *                  4. 数组输出
+     *                      $data=['name' => '张三','hobbies' => ['篮球', '音乐', '阅读']];
+     *                      $next->info('用户数据:', $data);
+     *                  5. 对象输出
+     *                      $user = new stdClass();
+     *                      $user->id = 1;
+     *                      $user->username = 'admin';
+     *                      $next->warning('用户对象:', $user);
+     *                  6. 混合输出
+     *                      $next('字符串:', 'Hello');
+     *                      $next('数字:', 123.45);
+     *                      $next('布尔值:', true);
+     *                      $next('空值:', null);
+     *                      $next('数组:', [1, 2, 3]);
      *
      * @throws Exception|Throwable
      */
     function stream_output(\Closure $callback): void
     {
-        static $initialized = false;
-        $isCli = PHP_SAPI === 'cli';
+        static $initialized = false; // 静态标记是否已初始化
+        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
 
-        if (!$initialized) {
+        if (!$initialized) { // 首次调用初始化
             $initialized = true;
 
-            if ($isCli) {
-                // CLI 信号处理
+            if ($isCli) { // CLI环境信号处理
                 if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
-                    pcntl_async_signals(true);
-                    pcntl_signal(SIGTERM, function () {
+                    pcntl_async_signals(true); // 启用异步信号
+                    pcntl_signal(SIGTERM, function () { // 注册终止信号处理
                         echo "进程被终止。\n";
                         exit;
                     });
                 }
-            } else {
-                // 移除 headers_sent 检查，允许之前有输出
+            } else { // Web环境设置
+                ini_set('max_execution_time', '0'); // 无执行时间限制
+                set_time_limit(0); // 无时间限制
+                ignore_user_abort(true); // 忽略用户中断
 
-                // Web 环境设置
-                ini_set('max_execution_time', '0');
-                set_time_limit(0);
-                ignore_user_abort(true);
-
-                // 设置HTTP响应头（如果还没有发送header）
-                if (!headers_sent()) {
-                    header('Content-Type: text/html; charset=UTF-8');
-                    header('Cache-Control: no-cache, no-store, must-revalidate');
-                    header('Pragma: no-cache');
-                    header('Expires: 0');
-                    header('Connection: keep-alive');
-                    header('X-Accel-Buffering: no');
+                if (!headers_sent()) { // 如果头信息未发送
+                    header('Content-Type: text/html; charset=UTF-8'); // 设置内容类型
+                    header('Cache-Control: no-cache, no-store, must-revalidate'); // 禁用缓存
+                    header('Pragma: no-cache'); // 兼容旧浏览器
+                    header('Expires: 0'); // 立即过期
+                    header('Connection: keep-alive'); // 保持连接
+                    header('X-Accel-Buffering: no'); // 禁用Nginx缓冲
 
                     if (function_exists('apache_setenv')) {
-                        @apache_setenv('no-gzip', '1');
+                        @apache_setenv('no-gzip', '1'); // 禁用Apache压缩
                     }
                 }
             }
 
-            // 清除当前输出缓冲区，但不影响之前的输出
-            if (ob_get_level() > 0) {
-                ob_end_flush();
-            }
-            ob_implicit_flush(true);
+            if (ob_get_level() > 0) ob_end_flush(); // 清除当前缓冲区
+            ob_implicit_flush(true); // 启用隐式刷新
         }
 
         // 创建输出处理器
         $next = new class($isCli)
         {
-            private bool $isCli;
-            private bool $supportsColors;
-            private string $lineBreak;
+            private bool $isCli; // 环境标识
+            private bool $supportsColors; // 颜色支持
+            private string $lineBreak; // 换行符
 
             // 颜色映射配置
             private const COLOR_MAP = [
-                'info'    => ['cli' => "\033[36m", 'browser' => '#0099CC', 'prefix' => '[INFO] '],
-                'error'   => ['cli' => "\033[31m", 'browser' => '#FF3300', 'prefix' => '[ERROR] '],
-                'warning' => ['cli' => "\033[33m", 'browser' => '#FF9900', 'prefix' => '[WARNING] '],
-                'success' => ['cli' => "\033[32m", 'browser' => '#009900', 'prefix' => '[SUCCESS] '],
-                'default' => ['cli' => "\033[37m", 'browser' => '#666666', 'prefix' => '[LOG] ']
+                'info'    => ['cli' => "\033[36m", 'browser' => '#0099CC'], // 信息颜色
+                'error'   => ['cli' => "\033[31m", 'browser' => '#FF3300'], // 错误颜色
+                'warning' => ['cli' => "\033[33m", 'browser' => '#FF9900'], // 警告颜色
+                'success' => ['cli' => "\033[32m", 'browser' => '#009900'], // 成功颜色
+                'default' => ['cli' => "\033[37m", 'browser' => '#666666']  // 默认颜色
             ];
 
             public function __construct(bool $isCli)
             {
-                $this->isCli = $isCli;
-                $this->lineBreak = $isCli ? PHP_EOL : '<br>';
-                $this->supportsColors = $this->checkColorSupport();
+                $this->isCli = $isCli; // 设置环境
+                $this->lineBreak = $isCli ? PHP_EOL : '<br>'; // 设置换行符
+                $this->supportsColors = $this->checkColorSupport(); // 检测颜色支持
             }
 
-            public function __invoke(string ...$strings): void
+            public function __invoke(...$data): void // 支持任意参数
             {
-                $this->output($strings);
+                $this->output($data); // 调用输出方法
             }
 
             public function __call(string $name, array $args): void
             {
-                $this->output($args, $name);
+                $this->output($args, $name); // 调用带类型的输出
             }
 
-            private function output(array $texts, ?string $type = null): void
+            /**
+             * 刷新输出缓冲区（公开方法）
+             */
+            public function flush(): void
             {
-                if (empty($texts)) {
+                if (ob_get_level() > 0) ob_flush(); // 刷新输出缓冲区
+                flush(); // 刷新系统缓冲区
+                if (function_exists('usleep') && $this->isCli) usleep(1000); // CLI环境微延迟
+            }
+
+            /**
+             * 统一输出处理
+             */
+            private function output(array $items, ?string $type = null): void
+            {
+                if (empty($items)) { // 空数据只刷新
                     $this->flush();
                     return;
                 }
 
-                $colorMap = self::COLOR_MAP[$type] ?? self::COLOR_MAP['default'];
+                $colorMap = self::COLOR_MAP[$type] ?? self::COLOR_MAP['default']; // 获取颜色配置
 
-                foreach ($texts as $text) {
-                    if ($this->isCli) {
-                        echo $this->supportsColors ? $colorMap['cli'] . $text . "\033[0m" : $colorMap['prefix'] . $text;
-                        echo $this->lineBreak;
-                    } else {
-                        echo '<span style="color: ' . $colorMap['browser'] . '; font-weight: bold;">' .
-                            htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') .
-                            '</span>' . $this->lineBreak;
+                foreach ($items as $item) { // 遍历所有数据项
+                    $formatted = self::formatData($item); // 格式化数据
+                    if ($this->isCli) { // CLI环境输出
+                        echo $this->supportsColors ? $colorMap['cli'] . $formatted . "\033[0m" : $formatted; // 带颜色输出
+                        echo $this->lineBreak; // 换行
+                    } else { // 浏览器环境输出
+                        echo '<span style="color: ' . $colorMap['browser'] . '; font-weight: bold; white-space: pre-wrap;">' .
+                            htmlspecialchars($formatted, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') .
+                            '</span>' . $this->lineBreak; // HTML格式输出
                     }
                 }
 
-                $this->flush();
+                $this->flush(); // 刷新缓冲区
             }
 
+            /**
+             * 格式化数据为可读字符串（静态方法）
+             */
+            public static function formatData($data): string
+            {
+                if (is_string($data)) return $data; // 字符串直接返回
+                if (is_scalar($data) || is_null($data)) return var_export($data, true); // 标量数据转换
+
+                if (is_array($data) || is_object($data)) { // 数组或对象
+                    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE); // JSON格式化
+                    return $json !== false ? $json : '无法编码的数据'; // 返回JSON或错误信息
+                }
+
+                return '不支持的数据类型: ' . gettype($data); // 其他类型提示
+            }
+
+            /**
+             * 检测终端颜色支持
+             */
             private function checkColorSupport(): bool
             {
-                if (!$this->isCli) return false;
+                if (!$this->isCli) return false; // 非CLI环境不支持
 
-                if (DIRECTORY_SEPARATOR === '\\') {
-                    return getenv('ANSICON') !== false || getenv('ConEmuANSI') === 'ON' || getenv('TERM') === 'xterm'
-                        || (function_exists('sapi_windows_vt100_support') && @sapi_windows_vt100_support(STDOUT));
+                if (DIRECTORY_SEPARATOR === '\\') { // Windows系统
+                    return getenv('ANSICON') !== false ||  // ANSICON支持
+                        getenv('ConEmuANSI') === 'ON' || // ConEmu支持
+                        getenv('TERM') === 'xterm' || // xterm支持
+                        (function_exists('sapi_windows_vt100_support') && @sapi_windows_vt100_support(STDOUT)); // VT100支持
                 }
 
-                if (function_exists('posix_isatty') && @posix_isatty(STDOUT)) {
-                    return true;
-                }
-
-                $term = getenv('TERM');
-                return $term !== false && (stripos($term, 'color') !== false || stripos($term, 'xterm') !== false || stripos($term, 'vt100') !== false);
-            }
-
-            public function flush(): void
-            {
-                if (ob_get_level() > 0){
-                    ob_flush();
-                }
-                flush();
-                if (function_exists('usleep') && $this->isCli){
-                    usleep(1000);
-                }
+                return (function_exists('posix_isatty') && @posix_isatty(STDOUT)) || // Unix TTY检测
+                    (($term = getenv('TERM')) !== false && // 环境变量检测
+                        (stripos($term, 'color') !== false || stripos($term, 'xterm') !== false || stripos($term, 'vt100') !== false));
             }
         };
 
         try {
-            $callback($next);
-            $next->flush();
-        } catch (\Throwable $e) {
-            $message = $isCli ? "错误: " . $e->getMessage() . PHP_EOL : '<span style="color: #FF3300; font-weight: bold;">错误: ' .
-                htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') . '</span><br>';
-
-            echo $message;
-            $next->flush();
-            throw $e;
+            $callback($next); // 执行用户回调
+            $next->flush(); // 最终刷新
+        } catch (\Throwable $e) { // 异常处理
+            $message = $next::formatData($e->getMessage()); // 使用静态方法格式化错误信息
+            if ($isCli) { // CLI错误输出
+                echo "错误: " . $message . PHP_EOL;
+            } else { // 浏览器错误输出
+                echo '<span style="color: #FF3300; font-weight: bold;">错误: ' .
+                    htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') . '</span><br>';
+            }
+            $next->flush(); // 刷新输出
+            throw $e; // 重新抛出
         }
     }
 }
