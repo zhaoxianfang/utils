@@ -12,6 +12,8 @@ use DOMDocument;
 /**
  * Sitemap 站点地图生成器 - PHP 8.2+ 完整增强版
  *
+ * @see https://weisifang.com/docs/doc/6_209 网站地图生成器
+ *
  * 功能特性：
  * - 完全支持 PHP 8.2+ 特性
  * - 支持标准 URL、新闻、图片、视频站点地图
