@@ -772,7 +772,7 @@ if (! function_exists('get_raw_input')) {
     function get_raw_input(bool $returnOriginal = true, bool $getDataType = false): array|string|null
     {
         // 获取原始数据
-        return \zxf\Util\Http\Request::instance()->getRawInput($returnOriginal, $getDataType);
+        return \zxf\Utils\Http\Request::instance()->getRawInput($returnOriginal, $getDataType);
     }
 }
 

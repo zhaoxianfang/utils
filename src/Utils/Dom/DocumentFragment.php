@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+namespace zxf\Utils\Dom;
+
+use DOMDocumentFragment;
+
+/**
+ * @property string $tag
+ */
+class DocumentFragment extends Node
+{
+    public function __construct(DOMDocumentFragment $documentFragment)
+    {
+        $this->setNode($documentFragment);
+    }
+
+    /**
+     * Append raw XML data.
+     *
+     * @param  string  $data
+     */
+    public function appendXml($data)
+    {
+        $this->node->appendXML($data);
+    }
+}

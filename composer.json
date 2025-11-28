@@ -18,7 +18,7 @@
   },
   "autoload": {
     "psr-4": {
-      "zxf\\Util\\": "src/Util/"
+      "zxf\\Utils\\": "src/Utils/"
     },
     "files": [
       "src/funcs/helpers.php"
@@ -26,7 +26,7 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "zxf\\Util\\Tests\\": "tests/"
+      "zxf\\Utils\\Tests\\": "tests/"
     }
   },
   "config": {
