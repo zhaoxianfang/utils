@@ -6,224 +6,300 @@ namespace zxf\Utils\Dom;
 
 use InvalidArgumentException;
 
+/**
+ * 类属性管理类
+ * 
+ * 提供对元素 class 属性的便捷操作方法
+ * 支持添加、删除、检查、切换类名等操作
+ * 
+ * 特性：
+ * - 流畅的链式调用
+ * - PHP 8.2+ 类型系统
+ * - 只读属性访问
+ * - 完整的类名操作 API
+ * 
+ * @example
+ * $element = $document->first('div');
+ * $element->classes()->add('active');
+ * $element->classes()->remove('inactive');
+ * if ($element->classes()->contains('active')) {
+ *     echo '元素包含 active 类';
+ * }
+ * 
+ * @package zxf\Utils\Dom
+ */
 class ClassAttribute
 {
     /**
-     * The DOM element instance.
-     *
-     * @var Element
+     * 关联的元素对象
      */
-    protected $element;
+    protected Element $element;
 
     /**
-     * @var string
-     */
-    protected $classesString = '';
-
-    /**
-     * @var string[]
-     */
-    protected $classes = [];
-
-    /**
-     * @throws InvalidArgumentException if parameter 1 is not an element node
+     * 构造函数
+     * 
+     * @param  Element  $element  元素对象
      */
     public function __construct(Element $element)
     {
-        if (! $element->isElementNode()) {
-            throw new InvalidArgumentException(sprintf('The element must contain DOMElement node.'));
-        }
-
         $this->element = $element;
-
-        $this->parseClassAttribute();
     }
 
     /**
-     * Parses class attribute of the element.
+     * 获取所有类名
+     *
+     * @return array<int, string> 类名数组
      */
-    protected function parseClassAttribute()
+    public function all(): array
     {
-        if (! $this->element->hasAttribute('class')) {
-            // possible if class attribute has been removed
-            if ($this->classesString !== '') {
-                $this->classesString = '';
-                $this->classes = [];
+        $classString = $this->element->getAttribute('class') ?? '';
+
+        if (trim($classString) === '') {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_unique(explode(' ', trim($classString))),
+            fn($class) => trim($class) !== ''
+        ));
+    }
+
+    /**
+     * 获取所有类名（别名方法）
+     *
+     * @return array<int, string> 类名数组
+     */
+    public function toArray(): array
+    {
+        return $this->all();
+    }
+
+    /**
+     * 添加类名
+     *
+     * @param  string  ...$classNames  类名列表
+     * @return self
+     */
+    public function add(string ...$classNames): self
+    {
+        $currentClasses = $this->all();
+
+        foreach ($classNames as $className) {
+            $className = trim($className);
+            if ($className !== '' && ! in_array($className, $currentClasses, true)) {
+                $currentClasses[] = $className;
             }
-
-            return;
         }
 
-        // if class attribute is not changed
-        if ($this->element->getAttribute('class') === $this->classesString) {
-            return;
-        }
-
-        // save class attribute as is (without trimming)
-        $this->classesString = $this->element->getAttribute('class');
-
-        $classesString = trim($this->classesString);
-
-        if ($classesString === '') {
-            $this->classes = [];
-
-            return;
-        }
-
-        $classes = explode(' ', $classesString);
-
-        $classes = array_map('trim', $classes);
-        $classes = array_filter($classes);
-        $classes = array_unique($classes);
-
-        $this->classes = array_values($classes);
-    }
-
-    /**
-     * Updates class attribute of the element.
-     */
-    protected function updateClassAttribute()
-    {
-        $this->classesString = implode(' ', $this->classes);
-
-        $this->element->setAttribute('class', $this->classesString);
-    }
-
-    /**
-     * @throws InvalidArgumentException if class name is not a string
-     */
-    public function add(string $className): self
-    {
-        $this->parseClassAttribute();
-
-        if (in_array($className, $this->classes, true)) {
-            return $this;
-        }
-
-        $this->classes[] = $className;
-
-        $this->updateClassAttribute();
+        $this->element->setAttribute('class', implode(' ', $currentClasses));
 
         return $this;
     }
 
     /**
-     * @throws InvalidArgumentException if class name is not a string
+     * 添加多个类名（数组形式）
+     *
+     * @param  array<int, string>  $classNames  类名数组
+     * @return self
      */
     public function addMultiple(array $classNames): self
     {
-        $this->parseClassAttribute();
+        return $this->add(...$classNames);
+    }
+
+    /**
+     * 移除类名
+     *
+     * @param  string  ...$classNames  类名列表
+     * @return self
+     */
+    public function remove(string ...$classNames): self
+    {
+        $currentClasses = $this->all();
 
         foreach ($classNames as $className) {
-            if (! is_string($className)) {
-                throw new InvalidArgumentException(sprintf('Class name must be a string, %s given.', (is_object($className) ? get_class($className) : gettype($className))));
+            $key = array_search(trim($className), $currentClasses, true);
+            if ($key !== false) {
+                unset($currentClasses[$key]);
             }
-
-            if (in_array($className, $this->classes, true)) {
-                continue;
-            }
-
-            $this->classes[] = $className;
         }
 
-        $this->updateClassAttribute();
+        $this->element->setAttribute('class', implode(' ', array_values($currentClasses)));
 
         return $this;
     }
 
     /**
-     * @return string[]
-     */
-    public function getAll(): array
-    {
-        $this->parseClassAttribute();
-
-        return $this->classes;
-    }
-
-    public function contains(string $className): bool
-    {
-        $this->parseClassAttribute();
-
-        return in_array($className, $this->classes, true);
-    }
-
-    /**
-     * @throws InvalidArgumentException if class name is not a string
-     */
-    public function remove(string $className): self
-    {
-        $this->parseClassAttribute();
-
-        $classIndex = array_search($className, $this->classes);
-
-        if ($classIndex === false) {
-            return $this;
-        }
-
-        unset($this->classes[$classIndex]);
-
-        $this->updateClassAttribute();
-
-        return $this;
-    }
-
-    /**
-     * @throws InvalidArgumentException if class name is not a string
+     * 移除多个类名（数组形式）
+     *
+     * @param  array<int, string>  $classNames  类名数组
+     * @return self
      */
     public function removeMultiple(array $classNames): self
     {
-        $this->parseClassAttribute();
+        return $this->remove(...$classNames);
+    }
 
-        foreach ($classNames as $className) {
-            if (! is_string($className)) {
-                throw new InvalidArgumentException(sprintf('Class name must be a string, %s given.', (is_object($className) ? get_class($className) : gettype($className))));
-            }
+    /**
+     * 切换类名
+     * 
+     * @param  string  $className  类名
+     * @return self
+     */
+    public function toggle(string $className): self
+    {
+        $className = trim($className);
+        $currentClasses = $this->all();
+        $key = array_search($className, $currentClasses, true);
 
-            $classIndex = array_search($className, $this->classes);
-
-            if ($classIndex === false) {
-                continue;
-            }
-
-            unset($this->classes[$classIndex]);
+        if ($key !== false) {
+            unset($currentClasses[$key]);
+        } else {
+            $currentClasses[] = $className;
         }
 
-        $this->updateClassAttribute();
+        $this->element->setAttribute('class', implode(' ', array_values($currentClasses)));
 
         return $this;
     }
 
     /**
-     * @param  string[]  $preserved
+     * 检查是否包含指定类名
+     * 
+     * @param  string  $className  类名
+     * @return bool
      */
-    public function removeAll(array $preserved = []): self
+    public function contains(string $className): bool
     {
-        $this->parseClassAttribute();
+        return in_array(trim($className), $this->all(), true);
+    }
 
-        $preservedClasses = [];
+    /**
+     * 设置类名（替换所有）
+     * 
+     * @param  string  ...$classNames  新的类名列表
+     * @return self
+     */
+    public function set(string ...$classNames): self
+    {
+        $classNames = array_values(array_filter(
+            array_unique(array_map('trim', $classNames)),
+            fn($class) => $class !== ''
+        ));
 
-        foreach ($preserved as $className) {
-            if (! is_string($className)) {
-                throw new InvalidArgumentException(sprintf('Class name must be a string, %s given.', (is_object($className) ? get_class($className) : gettype($className))));
-            }
-
-            if (! in_array($className, $this->classes, true)) {
-                continue;
-            }
-
-            $preservedClasses[] = $className;
-        }
-
-        $this->classes = $preservedClasses;
-
-        $this->updateClassAttribute();
+        $this->element->setAttribute('class', implode(' ', $classNames));
 
         return $this;
     }
 
-    public function getElement(): Element
+    /**
+     * 清空所有类名
+     * 
+     * @return self
+     */
+    public function clear(): self
     {
-        return $this->element;
+        $this->element->removeAttribute('class');
+        return $this;
+    }
+
+    /**
+     * 检查是否有任何类名
+     * 
+     * @return bool
+     */
+    public function isEmpty(): bool
+    {
+        return count($this->all()) === 0;
+    }
+
+    /**
+     * 获取类名数量
+     * 
+     * @return int
+     */
+    public function count(): int
+    {
+        return count($this->all());
+    }
+
+    /**
+     * 替换类名
+     * 
+     * @param  string  $oldClass  旧类名
+     * @param  string  $newClass  新类名
+     * @return self
+     */
+    public function replace(string $oldClass, string $newClass): self
+    {
+        $this->remove($oldClass);
+        $this->add($newClass);
+        return $this;
+    }
+
+    /**
+     * 检查是否包含所有指定类名
+     * 
+     * @param  string  ...$classNames  类名列表
+     * @return bool
+     */
+    public function containsAll(string ...$classNames): bool
+    {
+        foreach ($classNames as $className) {
+            if (! $this->contains($className)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 检查是否包含任意指定类名
+     * 
+     * @param  string  ...$classNames  类名列表
+     * @return bool
+     */
+    public function containsAny(string ...$classNames): bool
+    {
+        foreach ($classNames as $className) {
+            if ($this->contains($className)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 魔术方法：获取类名
+     * 
+     * @param  string  $name  属性名（应为 'all'）
+     * @return array<int, string>|null
+     */
+    public function __get(string $name): ?array
+    {
+        return match ($name) {
+            'all' => $this->all(),
+            default => null,
+        };
+    }
+
+    /**
+     * 魔术方法：转换为字符串
+     * 
+     * @return string
+     */
+    public function __toString(): string
+    {
+        return implode(' ', $this->all());
+    }
+
+    /**
+     * 可数接口：获取类名数量
+     * 
+     * @return int
+     */
+    public function __invoke(): int
+    {
+        return $this->count();
     }
 }

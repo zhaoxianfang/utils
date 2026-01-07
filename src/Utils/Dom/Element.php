@@ -14,18 +14,24 @@ use InvalidArgumentException;
 use LogicException;
 use RuntimeException;
 use zxf\Utils\Dom\Exceptions\InvalidSelectorException;
+use zxf\Utils\Dom\ClassAttribute;
+use zxf\Utils\Dom\StyleAttribute;
 
 class Element extends Node
 {
     /**
-     * @var ClassAttribute
+     * 类属性管理对象
+     * 
+     * @var ClassAttribute|null
      */
-    protected $classAttribute;
+    protected $classAttribute = null;
 
     /**
-     * @var StyleAttribute
+     * 样式属性管理对象
+     * 
+     * @var StyleAttribute|null
      */
-    protected $styleAttribute;
+    protected $styleAttribute = null;
 
     /**
      * @param  DOMElement|DOMText|DOMComment|DOMCdataSection|string  $tagName  The tag name of an element
@@ -86,13 +92,23 @@ class Element extends Node
      * Checks that the node matches selector.
      *
      * @param  string  $selector  CSS selector
+     * @param  string|bool  $typeOrStrict  选择器类型或严格模式标志
      *
      * @throws InvalidSelectorException if the selector is invalid
      * @throws InvalidArgumentException if the tag name is not a string
      * @throws RuntimeException if the tag name is not specified in strict mode
      */
-    public function matches(string $selector, bool $strict = false): bool
+    public function matches(string $selector, string|bool $typeOrStrict = false): bool
     {
+        // 兼容旧版 API：如果第二个参数是布尔值，则视为 strict 模式
+        $type = Query::TYPE_CSS;
+        $strict = false;
+        
+        if (is_bool($typeOrStrict)) {
+            $strict = $typeOrStrict;
+        } else {
+            $type = $typeOrStrict;
+        }
         if (! $this->node instanceof DOMElement) {
             return false;
         }
@@ -114,28 +130,29 @@ class Element extends Node
             return $document->has($selector);
         }
 
-        $segments = Query::getSegments($selector);
+        $segments = Query::parseSelector($selector);
+        $segment = $segments[0] ?? [];
 
-        if (! array_key_exists('tag', $segments)) {
+        if (! array_key_exists('tag', $segment)) {
             throw new RuntimeException(sprintf('Tag name must be specified in %s', $selector));
         }
 
-        if ($segments['tag'] !== $this->tagName() && $segments['tag'] !== '*') {
+        if ($segment['tag'] !== $this->tagName() && $segment['tag'] !== '*') {
             return false;
         }
 
-        $segments['id'] = array_key_exists('id', $segments) ? $segments['id'] : null;
+        $segmentId = $segment['id'] ?? null;
 
-        if ($segments['id'] !== $this->getAttribute('id')) {
+        if ($segmentId !== $this->getAttribute('id')) {
             return false;
         }
 
         $classes = $this->hasAttribute('class') ? explode(' ', trim($this->getAttribute('class'))) : [];
 
-        $segments['classes'] = array_key_exists('classes', $segments) ? $segments['classes'] : [];
+        $segmentClasses = $segment['classes'] ?? [];
 
-        $diff1 = array_diff($segments['classes'], $classes);
-        $diff2 = array_diff($classes, $segments['classes']);
+        $diff1 = array_diff($segmentClasses, $classes);
+        $diff2 = array_diff($classes, $segmentClasses);
 
         if (count($diff1) > 0 || count($diff2) > 0) {
             return false;
@@ -145,7 +162,7 @@ class Element extends Node
 
         unset($attributes['id'], $attributes['class']);
 
-        $segments['attributes'] = array_key_exists('attributes', $segments) ? $segments['attributes'] : [];
+        $segmentAttrs = $segment['attributes'] ?? [];
 
         $diff1 = array_diff_assoc($segments['attributes'], $attributes);
         $diff2 = array_diff_assoc($attributes, $segments['attributes']);
@@ -156,6 +173,146 @@ class Element extends Node
         }
 
         return true;
+    }
+
+    /**
+     * 获取子元素
+     * 
+     * @return array<int, Element> 子元素数组
+     */
+    public function children(): array
+    {
+        $result = [];
+        $childNodes = $this->node->childNodes;
+        
+        foreach ($childNodes as $childNode) {
+            if ($childNode instanceof DOMElement) {
+                $result[] = new Element($childNode);
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 获取父元素
+     *
+     * @return Element|null 父元素，如果没有则返回 null
+     */
+    public function parent(): ?Element
+    {
+        $parentNode = $this->node->parentNode;
+
+        if ($parentNode === null || !($parentNode instanceof DOMElement)) {
+            return null;
+        }
+
+        return new Element($parentNode);
+    }
+
+    /**
+     * 获取所属文档
+     *
+     * @return Document|null 文档对象
+     */
+    public function ownerDocument(): ?Document
+    {
+        $domDocument = $this->node->ownerDocument;
+        if ($domDocument === null) {
+            return null;
+        }
+
+        return Document::getFromDomDocument($domDocument);
+    }
+
+    /**
+     * 获取第一个子元素
+     *
+     * @return Element|null 第一个子元素
+     */
+    public function firstChild(): ?Element
+    {
+        $firstChild = $this->node->firstChild;
+        while ($firstChild !== null && !($firstChild instanceof DOMElement)) {
+            $firstChild = $firstChild->nextSibling;
+        }
+
+        return $firstChild !== null ? new Element($firstChild) : null;
+    }
+
+    /**
+     * 获取最后一个子元素
+     *
+     * @return Element|null 最后一个子元素
+     */
+    public function lastChild(): ?Element
+    {
+        $lastChild = $this->node->lastChild;
+        while ($lastChild !== null && !($lastChild instanceof DOMElement)) {
+            $lastChild = $lastChild->previousSibling;
+        }
+
+        return $lastChild !== null ? new Element($lastChild) : null;
+    }
+
+    /**
+     * 获取下一个兄弟元素
+     *
+     * @return Element|null 下一个兄弟元素
+     */
+    public function nextSibling(): ?Element
+    {
+        $sibling = $this->node->nextSibling;
+        while ($sibling !== null && !($sibling instanceof DOMElement)) {
+            $sibling = $sibling->nextSibling;
+        }
+
+        return $sibling !== null ? new Element($sibling) : null;
+    }
+
+    /**
+     * 获取前一个兄弟元素
+     *
+     * @return Element|null 前一个兄弟元素
+     */
+    public function previousSibling(): ?Element
+    {
+        $sibling = $this->node->previousSibling;
+        while ($sibling !== null && !($sibling instanceof DOMElement)) {
+            $sibling = $sibling->previousSibling;
+        }
+
+        return $sibling !== null ? new Element($sibling) : null;
+    }
+
+    /**
+     * 获取所有兄弟元素
+     *
+     * @return array<int, Element> 兄弟元素数组
+     */
+    public function siblings(): array
+    {
+        $result = [];
+        $sibling = $this->node->previousSibling;
+
+        // 向前查找
+        while ($sibling !== null) {
+            if ($sibling instanceof DOMElement) {
+                array_unshift($result, new Element($sibling));
+            }
+            $sibling = $sibling->previousSibling;
+        }
+
+        // 向后查找
+        $sibling = $this->node->nextSibling;
+        while ($sibling !== null) {
+            if ($sibling instanceof DOMElement) {
+                $result[] = new Element($sibling);
+            }
+            $sibling = $sibling->nextSibling;
+        }
+
+        return $result;
     }
 
     /**
@@ -215,6 +372,17 @@ class Element extends Node
         $this->node->removeAttribute($name);
 
         return $this;
+    }
+
+    /**
+     * 移除属性（别名方法）
+     *
+     * @param  string  $name  属性名
+     * @return self
+     */
+    public function removeAttr(string $name): self
+    {
+        return $this->removeAttribute($name);
     }
 
     /**
@@ -288,7 +456,13 @@ class Element extends Node
     }
 
     /**
-     * @throws LogicException if the node is not an instance of DOMElement
+     * 获取类属性管理对象
+     * 
+     * 提供便捷的类名操作方法
+     * 
+     * @return ClassAttribute 类属性管理对象
+     * 
+     * @throws LogicException 当节点不是元素节点时抛出异常
      */
     public function classes(): ClassAttribute
     {
@@ -297,7 +471,7 @@ class Element extends Node
         }
 
         if (! $this->isElementNode()) {
-            throw new LogicException('Class attribute is available only for element nodes.');
+            throw new LogicException('类属性仅适用于元素节点。');
         }
 
         $this->classAttribute = new ClassAttribute($this);
@@ -306,7 +480,13 @@ class Element extends Node
     }
 
     /**
-     * @throws LogicException if the node is not an instance of DOMElement
+     * 获取样式属性管理对象
+     *
+     * 提供便捷的样式操作方法
+     *
+     * @return StyleAttribute 样式属性管理对象
+     *
+     * @throws LogicException 当节点不是元素节点时抛出异常
      */
     public function style(): StyleAttribute
     {
@@ -315,13 +495,161 @@ class Element extends Node
         }
 
         if (! $this->isElementNode()) {
-            throw new LogicException('Style attribute is available only for element nodes.');
+            throw new LogicException('样式属性仅适用于元素节点。');
         }
 
         $this->styleAttribute = new StyleAttribute($this);
 
         return $this->styleAttribute;
     }
+
+    /**
+     * 设置样式（便捷方法）
+     *
+     * @param  string  $name  样式名
+     * @param  string|null  $value  样式值
+     * @return self
+     */
+    public function css(string $name, ?string $value = null): self
+    {
+        $this->style()->set($name, $value);
+        return $this;
+    }
+
+    /**
+     * 获取类属性管理对象（别名方法）
+     *
+     * @return ClassAttribute 类属性管理对象
+     */
+    public function class(): ClassAttribute
+    {
+        return $this->classes();
+    }
+
+    /**
+     * 添加类名（便捷方法）
+     *
+     * @param  string  ...$classNames  类名列表
+     * @return self
+     */
+    public function addClass(string ...$classNames): self
+    {
+        $this->classes()->add(...$classNames);
+        return $this;
+    }
+
+    /**
+     * 移除类名（便捷方法）
+     *
+     * @param  string  ...$classNames  类名列表
+     * @return self
+     */
+    public function removeClass(string ...$classNames): self
+    {
+        $this->classes()->remove(...$classNames);
+        return $this;
+    }
+
+    /**
+     * 切换类名（便捷方法）
+     *
+     * @param  string  $className  类名
+     * @return self
+     */
+    public function toggleClass(string $className): self
+    {
+        $this->classes()->toggle($className);
+        return $this;
+    }
+
+    /**
+     * 检查类是否存在（便捷方法）
+     *
+     * @param  string  $className  类名
+     * @return bool
+     */
+    public function hasClass(string $className): bool
+    {
+        return $this->classes()->contains($className);
+    }
+
+    /**
+     * 获取元素ID
+     *
+     * @return string|null
+     */
+    public function id(): ?string
+    {
+        return $this->getAttribute('id');
+    }
+
+    /**
+     * 设置元素ID
+     *
+     * @param  string  $id  ID值
+     * @return self
+     */
+    public function setId(string $id): self
+    {
+        return $this->setAttribute('id', $id);
+    }
+
+    /**
+     * 查找后代元素
+     *
+     * @param  string  $selector  选择器
+     * @param  string  $type  选择器类型
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function find(string $selector, string $type = Query::TYPE_CSS): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->find($selector, $type, $this->node);
+    }
+
+    /**
+     * 查找第一个匹配的后代元素
+     *
+     * @param  string  $selector  选择器
+     * @param  string  $type  选择器类型
+     * @return Element|null 第一个匹配的元素
+     */
+    public function first(string $selector, string $type = Query::TYPE_CSS): ?Element
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return null;
+        }
+
+        return $document->first($selector, $type, $this->node);
+    }
+
+    /**
+     * 移除样式
+     *
+     * @param  string  ...$names  样式名列表
+     * @return self
+     */
+    public function removeStyle(string ...$names): self
+    {
+        return $this->style()->remove(...$names);
+    }
+
+    /**
+     * 检查样式是否存在
+     *
+     * @param  string  $name  样式名
+     * @return bool
+     */
+    public function hasStyle(string $name): bool
+    {
+        return $this->style()->has($name);
+    }
+
 
     /**
      * Dynamically set an attribute on the element.
