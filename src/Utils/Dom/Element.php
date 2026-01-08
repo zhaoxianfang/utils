@@ -24,14 +24,14 @@ class Element extends Node
      * 
      * @var ClassAttribute|null
      */
-    protected $classAttribute = null;
+    protected ?ClassAttribute $classAttribute = null;
 
     /**
      * 样式属性管理对象
      * 
      * @var StyleAttribute|null
      */
-    protected $styleAttribute = null;
+    protected ?StyleAttribute $styleAttribute = null;
 
     /**
      * @param  DOMElement|DOMText|DOMComment|DOMCdataSection|string  $tagName  The tag name of an element
@@ -510,9 +510,31 @@ class Element extends Node
      * @param  string|null  $value  样式值
      * @return self
      */
-    public function css(string $name, ?string $value = null): self
+    public function css(string $name, ?string $value = null): self|string|null
     {
+        if ($value === null) {
+            // 获取样式值
+            return $this->style()->get($name);
+        }
+        // 设置样式值
         $this->style()->set($name, $value);
+        return $this;
+    }
+
+    /**
+     * 获取或设置HTML内容（便捷方法）
+     *
+     * @param  string|null  $html  HTML内容，如果为null则获取
+     * @return self|string  设置时返回self，获取时返回HTML字符串
+     */
+    public function setHtml(?string $html = null): self|string
+    {
+        if ($html === null) {
+            // 获取HTML内容
+            return $this->html();
+        }
+        // 设置HTML内容
+        $this->setInnerHtml($html);
         return $this;
     }
 

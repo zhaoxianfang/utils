@@ -181,7 +181,7 @@ class Query
      * - 基本选择器: *, div, .class, #id
      * - 属性选择器: [attr], [attr=value], [attr~=value], [attr|=value], [attr^=value], [attr$=value], [attr*=value]
      * - 组合选择器: 后代 (空格), 子元素 (>), 相邻兄弟 (+), 通用兄弟 (~)
-     * - 多选择器: 逗号分隔
+     * - 多选择器: 逗号分隔（伪类参数中的逗号不会被分割）
      * - 伪类选择器: :first-child, :last-child, :nth-child, :empty, :contains, :has, :not 等
      * 
      * @param  string  $selector  CSS 选择器
@@ -191,11 +191,13 @@ class Query
     {
         $selector = trim($selector);
 
-        // 处理多个选择器（逗号分隔）
+        // 处理多个选择器（逗号分隔），需要避免伪类参数中的逗号
         if (str_contains($selector, ',')) {
-            $selectors = array_map('trim', explode(',', $selector));
-            $xpaths = array_map(fn($s) => static::cssToXpath($s), $selectors);
-            return implode(' | ', $xpaths);
+            $selectors = static::splitByCommaOutsidePseudo($selector);
+            if (count($selectors) > 1) {
+                $xpaths = array_map(fn($s) => static::cssToXpath($s), $selectors);
+                return implode(' | ', $xpaths);
+            }
         }
 
         // 解析选择器
@@ -220,6 +222,52 @@ class Query
         }
 
         return $xpath;
+    }
+
+    /**
+     * 智能分割逗号，避免在伪类参数内部分割
+     * 
+     * 此方法正确处理伪类参数中的逗号，例如：
+     * - :between(2,4) 不会被分割
+     * - div, p 会被正确分割为 ['div', 'p']
+     * 
+     * @param  string  $selector  CSS 选择器
+     * @return array<int, string> 分割后的选择器数组
+     */
+    protected static function splitByCommaOutsidePseudo(string $selector): array
+    {
+        $result = [];
+        $current = '';
+        $parenDepth = 0;
+        $bracketDepth = 0;
+        
+        $length = strlen($selector);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $selector[$i];
+            
+            if ($char === '[') {
+                $bracketDepth++;
+            } elseif ($char === ']') {
+                $bracketDepth--;
+            } elseif ($char === '(') {
+                $parenDepth++;
+            } elseif ($char === ')') {
+                $parenDepth--;
+            } elseif ($char === ',' && $parenDepth === 0 && $bracketDepth === 0) {
+                // 只有在不在括号内时才分割
+                $result[] = trim($current);
+                $current = '';
+                continue;
+            }
+            
+            $current .= $char;
+        }
+        
+        if ($current !== '') {
+            $result[] = trim($current);
+        }
+        
+        return $result;
     }
 
     /**
@@ -426,7 +474,7 @@ class Query
 
         // 伪类
         if (! empty($segment['pseudo'])) {
-            $xpath .= static::compilePseudo($segment['pseudo'], $segment['pseudoArg'] ?? '');
+            $xpath .= static::compilePseudo($segment['pseudo'], $segment['pseudoArg'] ?? '', $segment['tag'] ?? '*');
         }
 
         return $xpath;
@@ -463,25 +511,33 @@ class Query
     /**
      * 编译伪类选择器
      *
-     * 支持的伪类列表：
-     * - 结构伪类: first-child, last-child, only-child, nth-child, nth-last-child
-     * - 类型伪类: first-of-type, last-of-type, only-of-type, nth-of-type, nth-last-of-type
-     * - 内容伪类: empty, contains, has, not
-     * - 表单伪类: enabled, disabled, checked, selected, focus
-     * - 状态伪类: root, target, hover, visible, hidden
-     * - 类型伪类: header, input, button, text, comment
-     * - 位置伪类: first, last, even, odd, eq, gt, lt, slice
-     * - 表单元素类型伪类: checkbox, radio, password, file, email, url, number, tel, search, date, time, datetime, month, week, color, range, submit, reset
-     * - HTML元素伪类: video, audio, canvas, svg, script, style, meta, link, base, head, body, title
-     * - 内容匹配伪类: contains-text, starts-with, ends-with, blank, parent-only-text
-     * - 语言伪类: lang
-     * - 表单验证伪类: in-range, out-of-range, indeterminate, placeholder-shown, default, valid, invalid, autofill
+     * 支持的伪类列表（120+ 种）：
+     * - 结构伪类: first-child, last-child, only-child, nth-child, nth-last-child, nth-last-child(扩展), nth-last-of-type
+     * - 类型伪类: first-of-type, last-of-type, only-of-type, nth-of-type
+     * - 内容伪类: empty, contains, has, not, contains-text, starts-with, ends-with, text-match
+     * - 表单伪类: enabled, disabled, checked, selected, required, optional, read-only, read-write
+     * - 表单元素类型伪类: text, password, checkbox, radio, file, email, url, number, tel, search, date, time, datetime, datetime-local, month, week, color, range, submit, reset, image, button
+     * - HTML元素伪类: header, input, button, link, visited, image, video, audio, canvas, svg, script, style, meta, link, base, head, body, title, table, tr, td, th, thead, tbody, tfoot, ul, ol, li, dl, dt, dd, form, label, fieldset, legend, section, article, aside, nav, main, footer, header(HTML5), hgroup, figure, figcaption, details, summary, dialog, menu
+     * - 状态伪类: root, target, focus, hover, active
+     * - 可见性伪类: visible, hidden
+     * - 位置伪类: first, last, even, odd, eq, gt, lt, parent, slice, between
+     * - 文本相关伪类: text-node, comment-node, cdata, blank, parent-only-text, text-length-gt/lt/eq, text-length-between
+     * - 语言伪类: lang, dir(ltr, rtl, auto)
+     * - 表单验证伪类: in-range, out-of-range, indeterminate, placeholder-shown, default, valid, invalid, autofill, user-invalid, user-valid
+     * - 属性匹配伪类: has-attr, data, attr-match
+     * - 节点类型伪类: element, processing-instruction, document-node, document-fragment
+     * - 自定义伪类: match, filter, each, map, reduce
+     * - 属性长度伪类: attr-length-gt/lt/eq
+     * - 深度伪类: depth-0/1/2/3, depth-between
+     * - 子元素数量伪类: children-gt/lt/eq
+     * - 属性数量伪类: attr-count-gt/lt/eq
      *
      * @param  string  $pseudo  伪类名
      * @param  string  $arg  伪类参数
+     * @param  string  $tagName  元素标签名（用于 of-type 伪类）
      * @return string XPath 伪类条件
      */
-    protected static function compilePseudo(string $pseudo, string $arg): string
+    protected static function compilePseudo(string $pseudo, string $arg, string $tagName = '*'): string
     {
         return match ($pseudo) {
             // 结构伪类 - 子元素位置
@@ -491,11 +547,11 @@ class Query
             'nth-child' => static::compileNthChild($arg),
             'nth-last-child' => static::compileNthChild($arg, true),
             // 结构伪类 - 同类型元素位置
-            'first-of-type' => '[not(preceding-sibling::*)]', // 需要结合元素标签名使用
-            'last-of-type' => '[not(following-sibling::*)]', // 需要结合元素标签名使用
-            'only-of-type' => '[not(preceding-sibling::*[name()=name(current())]) and not(following-sibling::*[name()=name(current())])]',
-            'nth-of-type' => static::compileNthChild($arg, false, true),
-            'nth-last-of-type' => static::compileNthChild($arg, true, true),
+            'first-of-type' => sprintf('[not(preceding-sibling::%s)]', $tagName),
+            'last-of-type' => sprintf('[not(following-sibling::%s)]', $tagName),
+            'only-of-type' => sprintf('[not(preceding-sibling::%s) and not(following-sibling::%s)]', $tagName, $tagName),
+            'nth-of-type' => static::compileNthChild($arg, false, true, $tagName),
+            'nth-last-of-type' => static::compileNthChild($arg, true, true, $tagName),
             // 内容伪类
             'empty' => '[not(*) and not(text()[normalize-space()])]',
             'contains' => sprintf('[contains(string(.), "%s")]', $arg),
@@ -505,14 +561,14 @@ class Query
             'root' => '[not(parent::*)]',
             'target' => '[@name=substring-after(., "#") and substring-after(., "#")!=""]',
             // 表单状态伪类
-            'enabled' => '[not(@disabled="disabled") and not(@type="hidden")]',
-            'disabled' => '[@disabled="disabled"]',
-            'checked' => '[@checked="checked"]',
-            'selected' => '[@selected="selected"]',
-            'required' => '[@required="required"]',
-            'optional' => '[@required!="required"]',
-            'read-only' => '[@readonly="readonly"]',
-            'read-write' => '[@readonly!="readonly"]',
+            'enabled' => '[not(@disabled="disabled") and not(@disabled) and not(@type="hidden")]',
+            'disabled' => '[@disabled="disabled" or @disabled]',
+            'checked' => '[@checked="checked" or @checked]',
+            'selected' => '[@selected="selected" or @selected]',
+            'required' => '[@required="required" or @required]',
+            'optional' => '[not(@required="required") and not(@required)]',
+            'read-only' => '[@readonly="readonly" or @readonly]',
+            'read-write' => '[not(@readonly="readonly") and not(@readonly)]',
             // 用户交互伪类
             'focus' => '[@focus]',
             'hover' => '[@hover]',
@@ -563,9 +619,9 @@ class Query
             'body' => '[self::body]',
             'title' => '[self::title]',
             // 内容匹配伪类
-            'contains-text' => sprintf('[contains(text(), "%s")]', $arg),
-            'starts-with' => sprintf('[starts-with(text(), "%s")]', $arg),
-            'ends-with' => sprintf('[substring(text(), string-length(text()) - string-length("%s") + 1) = "%s"]', $arg, $arg),
+            'contains-text' => sprintf('[contains(., "%s")]', $arg),
+            'starts-with' => sprintf('[starts-with(., "%s")]', $arg),
+            'ends-with' => sprintf('[substring(., string-length(.) - string-length("%s") + 1) = "%s"]', $arg, $arg),
             // 属性匹配伪类
             'has-attr' => sprintf('[@%s]', $arg),
             'data' => sprintf('[@data-%s]', $arg),
@@ -590,17 +646,92 @@ class Query
             // 语言伪类（简化版本，只支持 lang 属性）
             'lang' => sprintf('[@lang=\"%s\" or starts-with(@lang, \"%s-\")]', $arg, $arg),
             // 表单相关伪类
-            'in-range' => '[@min and @max and number(.) >= number(@min) and number(.) <= number(@max)]',
-            'out-of-range' => '[@min and @max and (number(.) < number(@min) or number(.) > number(@max))]',
+            'in-range' => '[@min and @max and @value and number(@value) >= number(@min) and number(@value) <= number(@max)]',
+            'out-of-range' => '[@min and @max and @value and (number(@value) < number(@min) or number(@value) > number(@max))]',
             'indeterminate' => '[@indeterminate="indeterminate"]',
-            'placeholder-shown' => '[@placeholder and not(@value) or @value=""]',
+            'placeholder-shown' => '[@placeholder and (not(@value) or @value="")]',
             'default' => '[@default]',
             'valid' => '[@valid="valid"]',
             'invalid' => '[@invalid="invalid"]',
             'autofill' => '[contains(@style, "background-color") or contains(@style, "background")]',
-            // 结构伪类扩展
-            'only-child' => '[not(preceding-sibling::*) and not(following-sibling::*)]',
-            'only-of-type' => sprintf('[not(preceding-sibling::%s) and not(following-sibling::%s)]', $arg, $arg),
+            // 表单验证扩展伪类
+            'user-invalid' => '[@aria-invalid="true"]',
+            'user-valid' => '[not(@aria-invalid="true") or @aria-invalid="false"]',
+            // HTML5 结构元素伪类
+            'table' => '[self::table]',
+            'tr' => '[self::tr]',
+            'td' => '[self::td]',
+            'th' => '[self::th]',
+            'thead' => '[self::thead]',
+            'tbody' => '[self::tbody]',
+            'tfoot' => '[self::tfoot]',
+            'ul' => '[self::ul]',
+            'ol' => '[self::ol]',
+            'li' => '[self::li]',
+            'dl' => '[self::dl]',
+            'dt' => '[self::dt]',
+            'dd' => '[self::dd]',
+            'form' => '[self::form]',
+            'label' => '[self::label]',
+            'fieldset' => '[self::fieldset]',
+            'legend' => '[self::legend]',
+            'section' => '[self::section]',
+            'article' => '[self::article]',
+            'aside' => '[self::aside]',
+            'nav' => '[self::nav]',
+            'main' => '[self::main]',
+            'footer' => '[self::footer]',
+            'figure' => '[self::figure]',
+            'figcaption' => '[self::figcaption]',
+            'details' => '[self::details]',
+            'summary' => '[self::summary]',
+            'dialog' => '[self::dialog]',
+            'menu' => '[self::menu]',
+            // 表格行伪类
+            'table-row' => '[self::tr]',
+            'table-cell' => '[self::td or self::th]',
+            'table-header' => '[self::th]',
+            // 列表伪类
+            'list-item' => '[self::li]',
+            'list' => '[self::ul or self::ol]',
+            // 文本节点伪类（扩展）
+            'whitespace' => '[self::text() and normalize-space(.)=""]',
+            'non-whitespace' => '[self::text() and normalize-space(.)!=""]',
+            // 方向伪类
+            'dir-ltr' => '[@dir="ltr"]',
+            'dir-rtl' => '[@dir="rtl"]',
+            'dir-auto' => '[@dir="auto"]',
+            // 深度伪类
+            'depth-0' => '[not(ancestor::*)]',
+            'depth-1' => '[count(ancestor::*) = 1]',
+            'depth-2' => '[count(ancestor::*) = 2]',
+            'depth-3' => '[count(ancestor::*) = 3]',
+            // 索引范围伪类
+            'between' => static::compileBetween($arg),
+            // 文本长度伪类（使用 normalize-space 来正确处理文本）
+            'text-length-gt' => sprintf('[string-length(normalize-space(.)) > %d]', (int)$arg),
+            'text-length-lt' => sprintf('[string-length(normalize-space(.)) < %d]', (int)$arg),
+            'text-length-eq' => sprintf('[string-length(normalize-space(.)) = %d]', (int)$arg),
+            // 文本长度范围伪类
+            'text-length-between' => static::compileTextLengthBetween($arg),
+            // 子元素数量伪类
+            'children-gt' => sprintf('[count(*) > %d]', (int)$arg),
+            'children-lt' => sprintf('[count(*) < %d]', (int)$arg),
+            'children-eq' => sprintf('[count(*) = %d]', (int)$arg),
+            // 属性数量伪类
+            'attr-count-gt' => sprintf('[count(@*) > %d]', (int)$arg),
+            'attr-count-lt' => sprintf('[count(@*) < %d]', (int)$arg),
+            'attr-count-eq' => sprintf('[count(@*) = %d]', (int)$arg),
+            // 属性值长度伪类
+            'attr-length-gt' => static::compileAttrLengthGt($arg),
+            'attr-length-lt' => static::compileAttrLengthLt($arg),
+            'attr-length-eq' => static::compileAttrLengthEq($arg),
+            // 深度范围伪类
+            'depth-between' => static::compileDepthBetween($arg),
+            // 文本内容匹配伪类（正则表达式简化版）
+            'text-match' => static::compileTextMatch($arg),
+            // 属性值匹配伪类
+            'attr-match' => static::compileAttrMatch($arg),
             // 伪元素（在 Document 中处理）
             default => '',
         };
@@ -612,17 +743,28 @@ class Query
      * @param  string  $formula  nth 公式
      * @param  bool  $reverse  是否反向（nth-last-*）
      * @param  bool  $ofType  是否按类型（nth-of-type）
+     * @param  string  $tagName  元素标签名（用于 of-type）
      * @return string XPath 条件
      */
-    protected static function compileNthChild(string $formula, bool $reverse = false, bool $ofType = false): string
+    protected static function compileNthChild(string $formula, bool $reverse = false, bool $ofType = false, string $tagName = '*'): string
     {
         $formula = strtolower(trim($formula));
 
         if ($formula === 'even') {
+            if ($ofType) {
+                return $reverse 
+                    ? sprintf('[count(following-sibling::%s) mod 2 = 0]', $tagName)
+                    : sprintf('[count(preceding-sibling::%s) mod 2 = 0]', $tagName);
+            }
             return $reverse ? '[last() - position() mod 2 = 0]' : '[position() mod 2 = 0]';
         }
 
         if ($formula === 'odd') {
+            if ($ofType) {
+                return $reverse 
+                    ? sprintf('[count(following-sibling::%s) mod 2 = 1]', $tagName)
+                    : sprintf('[count(preceding-sibling::%s) mod 2 = 1]', $tagName);
+            }
             return $reverse ? '[last() - position() mod 2 = 1]' : '[position() mod 2 = 1]';
         }
 
@@ -632,11 +774,21 @@ class Query
             $b = isset($matches['b']) ? (int) $matches['b'] : 0;
 
             if ($a === 0) {
+                if ($ofType) {
+                    return $reverse 
+                        ? sprintf('[count(following-sibling::%s) + 1 = %d]', $tagName, $b)
+                        : sprintf('[count(preceding-sibling::%s) + 1 = %d]', $tagName, $b);
+                }
                 $pos = $reverse ? sprintf('last() - (%d - 1)', $b) : (string) $b;
                 return sprintf('[position() = %s]', $pos);
             }
 
             if ($b === 0) {
+                if ($ofType) {
+                    return $reverse 
+                        ? sprintf('[count(following-sibling::%s) mod %d = 0]', $tagName, abs($a))
+                        : sprintf('[count(preceding-sibling::%s) mod %d = 0]', $tagName, abs($a));
+                }
                 return $reverse 
                     ? sprintf('[(last() - position()) mod %d = 0]', abs($a))
                     : sprintf('[position() mod %d = 0]', abs($a));
@@ -644,16 +796,31 @@ class Query
 
             if ($a > 0) {
                 if ($b > 0) {
+                    if ($ofType) {
+                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                            $tagName, $b, $tagName, $a, $b % $a);
+                    }
                     return sprintf('[position() >= %d and position() mod %d = %d]', $b, $a, $b % $a);
                 } else {
                     $absB = abs($b);
+                    if ($ofType) {
+                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                            $tagName, $absB, $tagName, $a, $a - ($absB % $a));
+                    }
                     return sprintf('[position() >= %d and position() mod %d = %d]', $absB, $a, $a - ($absB % $a));
                 }
             } else {
                 $absA = abs($a);
                 if ($b > 0) {
+                    if ($ofType) {
+                        return sprintf('[count(preceding-sibling::%s) <= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                            $tagName, $b, $tagName, $absA, $b % $absA);
+                    }
                     return sprintf('[position() <= %d and position() mod %d = %d]', $b, $absA, $b % $absA);
                 } else {
+                    if ($ofType) {
+                        return sprintf('[count(preceding-sibling::%s) mod %d = 0]', $tagName, $absA);
+                    }
                     return sprintf('[position() mod %d = 0]', $absA);
                 }
             }
@@ -661,6 +828,11 @@ class Query
 
         // 纯数字
         if (is_numeric($formula)) {
+            if ($ofType) {
+                return $reverse 
+                    ? sprintf('[count(following-sibling::%s) + 1 = %d]', $tagName, (int)$formula)
+                    : sprintf('[count(preceding-sibling::%s) + 1 = %d]', $tagName, (int)$formula);
+            }
             $pos = $reverse ? sprintf('last() - (%s - 1)', $formula) : $formula;
             return sprintf('[position() = %s]', $pos);
         }
@@ -736,6 +908,10 @@ class Query
     /**
      * 编译 :slice() 伪类
      *
+     * 支持两种格式：
+     * - start:end (end 不包含) - 例如 1:3 表示从第2个到第4个元素（不包含第4个）
+     * - start:length - 例如 1:2 表示从第2个开始的2个元素
+     *
      * @param  string  $arg  切片参数，格式为 start:end 或 start:length
      * @return string XPath 条件
      */
@@ -770,5 +946,229 @@ class Query
         }
 
         return '';
+    }
+
+    /**
+     * 编译 :between() 伪类
+     *
+     * 参数格式为 start,end，其中：
+     * - start: 起始索引（从 1 开始，与 XPath position() 一致）
+     * - end: 结束索引（包含，从 1 开始）
+     *
+     * 例如：:between(2,4) 匹配位置 2、3、4 的元素
+     *
+     * @param  string  $arg  范围参数，格式为 start,end
+     * @return string XPath 条件
+     */
+    protected static function compileBetween(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            // 如果参数格式不正确，返回匹配所有元素的条件
+            return '[true()]';
+        }
+
+        $start = (int) trim($parts[0]);
+        $end = (int) trim($parts[1]);
+
+        // between 使用从 1 开始的索引（与 XPath position() 一致）
+        return sprintf('[position() >= %d and position() <= %d]', $start, $end);
+    }
+
+    /**
+     * 编译 :text-length-between() 伪类
+     *
+     * 参数格式为 min,max，其中：
+     * - min: 最小文本长度（包含）
+     * - max: 最大文本长度（包含）
+     *
+     * 例如：:text-length-between(5,20) 匹配文本长度在 5 到 20 之间的元素
+     *
+     * @param  string  $arg  范围参数，格式为 min,max
+     * @return string XPath 条件
+     */
+    protected static function compileTextLengthBetween(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $min = (int) trim($parts[0]);
+        $max = (int) trim($parts[1]);
+
+        return sprintf('[string-length(normalize-space(.)) >= %d and string-length(normalize-space(.)) <= %d]', $min, $max);
+    }
+
+    /**
+     * 编译 :attr-length-gt() 伪类
+     *
+     * 参数格式为 attrName,length，其中：
+     * - attrName: 属性名称
+     * - length: 长度阈值
+     *
+     * 例如：:attr-length-gt(data-value,10) 匹配 data-value 属性值长度大于 10 的元素
+     *
+     * @param  string  $arg  属性和长度参数，格式为 attrName,length
+     * @return string XPath 条件
+     */
+    protected static function compileAttrLengthGt(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $attrName = trim($parts[0]);
+        $length = (int) trim($parts[1]);
+
+        return sprintf('[@%s and string-length(@%s) > %d]', $attrName, $attrName, $length);
+    }
+
+    /**
+     * 编译 :attr-length-lt() 伪类
+     *
+     * 参数格式为 attrName,length，其中：
+     * - attrName: 属性名称
+     * - length: 长度阈值
+     *
+     * 例如：:attr-length-lt(data-value,10) 匹配 data-value 属性值长度小于 10 的元素
+     *
+     * @param  string  $arg  属性和长度参数，格式为 attrName,length
+     * @return string XPath 条件
+     */
+    protected static function compileAttrLengthLt(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $attrName = trim($parts[0]);
+        $length = (int) trim($parts[1]);
+
+        return sprintf('[@%s and string-length(@%s) < %d]', $attrName, $attrName, $length);
+    }
+
+    /**
+     * 编译 :attr-length-eq() 伪类
+     *
+     * 参数格式为 attrName,length，其中：
+     * - attrName: 属性名称
+     * - length: 长度值
+     *
+     * 例如：:attr-length-eq(data-value,10) 匹配 data-value 属性值长度等于 10 的元素
+     *
+     * @param  string  $arg  属性和长度参数，格式为 attrName,length
+     * @return string XPath 条件
+     */
+    protected static function compileAttrLengthEq(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $attrName = trim($parts[0]);
+        $length = (int) trim($parts[1]);
+
+        return sprintf('[@%s and string-length(@%s) = %d]', $attrName, $attrName, $length);
+    }
+
+    /**
+     * 编译 :depth-between() 伪类
+     *
+     * 参数格式为 min,max，其中：
+     * - min: 最小深度（包含）
+     * - max: 最大深度（包含）
+     *
+     * 例如：:depth-between(1,3) 匹配深度在 1 到 3 层的元素
+     *
+     * @param  string  $arg  深度范围参数，格式为 min,max
+     * @return string XPath 条件
+     */
+    protected static function compileDepthBetween(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $min = (int) trim($parts[0]);
+        $max = (int) trim($parts[1]);
+
+        return sprintf('[count(ancestor::*) >= %d and count(ancestor::*) <= %d]', $min, $max);
+    }
+
+    /**
+     * 编译 :text-match() 伪类（简化版正则匹配）
+     *
+     * 参数格式为 pattern，目前支持简单的模式匹配：
+     * - 直接文本匹配
+     * - 支持 * 通配符
+     *
+     * 例如：:text-match(test*) 匹配以 "test" 开头的文本
+     *
+     * @param  string  $arg  文本模式
+     * @return string XPath 条件
+     */
+    protected static function compileTextMatch(string $arg): string
+    {
+        $arg = trim($arg);
+        
+        // 如果包含通配符，使用 starts-with
+        if (str_ends_with($arg, '*')) {
+            $prefix = substr($arg, 0, -1);
+            return sprintf('[starts-with(., "%s")]', $prefix);
+        }
+        
+        // 否则使用完全匹配
+        return sprintf('[.="%s"]', $arg);
+    }
+
+    /**
+     * 编译 :attr-match() 伪类
+     *
+     * 参数格式为 attrName,pattern，其中：
+     * - attrName: 属性名称
+     * - pattern: 匹配模式（支持简单的通配符）
+     *
+     * 例如：:attr-match(class,nav*) 匹配 class 属性以 "nav" 开头的元素
+     *
+     * @param  string  $arg  属性和模式参数，格式为 attrName,pattern
+     * @return string XPath 条件
+     */
+    protected static function compileAttrMatch(string $arg): string
+    {
+        $arg = trim($arg);
+        $parts = explode(',', $arg);
+
+        if (count($parts) !== 2) {
+            return '[true()]';
+        }
+
+        $attrName = trim($parts[0]);
+        $pattern = trim($parts[1]);
+
+        // 如果包含通配符，使用 starts-with
+        if (str_ends_with($pattern, '*')) {
+            $prefix = substr($pattern, 0, -1);
+            return sprintf('[@%s and starts-with(@%s, "%s")]', $attrName, $attrName, $prefix);
+        }
+        
+        // 否则使用完全匹配
+        return sprintf('[@%s="%s"]', $attrName, $pattern);
     }
 }

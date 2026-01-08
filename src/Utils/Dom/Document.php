@@ -72,9 +72,22 @@ class Document
      * 构造函数
      * 
      * @param  DOMDocument|string|null  $string  DOM 文档对象或 HTML/XML 字符串
-     * @param  bool  $isFile  是否从文件加载
+     * @param  bool  $isFile  是否从文件加载（支持本地文件和远程 URL）
      * @param  string  $encoding  文档编码
      * @param  string  $type  文档类型（HTML 或 XML）
+     * 
+     * @example
+     * // 从字符串加载
+     * $doc = new Document('<div>Content</div>');
+     * 
+     * // 从本地文件加载
+     * $doc = new Document('/path/to/file.html', true);
+     * 
+     * // 从远程 URL 加载
+     * $doc = new Document('https://example.com', true);
+     * 
+     * // 加载 XML
+     * $doc = new Document('<?xml version="1.0"?><root/>', false, 'UTF-8', Document::TYPE_XML);
      */
     public function __construct(
         DOMDocument|string|null $string = null,
@@ -96,8 +109,7 @@ class Document
             }
         }
 
-        // 注册实例
-        spl_object_hash($this->document);
+        // 注册实例到静态映射
         self::$instances[spl_object_hash($this->document)] = $this;
     }
 
@@ -135,7 +147,7 @@ class Document
      * 加载 HTML/XML 内容
      * 
      * @param  string  $string  HTML/XML 字符串或文件路径
-     * @param  bool  $isFile  是否从文件加载
+     * @param  bool  $isFile  是否从文件加载（支持本地文件和 HTTP/HTTPS URL）
      * @param  string|null  $type  文档类型（默认使用构造时的类型）
      * @return self
      * 
@@ -151,12 +163,23 @@ class Document
         $loaded = false;
 
         if ($isFile) {
-            if (! file_exists($string)) {
+            // 检查是否为 HTTP/HTTPS URL
+            if ($this->isRemoteUrl($string)) {
+                $content = $this->fetchRemoteContent($string);
+                if ($content === false) {
+                    throw new RuntimeException(sprintf('无法获取远程内容: %s', $string));
+                }
+                $loaded = $type === self::TYPE_XML
+                    ? $this->document->loadXML($content)
+                    : $this->document->loadHTML($content);
+            } elseif (file_exists($string)) {
+                // 本地文件
+                $loaded = $type === self::TYPE_XML
+                    ? $this->document->load($string)
+                    : $this->document->loadHTMLFile($string);
+            } else {
                 throw new RuntimeException(sprintf('文件不存在: %s', $string));
             }
-            $loaded = $type === self::TYPE_XML
-                ? $this->document->load($string)
-                : $this->document->loadHTMLFile($string);
         } else {
             if ($type === self::TYPE_XML) {
                 $loaded = $this->document->loadXML($string);
@@ -173,7 +196,8 @@ class Document
         if (! $loaded) {
             $errors = libxml_get_errors();
             libxml_clear_errors();
-            throw new RuntimeException(sprintf('文档加载失败: %s', $errors[0]->message ?? '未知错误'));
+            $errorMsg = !empty($errors) ? $errors[0]->message : '未知错误';
+            throw new RuntimeException(sprintf('文档加载失败: %s', $errorMsg));
         }
 
         libxml_clear_errors();
@@ -445,8 +469,8 @@ class Document
     public function setContent(string $expression, string $content): self
     {
         $element = $this->first($expression);
-        if ($element !== null) {
-            $element->html($content);
+        if ($element !== null && method_exists($element, 'setHtml')) {
+            $element->setHtml($content);
         }
         return $this;
     }
@@ -526,6 +550,22 @@ class Document
     ): ?Element {
         $elements = $this->doFind($expression, $type, true, $contextNode);
         return $elements[0] ?? null;
+    }
+
+    /**
+     * 使用 XPath 查询元素
+     *
+     * @param  string  $xpathExpression  XPath 表达式
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * $elements = $doc->xpath('//div[@class="container"]');
+     * $elements = $doc->xpath('//a[contains(@href, "example.com")]');
+     * $elements = $doc->xpath('(//div[@class="item"])[1]');
+     */
+    public function xpath(string $xpathExpression): array
+    {
+        return $this->doFind($xpathExpression, Query::TYPE_XPATH, true, null);
     }
 
     /**
@@ -673,7 +713,7 @@ class Document
         $element = new Element($tagName);
 
         if ($content !== null) {
-            $element->text($content);
+            $element->setValue($content);
         }
 
         if (! empty($attributes)) {
@@ -998,5 +1038,86 @@ class Document
     public function __toString(): string
     {
         return $this->toString();
+    }
+
+    /**
+     * 检查字符串是否为远程 URL（HTTP/HTTPS）
+     * 
+     * @param  string  $url  要检查的 URL
+     * @return bool 如果是远程 URL 返回 true，否则返回 false
+     */
+    protected function isRemoteUrl(string $url): bool
+    {
+        return preg_match('/^https?:\/\//i', $url) === 1;
+    }
+
+    /**
+     * 获取远程内容（使用优化的 cURL）
+     * 
+     * 此方法通过 HTTP/HTTPS 协议获取远程内容，支持：
+     * - 自动跟随重定向（最多 5 次）
+     * - SSL 证书验证
+     * - 自动编码检测
+     * - 超时控制（连接超时 10 秒，总超时 30 秒）
+     * - 模拟浏览器 User-Agent
+     * 
+     * @param  string  $url  远程 URL
+     * @return string|false 返回内容或 false
+     * 
+     * @throws RuntimeException 当 cURL 扩展未启用时抛出
+     * @throws RuntimeException 当请求失败时抛出
+     * @throws RuntimeException 当 HTTP 状态码异常时抛出
+     * 
+     * @example
+     * $content = $this->fetchRemoteContent('https://example.com');
+     */
+    protected function fetchRemoteContent(string $url): string|false
+    {
+        // 检查是否启用 cURL 扩展
+        if (!extension_loaded('curl')) {
+            throw new RuntimeException('cURL 扩展未启用，无法获取远程内容');
+        }
+
+        $ch = curl_init();
+        if ($ch === false) {
+            return false;
+        }
+
+        // 配置 cURL 选项
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_0) AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.56 Safari/535.11',
+            CURLOPT_ENCODING => '', // 支持所有编码
+            CURLOPT_HTTPHEADER => [
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8',
+                'Cache-Control: no-cache',
+            ],
+        ]);
+
+        $content = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        
+        curl_close($ch);
+
+        // 检查错误
+        if ($content === false || !empty($error)) {
+            throw new RuntimeException(sprintf('cURL 请求失败: %s', $error ?: '未知错误'));
+        }
+
+        // 检查 HTTP 状态码
+        if ($httpCode < 200 || $httpCode >= 300) {
+            throw new RuntimeException(sprintf('HTTP 请求失败，状态码: %d', $httpCode));
+        }
+
+        return $content;
     }
 }

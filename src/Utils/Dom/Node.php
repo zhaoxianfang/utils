@@ -36,19 +36,15 @@ abstract class Node
      * 
      * @var DOMElement|DOMText|DOMComment|DOMCdataSection|DOMDocumentFragment
      */
-    protected $node;
+    protected DOMElement|DOMText|DOMComment|DOMCdataSection|DOMDocumentFragment $node;
 
     /**
      * 构造函数
      * 
      * @param  DOMElement|DOMText|DOMComment|DOMCdataSection|DOMDocumentFragment  $node  DOM 节点
      */
-    public function __construct($node)
+    public function __construct(DOMElement|DOMText|DOMComment|DOMCdataSection|DOMDocumentFragment $node)
     {
-        if (! $node instanceof DOMNode) {
-            throw new InvalidArgumentException('参数必须是 DOMNode 的实例。');
-        }
-
         $this->node = $node;
     }
 
