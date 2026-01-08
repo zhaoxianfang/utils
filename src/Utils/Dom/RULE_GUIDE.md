@@ -152,6 +152,7 @@
 | `:eq(n)`               | 等于索引     | n: 索引               | `$doc->find('li:eq(2)')`                 | 索引等于n                                                                                                                                 |
 | `:gt(n)`               | 大于索引     | n: 索引               | `$doc->find('li:gt(2)')`                 | 索引大于n                                                                                                                                 |
 | `:lt(n)`               | 小于索引     | n: 索引               | `$doc->find('li:lt(3)')`                 | 索引小于n                                                                                                                                 |
+| `:parent`              | 父元素      | 无                   | `$doc->find(':parent')`                | 有子元素的元素                                                                                                                              |
 | `:between(start,end)`  | 索引范围     | start, end          | `$doc->find('li:between(2,5)')`          | 索引在2-5之间                                                                                                                              |
 | `:slice(start:end)`    | 切片       | start:end           | `$doc->find('li:slice(1:3)')`            | 切片范围                                                                                                                                  |
 | **可见性伪类**              |
@@ -181,12 +182,28 @@
 | `:text-length-gt(n)`   | 文本长度大于   | n: 长度               | `$doc->find(':text-length-gt(10)')`      | 文本长度>n                                                                                                                                |
 | `:text-length-lt(n)`   | 文本长度小于   | n: 长度               | `$doc->find(':text-length-lt(10)')`      | 文本长度<n                                                                                                                                |
 | `:text-length-eq(n)`   | 文本长度等于   | n: 长度               | `$doc->find(':text-length-eq(10)')`      | 文本长度=n                                                                                                                                |
+| `:text-length-between(start,end)` | 文本长度范围 | start, end | `$doc->find(':text-length-between(5,10)')` | 文本长度在5-10之间                                                                                                                        |
 | **子元素数量伪类**            |
 | `:children-gt(n)`      | 子元素大于    | n: 数量               | `$doc->find(':children-gt(3)')`          | 子元素数>n                                                                                                                                |
 | `:children-lt(n)`      | 子元素小于    | n: 数量               | `$doc->find(':children-lt(3)')`          | 子元素数<n                                                                                                                                |
 | `:children-eq(n)`      | 子元素等于    | n: 数量               | `$doc->find(':children-eq(3)')`          | 子元素数=n                                                                                                                                |
-| **属性匹配扩展**             |
-| `:has-attr(name)`      | 有属性      | name: 属性名           | `$doc->find(':has-attr(data-id)')`       | 有指定属性                                                                                                                                 |
+| **属性数量伪类**            |
+| `:attr-count-gt(n)`   | 属性数大于    | n: 数量               | `$doc->find(':attr-count-gt(3)')`       | 属性数>n                                                                                                                                 |
+| `:attr-count-lt(n)`   | 属性数小于    | n: 数量               | `$doc->find(':attr-count-lt(3)')`       | 属性数<n                                                                                                                                 |
+| `:attr-count-eq(n)`   | 属性数等于    | n: 数量               | `$doc->find(':attr-count-eq(3)')`       | 属性数=n                                                                                                                                 |
+| **属性值长度伪类**           |
+| `:attr-length-gt(attr,n)` | 属性值长度大于 | attr: 属性名, n: 长度 | `$doc->find(':attr-length-gt(href,10)')` | 属性值长度>n                                                                                                                              |
+| `:attr-length-lt(attr,n)` | 属性值长度小于 | attr: 属性名, n: 长度 | `$doc->find(':attr-length-lt(href,10)')` | 属性值长度<n                                                                                                                              |
+| `:attr-length-eq(attr,n)` | 属性值长度等于 | attr: 属性名, n: 长度 | `$doc->find(':attr-length-eq(href,10)')` | 属性值长度=n                                                                                                                              |
+| **节点类型伪类**             |
+| `:element`            | 元素节点    | 无                   | `$doc->find(':element')`                | 元素节点                                                                                                                                  |
+| `:cdata`              | CDATA节点   | 无                   | `$doc->find(':cdata')`                  | CDATA节点                                                                                                                                 |
+| **深度范围伪类**             |
+| `:depth-between(start,end)` | 深度范围    | start, end          | `$doc->find(':depth-between(1,3)')`       | 深度在1-3之间                                                                                                                              |
+| **文本内容匹配伪类**         |
+| `:text-match(pattern)` | 文本匹配    | pattern: 正则模式    | `$doc->find(':text-match(^test)')`       | 文本匹配正则表达式                                                                                                                          |
+| **属性值匹配伪类**           |
+| `:attr-match(attr,pattern)` | 属性值匹配    | attr: 属性名, pattern: 正则模式 | `$doc->find(':attr-match(href,^http)')` | 属性值匹配正则表达式                                                                                                                        |
 | `:data(name)`          | data属性   | name: data名         | `$doc->find(':data(id)')`                | data-*属性                                                                                                                              |
 | **表单验证伪类**             |
 | `:in-range`            | 在范围内     | 无                   | `$doc->find(':in-range')`                | 值在min-max间                                                                                                                            |
@@ -203,7 +220,7 @@
 | `::text`               | 文本内容     | 无                   | `$doc->text('div::text')`                | 获取文本                                                                                                                                  |
 | `::attr(name)`         | 属性值      | name: 属性名           | `$doc->text('a::attr(href)')`            | 获取属性                                                                                                                                  |
 
-**总计**: 100+ 种选择器（包括基础选择器9种、属性选择器7种、结构伪类10种、内容伪类9种、表单伪类8种、表单元素类型24种、HTML元素伪类19种、HTML5结构元素24种、位置伪类10种、可见性伪类2种、状态伪类5种、语言方向伪类4种、深度伪类4种、文本相关伪类7种、子元素数量伪类3种、属性匹配扩展5种、表单验证伪类9种、伪元素2种）
+**总计**: 130+ 种选择器（包括基础选择器9种、属性选择器7种、结构伪类10种、内容伪类9种、文档状态伪类2种、表单伪类8种、表单元素类型24种、HTML元素伪类19种、HTML5结构元素24种、位置伪类11种、可见性伪类2种、用户交互伪类3种、语言方向伪类4种、深度伪类5种、文本相关伪类11种、内容匹配伪类3种、节点类型伪类4种、子元素数量伪类3种、属性数量伪类3种、属性匹配扩展5种、属性值长度伪类3种、表单验证伪类9种、表单验证扩展伪类2种、深度范围伪类1种、文本内容匹配伪类1种、属性值匹配伪类1种、伪元素2种）
 
 ---
 
