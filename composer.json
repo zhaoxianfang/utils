@@ -1,8 +1,26 @@
 {
   "name": "zxf/utils",
-  "description": "无业务逻辑的通用工具包和通用函数集",
+  "description": "现代化的 PHP 工具包，包含强大的 DOM 操作库和一些常用的类库、通用函数集和实用工具",
   "type": "library",
-  "keywords": ["utils", "func", "zxf" ,"php", "工具"],
+  "keywords": [
+    "utils",
+    "dom",
+    "html",
+    "xml",
+    "css",
+    "xpath",
+    "web-scraper",
+    "html-parser",
+    "xml-parser",
+    "php",
+    "php82",
+    "php83",
+    "php84",
+    "工具",
+    "DOM操作",
+    "image",
+    "http"
+  ],
   "license": "MIT",
   "authors": [
     {
@@ -12,7 +30,7 @@
     }
   ],
   "require": {
-    "php": "^8.1"
+    "php": "^8.2"
   },
   "require-dev": {
   },
@@ -34,5 +52,15 @@
     "optimize-autoloader": true
   },
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "funding": [
+    {
+      "type": "custom",
+      "url": "https://yoc.cn"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/zxf/utils/issues",
+    "source": "https://github.com/zxf/utils"
+  }
 }
