@@ -12,6 +12,8 @@ use DOMText;
 use InvalidArgumentException;
 use RuntimeException;
 use zxf\Utils\Dom\Exceptions\InvalidSelectorException;
+use zxf\Utils\Dom\Selectors\Query;
+use zxf\Utils\Dom\Fragments\DocumentFragment;
 
 /**
  * DOM 文档类

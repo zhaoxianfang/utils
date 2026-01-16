@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace zxf\Utils\Dom;
+namespace zxf\Utils\Dom\Fragments;
+
+use zxf\Utils\Dom\Node;
 
 use DOMDocumentFragment as NativeDOMDocumentFragment;
 use DOMNode;

@@ -14,8 +14,9 @@ use InvalidArgumentException;
 use LogicException;
 use RuntimeException;
 use zxf\Utils\Dom\Exceptions\InvalidSelectorException;
-use zxf\Utils\Dom\ClassAttribute;
-use zxf\Utils\Dom\StyleAttribute;
+use zxf\Utils\Dom\Selectors\Query;
+use zxf\Utils\Dom\Attributes\ClassAttribute;
+use zxf\Utils\Dom\Attributes\StyleAttribute;
 
 class Element extends Node
 {

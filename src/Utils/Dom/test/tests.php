@@ -8,21 +8,21 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-require_once __DIR__ . '/Query.php';
-require_once __DIR__ . '/Document.php';
-require_once __DIR__ . '/Node.php';
-require_once __DIR__ . '/Element.php';
-require_once __DIR__ . '/ClassAttribute.php';
-require_once __DIR__ . '/StyleAttribute.php';
-require_once __DIR__ . '/DocumentFragment.php';
-require_once __DIR__ . '/Encoder.php';
-require_once __DIR__ . '/Errors.php';
-require_once __DIR__ . '/Exceptions/InvalidSelectorException.php';
+require_once __DIR__ . '/../Document.php';
+require_once __DIR__ . '/../Node.php';
+require_once __DIR__ . '/../Element.php';
+require_once __DIR__ . '/../Selectors/Query.php';
+require_once __DIR__ . '/../Attributes/ClassAttribute.php';
+require_once __DIR__ . '/../Attributes/StyleAttribute.php';
+require_once __DIR__ . '/../Fragments/DocumentFragment.php';
+require_once __DIR__ . '/../Utils/Encoder.php';
+require_once __DIR__ . '/../Utils/Errors.php';
+require_once __DIR__ . '/../Exceptions/InvalidSelectorException.php';
 
 use zxf\Utils\Dom\Document;
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 use zxf\Utils\Dom\Element;
-use zxf\Utils\Dom\Encoder;
+use zxf\Utils\Dom\Utils\Encoder;
 
 // 初始化 Query
 Query::initialize();
@@ -1025,7 +1025,7 @@ echo "\n--- DocumentFragment 测试 ---\n";
 run_test('创建文档片段', function() {
     $doc = new Document('<div></div>');
     $fragment = $doc->createFragment();
-    return $fragment instanceof \zxf\Utils\Dom\DocumentFragment;
+    return $fragment instanceof \zxf\Utils\Dom\Fragments\DocumentFragment;
 });
 
 run_test('向片段添加元素', function() {
@@ -1554,38 +1554,38 @@ run_test('Errors::handle 处理错误', function() {
     try {
         throw new \RuntimeException('Test error');
     } catch (\Throwable $e) {
-        \zxf\Utils\Dom\Errors::handle($e);
+        \zxf\Utils\Dom\Utils\Errors::handle($e);
         return true;
     }
 });
 
 run_test('Errors::silence 静默处理错误', function() {
-    $result = \zxf\Utils\Dom\Errors::silence(function() {
+    $result = \zxf\Utils\Dom\Utils\Errors::silence(function() {
         throw new \RuntimeException('Silent error');
     }, 'default');
     return $result === 'default';
 });
 
 run_test('Errors::setLoggingEnabled 设置日志', function() {
-    \zxf\Utils\Dom\Errors::setLoggingEnabled(false);
-    return !\zxf\Utils\Dom\Errors::isLoggingEnabled();
+    \zxf\Utils\Dom\Utils\Errors::setLoggingEnabled(false);
+    return !\zxf\Utils\Dom\Utils\Errors::isLoggingEnabled();
 });
 
 run_test('Errors::setLogFile 设置日志文件', function() {
-    \zxf\Utils\Dom\Errors::setLogFile('/tmp/test.log');
-    $logFile = \zxf\Utils\Dom\Errors::getLogFile();
+    \zxf\Utils\Dom\Utils\Errors::setLogFile('/tmp/test.log');
+    $logFile = \zxf\Utils\Dom\Utils\Errors::getLogFile();
     return $logFile === '/tmp/test.log';
 });
 
 run_test('Errors::setErrorHandler 设置自定义处理器', function() {
     $called = false;
-    \zxf\Utils\Dom\Errors::setErrorHandler(function() use (&$called) {
+    \zxf\Utils\Dom\Utils\Errors::setErrorHandler(function() use (&$called) {
         $called = true;
     });
     try {
         throw new \RuntimeException('Test');
     } catch (\Throwable $e) {
-        \zxf\Utils\Dom\Errors::handle($e);
+        \zxf\Utils\Dom\Utils\Errors::handle($e);
     }
     return $called;
 });

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace zxf\Utils\Dom;
+namespace zxf\Utils\Dom\Utils;
 
 use Throwable;
 

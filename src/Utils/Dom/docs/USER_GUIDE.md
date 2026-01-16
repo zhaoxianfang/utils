@@ -59,14 +59,15 @@ require_once 'path/to/Query.php';
 require_once 'path/to/Document.php';
 require_once 'path/to/Element.php';
 require_once 'path/to/Node.php';
-require_once 'path/to/ClassAttribute.php';
-require_once 'path/to/StyleAttribute.php';
-require_once 'path/to/DocumentFragment.php';
-require_once 'path/to/Encoder.php';
-require_once 'path/to/Errors.php';
+require_once 'path/to/Selectors/Query.php';
+require_once 'path/to/Attributes/ClassAttribute.php';
+require_once 'path/to/Attributes/StyleAttribute.php';
+require_once 'path/to/Fragments/DocumentFragment.php';
+require_once 'path/to/Utils/Encoder.php';
+require_once 'path/to/Utils/Errors.php';
 require_once 'path/to/Exceptions/InvalidSelectorException.php';
 
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 use zxf\Utils\Dom\Document;
 
 // 初始化 Query
@@ -169,7 +170,7 @@ Node 类是 Element 和其他节点类型的基类。
 Query 类负责将 CSS 选择器转换为 XPath 表达式。
 
 ```php
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 
 Query::initialize();
 $xpath = Query::compile('.item.active');
@@ -663,7 +664,7 @@ DocumentFragment 允许你创建和操作文档片段，然后一次性插入到
 ### 创建片段
 
 ```php
-use zxf\Utils\Dom\DocumentFragment;
+use zxf\Utils\Dom\Fragments\DocumentFragment;
 
 $fragment = new DocumentFragment($doc);
 
@@ -703,7 +704,7 @@ echo $text; // 输出: 中文内容
 ### 编码转换
 
 ```php
-use zxf\Utils\Dom\Encoder;
+use zxf\Utils\Dom\Utils\Encoder;
 
 // HTML 实体编码
 $html = Encoder::encodeHtml('<script>alert("XSS")</script>');
@@ -749,7 +750,7 @@ try {
 ### 错误配置
 
 ```php
-use zxf\Utils\Dom\Errors;
+use zxf\Utils\Dom\Utils\Errors;
 
 // 静默处理错误
 Errors::silence();
@@ -888,7 +889,7 @@ $dates = $doc->findWithFallback([
 库提供了智能的选择器类型检测功能：
 
 ```php
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 
 // 自动检测选择器类型
 $type = Query::detectSelectorType('div.container');           // 'css'
@@ -957,7 +958,7 @@ $dates = $doc->findWithFallback([
 ### 检测选择器类型
 
 ```php
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 
 // 自动检测选择器类型
 $type = Query::detectSelectorType('div.container');           // 'css'
@@ -1024,7 +1025,7 @@ $doc->addClass('.container', 'active')
 ### 4. 始终初始化 Query
 
 ```php
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 
 // 在应用启动时初始化一次
 Query::initialize();

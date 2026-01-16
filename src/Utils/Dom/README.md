@@ -39,7 +39,7 @@ require_once 'path/to/Query.php';
 require_once 'path/to/Document.php';
 // ... other files
 
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 use zxf\Utils\Dom\Document;
 
 Query::initialize();
@@ -300,7 +300,7 @@ $style->set('backgroundColor', 'red');
 Utility class for encoding/decoding.
 
 ```php
-use zxf\Utils\Dom\Encoder;
+use zxf\Utils\Dom\Utils\Encoder;
 
 // HTML encoding
 $html = Encoder::encodeHtml('<script>alert("XSS")</script>');
@@ -320,7 +320,7 @@ $url = Encoder::decodeUrl('%E4%B8%AD%E6%96%87');
 Error handling utilities.
 
 ```php
-use zxf\Utils\Dom\Errors;
+use zxf\Utils\Dom\Utils\Errors;
 
 // Silence errors
 Errors::silence();

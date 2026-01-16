@@ -14,6 +14,7 @@ use DOMText;
 use InvalidArgumentException;
 use LogicException;
 use RuntimeException;
+use zxf\Utils\Dom\Selectors\Query;
 
 /**
  * DOM 节点基类

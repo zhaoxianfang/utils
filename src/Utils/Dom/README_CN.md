@@ -39,7 +39,7 @@ require_once 'path/to/Query.php';
 require_once 'path/to/Document.php';
 // ... 其他文件
 
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 use zxf\Utils\Dom\Document;
 
 Query::initialize();
@@ -347,7 +347,7 @@ $style->set('backgroundColor', 'red');
 编码/解码工具类。
 
 ```php
-use zxf\Utils\Dom\Encoder;
+use zxf\Utils\Dom\Utils\Encoder;
 
 // HTML 编码
 $html = Encoder::encodeHtml('<script>alert("XSS")</script>');
@@ -367,7 +367,7 @@ $url = Encoder::decodeUrl('%E4%B8%AD%E6%96%87');
 错误处理工具。
 
 ```php
-use zxf\Utils\Dom\Errors;
+use zxf\Utils\Dom\Utils\Errors;
 
 // 静默处理错误
 Errors::silence();

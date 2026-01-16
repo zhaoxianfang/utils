@@ -10,21 +10,21 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-require_once __DIR__ . '/Query.php';
-require_once __DIR__ . '/Document.php';
-require_once __DIR__ . '/Node.php';
-require_once __DIR__ . '/Element.php';
-require_once __DIR__ . '/ClassAttribute.php';
-require_once __DIR__ . '/StyleAttribute.php';
-require_once __DIR__ . '/DocumentFragment.php';
-require_once __DIR__ . '/Encoder.php';
-require_once __DIR__ . '/Errors.php';
-require_once __DIR__ . '/Exceptions/InvalidSelectorException.php';
+require_once __DIR__ . '/../Document.php';
+require_once __DIR__ . '/../Node.php';
+require_once __DIR__ . '/../Element.php';
+require_once __DIR__ . '/../Selectors/Query.php';
+require_once __DIR__ . '/../Attributes/ClassAttribute.php';
+require_once __DIR__ . '/../Attributes/StyleAttribute.php';
+require_once __DIR__ . '/../Fragments/DocumentFragment.php';
+require_once __DIR__ . '/../Utils/Encoder.php';
+require_once __DIR__ . '/../Utils/Errors.php';
+require_once __DIR__ . '/../Exceptions/InvalidSelectorException.php';
 
 use zxf\Utils\Dom\Document;
-use zxf\Utils\Dom\Query;
+use zxf\Utils\Dom\Selectors\Query;
 use zxf\Utils\Dom\Element;
-use zxf\Utils\Dom\Encoder;
+use zxf\Utils\Dom\Utils\Encoder;
 
 // 初始化 Query
 Query::initialize();
@@ -618,7 +618,7 @@ try {
     }
 
     // 使用 Errors::silence 静默处理错误
-    $result = \zxf\Utils\Dom\Errors::silence(function() {
+    $result = \zxf\Utils\Dom\Utils\Errors::silence(function() {
         throw new \RuntimeException('这是一个错误');
     }, '默认值');
     echo "静默处理错误后的结果: {$result}\n";
