@@ -1,9 +1,17 @@
 {
   "name": "zxf/utils",
-  "description": "现代化的 PHP 工具包，包含强大的 DOM 操作库和一些常用的类库、通用函数集和实用工具",
+  "description": "现代化的 PHP 工具包，包含强大的 DOM 操作库、数据转换和一些常用的类库、HTTP网络请求、代码压缩、通用函数集和实用工具等",
   "type": "library",
   "keywords": [
     "utils",
+    "util",
+    "tools",
+    "tool",
+    "tree",
+    "crypto",
+    "file",
+    "array",
+    "curl",
     "dom",
     "html",
     "xml",
@@ -25,7 +33,6 @@
   "authors": [
     {
       "name": "zxf",
-      "email": "zxf@example.com",
       "homepage": "https://yoc.cn"
     }
   ],
