@@ -504,7 +504,7 @@ class Document
      * 查找匹配选择器的元素
      *
      * @param  string  $expression  选择器表达式
-     * @param  string  $type  选择器类型（CSS 或 XPath）
+     * @param  string  $type  选择器类型（CSS、XPath 或 Regex）
      * @param  DOMElement|null  $contextNode  上下文节点
      * @return array<int, Element|string> 匹配的元素数组或文本/属性值数组
      *
@@ -517,7 +517,25 @@ class Document
         string $type = Query::TYPE_CSS,
         ?DOMElement $contextNode = null
     ): array {
-        // 处理 ::text 伪元素
+        // 处理正则表达式选择器
+        if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
+            return $this->findByRegex($expression, $contextNode);
+        }
+
+        // 处理 XPath 表达式中的 /text() 函数（直接文本节点）
+        // 例如：//div[@class="content"]/text()
+        if (strcasecmp($type, Query::TYPE_XPATH) === 0 && str_ends_with($expression, '/text()')) {
+            $baseExpression = substr($expression, 0, -7); // 移除 '/text()' (7个字符)
+            return $this->doFindTextNodes($baseExpression, $contextNode);
+        }
+
+        // 处理 XPath 表达式中的 text() 函数（所有文本节点）
+        // 例如：//div[@class="content"]//text()
+        if (strcasecmp($type, Query::TYPE_XPATH) === 0 && str_contains($expression, '//text()')) {
+            return $this->doFind($expression, $type, false, $contextNode);
+        }
+
+        // 处理 ::text 伪元素（CSS方式获取元素文本）
         if (str_ends_with($expression, '::text')) {
             $cleanSelector = substr($expression, 0, -6); // ::text 是 6 个字符
             $elements = $this->doFind($cleanSelector, $type, true, $contextNode);
@@ -555,17 +573,151 @@ class Document
     /**
      * 使用 XPath 查询元素
      *
+     * 支持完整的 XPath 1.0 语法，包括：
+     * - 路径表达式：/（绝对路径）、//（相对路径）、..（父节点）
+     * - 轴：child、descendant、parent、ancestor、following-sibling、preceding-sibling
+     * - 函数：text()、comment()、normalize-space()、contains()、starts-with()、ends-with()
+     * - 节点测试：node()、text()、comment()、element()
+     * - 布尔函数：true()、false()、not()、and、or
+     * - 数值函数：position()、last()、count()、sum()、number()、string-length()
+     * - 字符串函数：concat()、substring()、translate()
+     *
      * @param  string  $xpathExpression  XPath 表达式
      * @return array<int, Element> 匹配的元素数组
      *
      * @example
+     * // 基本路径
      * $elements = $doc->xpath('//div[@class="container"]');
      * $elements = $doc->xpath('//a[contains(@href, "example.com")]');
+     *
+     * // 索引和位置
      * $elements = $doc->xpath('(//div[@class="item"])[1]');
+     * $elements = $doc->xpath('//li[position() > 3]');
+     *
+     * // 绝对路径（全路径）
+     * $elements = $doc->xpath('/html/body/div[3]/div[1]/div/div[1]/span');
+     *
+     * // 文本节点
+     * $elements = $doc->xpath('//body/div[3]/div[1]/div/div[1]/text()');
+     *
+     * // 组合条件
+     * $elements = $doc->xpath('//div[contains(@class, "item") and @data-id="123"]');
      */
     public function xpath(string $xpathExpression): array
     {
         return $this->doFind($xpathExpression, Query::TYPE_XPATH, true, null);
+    }
+
+    /**
+     * 使用正则表达式查找元素
+     *
+     * 此方法使用正则表达式匹配元素的文本内容、HTML内容或属性值
+     * 支持匹配：
+     * - 文本内容: 通过元素的 textContent 匹配
+     * - HTML内容: 通过元素的 innerHTML 匹配
+     * - 属性值: 通过元素属性匹配
+     *
+     * 正则表达式选择器优势：
+     * 1. 灵活匹配：支持复杂的模式匹配
+     * 2. 文本提取：直接匹配文本内容，无需预先知道结构
+     * 3. 属性过滤：基于属性值的正则匹配
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  DOMElement|null  $contextNode  上下文节点（如果提供则从此节点开始搜索）
+     * @param  string|null  $attribute  属性名（如果提供则匹配属性值）
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * // 查找文本包含 "2026" 的元素
+     * $elements = $doc->regex('/2026/');
+     *
+     * // 查找文本包含日期格式的元素
+     * $elements = $doc->regex('/\d{4}-\d{2}-\d{2}/');
+     *
+     * // 查找 href 包含 "gov.cn" 的链接
+     * $elements = $doc->regex('/gov\.cn/', null, 'href');
+     *
+     * // 查找邮箱地址
+     * $elements = $doc->regex('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/');
+     *
+     * // 查找电话号码
+     * $elements = $doc->regex('/\d{3}-\d{4}-\d{4}/');
+     *
+     * // 在指定上下文中搜索
+     * $context = $doc->first('div.container');
+     * $elements = $doc->regex('/test/', $context);
+     */
+    public function regex(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array
+    {
+        return $this->findByRegex($pattern, $contextNode, $attribute);
+    }
+
+    /**
+     * 使用正则表达式查找元素（内部方法）
+     *
+     * 此方法支持多种匹配模式：
+     * - 匹配文本内容（默认）
+     * - 匹配特定属性值
+     * - 支持复杂正则表达式模式
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  DOMElement|null  $contextNode  上下文节点
+     * @param  string|null  $attribute  要匹配的属性名（如果提供则匹配属性值）
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @throws RuntimeException 当正则表达式无效时抛出
+     */
+    protected function findByRegex(string $pattern, ?DOMElement $contextNode = null, ?string $attribute = null): array
+    {
+        $result = [];
+
+        // 验证正则表达式
+        $errorReporting = error_reporting(0);
+        $isValid = @preg_match($pattern, '');
+        error_reporting($errorReporting);
+
+        if ($isValid === false && preg_last_error() !== PREG_NO_ERROR) {
+            throw new RuntimeException(sprintf('无效的正则表达式: "%s"。错误代码: %d', $pattern, preg_last_error()));
+        }
+
+        // 获取所有元素节点
+        $xpath = $this->createXpath();
+        $contextPath = $contextNode !== null ? '.' : '//';
+        $nodeList = $xpath->query($contextPath . '//*');
+
+        if ($nodeList === false) {
+            return $result;
+        }
+
+        foreach ($nodeList as $node) {
+            if (!($node instanceof DOMElement)) {
+                continue;
+            }
+
+            $matched = false;
+
+            // 如果指定了属性名，则匹配属性值
+            if ($attribute !== null) {
+                if ($node->hasAttribute($attribute)) {
+                    $attrValue = $node->getAttribute($attribute);
+                    if (preg_match($pattern, $attrValue) === 1) {
+                        $matched = true;
+                    }
+                }
+            } else {
+                // 否则匹配文本内容
+                $textContent = $node->textContent ?? '';
+                if (preg_match($pattern, $textContent) === 1) {
+                    $matched = true;
+                }
+            }
+
+            if ($matched) {
+                $result[] = $this->wrapNode($node);
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -632,9 +784,8 @@ class Document
      * 
      * @throws InvalidSelectorException 当选择器无效时抛出
      * @throws InvalidArgumentException 当上下文节点无效时抛出
-     * @throws RuntimeException 当查询失败时抛出
      */
-    private function doFind(
+    protected function doFind(
         string $expression,
         string $type,
         bool $wrapNode,
@@ -661,10 +812,28 @@ class Document
 
         // 执行 XPath 查询
         $xpath = $this->createXpath();
+        
+        // 捕获 XPath 错误而不是直接抛出异常
+        libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        
         $nodeList = $xpath->query($compiledExpression, $contextNode);
+        
+        // 检查是否有 XPath 错误
+        $xpathErrors = libxml_get_errors();
+        libxml_clear_errors();
+        
+        if (!empty($xpathErrors)) {
+            $errorMsg = '';
+            foreach ($xpathErrors as $error) {
+                $errorMsg .= sprintf('行 %d, 列 %d: %s', $error->line, $error->column, trim($error->message));
+            }
+            throw new RuntimeException(sprintf('XPath 查询失败: %s', $errorMsg));
+        }
 
+        // 检查查询结果
         if ($nodeList === false) {
-            throw new RuntimeException('XPath 查询失败。');
+            throw new RuntimeException('XPath 查询失败：无法执行查询表达式。');
         }
 
         // 转换结果
@@ -677,8 +846,53 @@ class Document
     }
 
     /**
+     * 查找匹配选择器的直接文本节点
+     *
+     * 此方法专门处理 XPath 的 /text() 函数，返回元素的直接文本节点
+     * 这些是未被任何标签包围的纯文本内容
+     *
+     * @param  string  $baseExpression  基础选择器（不包含 /text()）
+     * @param  DOMElement|null  $contextNode  上下文节点
+     * @return array<int, string> 文本内容数组
+     *
+     * @throws RuntimeException 当查询失败时抛出
+     *
+     * @example
+     * // 获取 div.content 的直接文本（不包括子元素的文本）
+     * $texts = $doc->doFindTextNodes('//div[@class="content"]');
+     *
+     * // 上下文节点内的直接文本
+     * $texts = $doc->doFindTextNodes('.container', $contextElement);
+     */
+    protected function doFindTextNodes(string $baseExpression, ?DOMElement $contextNode = null): array
+    {
+        // 执行 XPath 查询获取元素
+        $elements = $this->doFind($baseExpression, Query::TYPE_XPATH, false, $contextNode);
+
+        // 提取每个元素的直接文本节点
+        $result = [];
+        foreach ($elements as $element) {
+            if (!($element instanceof DOMNode)) {
+                continue;
+            }
+
+            // 获取直接子文本节点
+            foreach ($element->childNodes as $child) {
+                if ($child instanceof DOMText) {
+                    $text = trim($child->nodeValue);
+                    if ($text !== '') {
+                        $result[] = $text;
+                    }
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * 创建 XPath 对象
-     * 
+     *
      * @return \DOMXPath
      */
     protected function createXpath(): \DOMXPath
@@ -990,6 +1204,477 @@ class Document
     }
 
     /**
+     * 查找包含指定文本的元素
+     * 
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByText(string $text, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (is_string($element) && str_contains($element, $text)) {
+                // 如果是字符串（来自 ::text 伪元素），跳过
+                continue;
+            }
+            if ($element instanceof Element && str_contains($element->text(), $text)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找包含指定文本的元素（不区分大小写）
+     * 
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByTextIgnoreCase(string $text, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        $lowerText = strtolower($text);
+        
+        foreach ($elements as $element) {
+            if (is_string($element)) {
+                // 如果是字符串（来自 ::text 伪元素），跳过
+                continue;
+            }
+            if ($element instanceof Element && str_contains(strtolower($element->text()), $lowerText)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找具有指定属性的元素
+     * 
+     * @param  string  $attribute  属性名
+     * @param  string|null  $value  属性值（如果为null则只检查属性存在）
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByAttribute(string $attribute, ?string $value = null, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (!($element instanceof Element)) {
+                continue;
+            }
+            
+            if ($value === null) {
+                if ($element->hasAttribute($attribute)) {
+                    $result[] = $element;
+                }
+            } else {
+                if ($element->getAttribute($attribute) === $value) {
+                    $result[] = $element;
+                }
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找属性值包含指定文本的元素
+     * 
+     * @param  string  $attribute  属性名
+     * @param  string  $value  要查找的值
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByAttributeContains(string $attribute, string $value, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (!($element instanceof Element)) {
+                continue;
+            }
+            
+            $attrValue = $element->getAttribute($attribute);
+            if ($attrValue !== null && str_contains($attrValue, $value)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找属性值以指定文本开头的元素
+     * 
+     * @param  string  $attribute  属性名
+     * @param  string  $prefix  前缀
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByAttributeStartsWith(string $attribute, string $prefix, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (!($element instanceof Element)) {
+                continue;
+            }
+            
+            $attrValue = $element->getAttribute($attribute);
+            if ($attrValue !== null && str_starts_with($attrValue, $prefix)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找属性值以指定文本结尾的元素
+     * 
+     * @param  string  $attribute  属性名
+     * @param  string  $suffix  后缀
+     * @param  string  $selector  CSS选择器（可选，用于限制范围）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByAttributeEndsWith(string $attribute, string $suffix, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (!($element instanceof Element)) {
+                continue;
+            }
+            
+            $attrValue = $element->getAttribute($attribute);
+            if ($attrValue !== null && str_ends_with($attrValue, $suffix)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 使用选择器数组回退查找元素
+     *
+     * 此方法支持传入多个选择器，按顺序尝试，找到第一个非空结果即返回。
+     * 支持混合使用 CSS 选择器、XPath 选择器和正则表达式。
+     *
+     * 选择器数组格式：
+     * ```php
+     * [
+     *     'selector' => 'CSS选择器或XPath表达式或正则表达式',
+     *     'type' => 'css|xpath|regex',  // 可选，默认为 'css'
+     *     'attribute' => '属性名'       // 仅当 type='regex' 时使用，可选
+     * ]
+     * ```
+     *
+     * @param  array<int, array{selector: string, type?: string, attribute?: string}>  $selectors  选择器数组
+     * @param  DOMElement|null  $contextNode  上下文节点（可选）
+     * @return array<int, Element|string> 匹配的元素数组或文本/属性值数组
+     *
+     * @example
+     * // 基本用法：混合使用CSS和XPath
+     * $result = $doc->findWithFallback([
+     *     ['selector' => '.main-content .title'],           // CSS选择器
+     *     ['selector' => '//h1[@class="main-title"]'],     // XPath选择器
+     *     ['selector' => '/html/body/h1']                  // XPath绝对路径
+     * ]);
+     *
+     * // 使用正则表达式
+     * $result = $doc->findWithFallback([
+     *     ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
+     * ]);
+     *
+     * // 复杂场景：多个备选方案
+     * $result = $doc->findWithFallback([
+     *     ['selector' => 'div.content > h1'],
+     *     ['selector' => '.article-title'],
+     *     ['selector' => '//div[contains(@class, "content")]/h1', 'type' => 'xpath'],
+     *     ['selector' => '/html/body/div[1]/h1', 'type' => 'xpath']
+     * ]);
+     *
+     * // 匹配属性值的正则
+     * $result = $doc->findWithFallback([
+     *     ['selector' => '/https?:\/\//', 'type' => 'regex', 'attribute' => 'href']
+     * ]);
+     */
+    public function findWithFallback(
+        array $selectors,
+        ?DOMElement $contextNode = null
+    ): array {
+        foreach ($selectors as $index => $selectorConfig) {
+            try {
+                // 获取选择器配置
+                $selector = $selectorConfig['selector'] ?? '';
+                $type = ($selectorConfig['type'] ?? 'css');
+                $attribute = $selectorConfig['attribute'] ?? null;
+
+                if (empty($selector)) {
+                    continue;
+                }
+
+                // 根据类型执行查询
+                if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
+                    // 正则表达式选择器
+                    $result = $this->findByRegex($selector, $contextNode, $attribute);
+                } else {
+                    // CSS 或 XPath 选择器
+                    $result = $this->find($selector, $type, $contextNode);
+                }
+
+                // 如果找到结果，立即返回
+                if (!empty($result)) {
+                    return $result;
+                }
+            } catch (\Throwable $e) {
+                // 记录错误但继续尝试下一个选择器
+                // 可以选择记录日志
+                continue;
+            }
+        }
+
+        // 所有选择器都未找到结果
+        return [];
+    }
+
+    /**
+     * 使用选择器数组回退查找第一个元素
+     *
+     * 此方法是 findWithFallback() 的便捷版本，只返回第一个匹配的元素。
+     *
+     * @param  array<int, array{selector: string, type?: string, attribute?: string}>  $selectors  选择器数组
+     * @param  DOMElement|null  $contextNode  上下文节点（可选）
+     * @return Element|null 第一个匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstWithFallback([
+     *     ['selector' => '.main-title'],
+     *     ['selector' => '//h1[@class="title"]', 'type' => 'xpath'],
+     *     ['selector' => '/html/body/h1', 'type' => 'xpath']
+     * ]);
+     */
+    public function findFirstWithFallback(
+        array $selectors,
+        ?DOMElement $contextNode = null
+    ): ?Element {
+        $results = $this->findWithFallback($selectors, $contextNode);
+
+        if (empty($results)) {
+            return null;
+        }
+
+        // 返回第一个结果（排除字符串类型的结果，如 ::text 或 ::attr）
+        foreach ($results as $result) {
+            if ($result instanceof Element) {
+                return $result;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 按路径查找元素（支持绝对路径和相对路径）
+     *
+     * 此方法支持类似文件系统的路径语法来定位元素，提供完整的全路径选择能力：
+     * - /html/body/div[1] - XPath 绝对路径
+     * - //div[@class="item"] - XPath 相对路径
+     * - div/div/span - CSS 路径（从根开始）
+     * - div[@class="container"]/div - 带XPath条件的路径
+     * - div.content > div.pages-date > span - CSS 组合选择器路径
+     *
+     * 全路径选择器优势：
+     * 1. 精确定位：使用完整的DOM路径，避免歧义
+     * 2. 高效查询：直接定位到目标元素，减少搜索范围
+     * 3. 灵活组合：支持CSS选择器和XPath表达式的混合使用
+     *
+     * @param  string  $path  元素路径（CSS选择器或XPath表达式）
+     * @param  bool  $relative  是否为相对路径（默认false，表示绝对路径）
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * // XPath 绝对路径（从根元素开始）
+     * $elements = $doc->findByPath('/html/body/div[3]/div[1]/div/div[1]/span');
+     *
+     * // XPath 相对路径（任意位置）
+     * $elements = $doc->findByPath('//div[@class="item"]/span');
+     *
+     * // CSS 组合选择器路径
+     * $elements = $doc->findByPath('div.content > div.pages-date > span');
+     *
+     * // 混合使用CSS和XPath
+     * $elements = $doc->findByPath('div.container/div[@class="item"]/a');
+     */
+    public function findByPath(string $path, bool $relative = false): array
+    {
+        try {
+            // 如果是相对路径，转换为绝对路径
+            if (!$relative) {
+                // 确保以 / 开头
+                if (!str_starts_with($path, '/')) {
+                    $path = '/' . $path;
+                }
+            }
+            
+            // 将路径转换为 XPath
+            $xpathExpression = $this->pathToXPath($path);
+            return $this->xpath($xpathExpression);
+        } catch (\Exception $e) {
+            // 如果路径解析失败，尝试作为CSS选择器处理
+            return $this->find($path);
+        }
+    }
+
+    /**
+     * 将路径表达式转换为 XPath
+     *
+     * 智能识别路径类型并进行转换：
+     * - XPath 路径（以 / 或 // 开头）：直接返回
+     * - CSS 选择器：转换为 XPath 表达式
+     * - 混合路径：保留 XPath 条件，转换 CSS 选择器部分
+     *
+     * 全路径选择器支持：
+     * 1. 纯 XPath 绝对路径：/html/body/div[1]/div[2]/span
+     * 2. 纯 XPath 相对路径：//div[@class="container"]/p
+     * 3. CSS 全路径：div.container > div.content > p.title
+     * 4. 混合路径：div.container/div[@class="item"]/a
+     *
+     * @param  string  $path  路径表达式
+     * @return string XPath 表达式
+     *
+     * @example
+     * // XPath 路径，直接返回
+     * $xpath = $this->pathToXPath('/html/body/div[1]');
+     *
+     * // CSS 路径，转换为 XPath
+     * $xpath = $this->pathToXPath('div.container > p');
+     *
+     * // 混合路径
+     * $xpath = $this->pathToXPath('//div[@class="item"]/p');
+     *
+     * // 复杂全路径
+     * $xpath = $this->pathToXPath('/html/body/div[3]/div[@class="content"]/h1');
+     */
+    protected function pathToXPath(string $path): string
+    {
+        // 检测 XPath 绝对路径（以单个 / 开头）
+        if (preg_match('/^\/(?!\/)/', $path)) {
+            // 确保是有效的 XPath 路径
+            if ($this->isValidXPath($path)) {
+                return $path;
+            }
+        }
+
+        // 检测 XPath 相对路径（以 // 开头）
+        if (preg_match('/^\/\//', $path)) {
+            if ($this->isValidXPath($path)) {
+                return $path;
+            }
+        }
+
+        // 如果是 CSS 路径（使用 >、空格等组合器），转换为 XPath
+        try {
+            $xpath = Query::cssToXpath($path);
+
+            // 如果原始路径以 / 开头，确保 XPath 也是绝对路径
+            if (str_starts_with($path, '/') && !str_starts_with($xpath, '/')) {
+                $xpath = '/html' . $xpath;
+            }
+
+            return $xpath;
+        } catch (\Exception $e) {
+            // 如果转换失败，直接返回原路径
+            return $path;
+        }
+    }
+
+    /**
+     * 验证是否为有效的 XPath 表达式
+     *
+     * 此方法检查字符串是否包含 XPath 特征，用于区分 CSS 选择器和 XPath 表达式。
+     *
+     * @param  string  $expression  表达式
+     * @return bool 如果是有效的 XPath 表达式返回 true
+     *
+     * @example
+     * $isValid = $doc->isValidXPath('/html/body/div');          // true
+     * $isValid = $doc->isValidXPath('//div[@class="item"]');     // true
+     * $isValid = $doc->isValidXPath('div.container');          // false
+     * $isValid = $doc->isValidXPath('.class');                  // false
+     */
+    protected function isValidXPath(string $expression): bool
+    {
+        // XPath 特征：包含 @、//、/text()、/comment()、/node() 等
+        $xpathPatterns = [
+            '/\[@/',           // 属性选择器 [@attr="value"]
+            '/\/\//',          // 相对路径 //
+            '/\/text\(\)/i',   // text() 函数
+            '/\/comment\(\)/i',// comment() 函数
+            '/\/node\(\)/i',   // node() 函数
+            '/position\(\)/i',  // position() 函数
+            '/last\(\)/i',     // last() 函数
+            '/count\(/i',      // count() 函数
+            '/contains\(/i',    // contains() 函数
+            '/starts-with\(/i',// starts-with() 函数
+            '/string-length\(/i' // string-length() 函数
+        ];
+
+        foreach ($xpathPatterns as $pattern) {
+            if (preg_match($pattern, $expression)) {
+                return true;
+            }
+        }
+
+        // 检查是否是路径结构（包含 / 和 [n]）
+        if (preg_match('/^\/[a-z0-9_\/\[\]@\=\s\"\'\(\)\.]+$/i', $expression)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 获取所有匹配的文本内容（包括嵌套元素）
+     * 
+     * @param  string  $selector  选择器表达式
+     * @param  string  $type  选择器类型
+     * @param  bool  $trim  是否去除空白
+     * @param  bool  $unique  是否去重
+     * @return array<int, string> 文本数组
+     */
+    public function allTexts(string $selector, string $type = Query::TYPE_CSS, bool $trim = true, bool $unique = false): array
+    {
+        $texts = [];
+        $elements = $this->find($selector, $type);
+        
+        foreach ($elements as $element) {
+            $text = $element instanceof Element ? $element->text() : (string)$element;
+            if ($trim) {
+                $text = trim($text);
+            }
+            if ($text !== '') {
+                $texts[] = $text;
+            }
+        }
+        
+        return $unique ? array_values(array_unique($texts)) : $texts;
+    }
+
+    /**
      * 查找属性值（支持 ::attr(name) 伪元素）
      *
      * @param  string  $expression  选择器表达式
@@ -1003,6 +1688,416 @@ class Document
             $expression .= "::attr({$attrName})";
         }
         return $this->find($expression, $type);
+    }
+
+    /**
+     * 获取元素的直接文本节点（不包括子元素的文本）
+     *
+     * 此方法用于获取未被任何标签包围的纯文本内容
+     * 支持CSS选择器和XPath选择器
+     *
+     * @param  string  $selector  选择器表达式
+     * @param  string  $type  选择器类型（CSS 或 XPath）
+     * @return array<int, string> 直接文本节点数组
+     *
+     * @example
+     * // 获取 div.content 的直接文本（不包括子元素的文本）
+     * $texts = $doc->directText('div.content');
+     *
+     * // 使用 XPath
+     * $texts = $doc->directText('//div[@class="content"]', Query::TYPE_XPATH);
+     */
+    public function directText(string $selector, string $type = Query::TYPE_CSS): array
+    {
+        // 转换CSS选择器为XPath
+        if (strcasecmp($type, Query::TYPE_CSS) === 0) {
+            $selector = Query::cssToXpath($selector);
+        }
+
+        return $this->doFindTextNodes($selector);
+    }
+
+    /**
+     * 获取元素的所有文本节点（包括子元素的文本）
+     *
+     * @param  string  $selector  选择器表达式
+     * @param  string  $type  选择器类型（CSS 或 XPath）
+     * @param  bool  $trim  是否去除空白
+     * @return array<int, string> 所有文本节点数组
+     *
+     * @example
+     * // 获取 div.content 的所有文本
+     * $texts = $doc->allTextNodes('div.content');
+     *
+     * // 使用 XPath 获取所有文本节点（包括text()函数的结果）
+     * $texts = $doc->allTextNodes('//div[@class="content"]//text()', Query::TYPE_XPATH);
+     */
+    public function allTextNodes(string $selector, string $type = Query::TYPE_CSS, bool $trim = true): array
+    {
+        $xpathExpression = $selector;
+
+        // 如果是CSS选择器，转换为XPath
+        if (strcasecmp($type, Query::TYPE_CSS) === 0) {
+            $xpathExpression = Query::cssToXpath($selector);
+        }
+
+        // 如果是XPath且包含//text()，直接查询
+        if (str_contains($xpathExpression, '//text()')) {
+            $result = [];
+            $nodeList = $this->createXpath()->query($xpathExpression);
+
+            if ($nodeList) {
+                foreach ($nodeList as $node) {
+                    $text = $node->nodeValue ?? '';
+                    if ($trim) {
+                        $text = trim($text);
+                    }
+                    if ($text !== '') {
+                        $result[] = $text;
+                    }
+                }
+            }
+            return $result;
+        }
+
+        // 否则获取元素的文本内容
+        return $this->allTexts($xpathExpression, Query::TYPE_XPATH, $trim, false);
+    }
+
+    /**
+     * 查找包含指定文本的第一个元素
+     *
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByText('Hello');
+     * $element = $doc->findFirstByText('内容', '.content');
+     */
+    public function findFirstByText(string $text, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByText($text, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找包含指定文本（不区分大小写）的第一个元素
+     *
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByTextIgnoreCase('hello');
+     */
+    public function findFirstByTextIgnoreCase(string $text, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByTextIgnoreCase($text, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找具有指定属性值的第一个元素
+     *
+     * @param  string  $attribute  属性名
+     * @param  string|null  $value  属性值（如果为null则只检查属性存在）
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByAttribute('id', 'container');
+     * $element = $doc->findFirstByAttribute('data-id');
+     */
+    public function findFirstByAttribute(string $attribute, ?string $value = null, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByAttribute($attribute, $value, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找包含指定属性值的第一个元素
+     *
+     * @param  string  $attribute  属性名
+     * @param  string  $value  属性值
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByAttributeContains('class', 'active');
+     */
+    public function findFirstByAttributeContains(string $attribute, string $value, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByAttributeContains($attribute, $value, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找属性值以指定前缀开头的第一个元素
+     *
+     * @param  string  $attribute  属性名
+     * @param  string  $prefix  前缀
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByAttributeStartsWith('href', 'https://');
+     */
+    public function findFirstByAttributeStartsWith(string $attribute, string $prefix, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByAttributeStartsWith($attribute, $prefix, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找属性值以指定后缀结尾的第一个元素
+     *
+     * @param  string  $attribute  属性名
+     * @param  string  $suffix  后缀
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByAttributeEndsWith('href', '.pdf');
+     */
+    public function findFirstByAttributeEndsWith(string $attribute, string $suffix, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByAttributeEndsWith($attribute, $suffix, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 查找指定索引位置的元素
+     *
+     * @param  string  $selector  选择器表达式
+     * @param  int  $index  元素索引（从0开始）
+     * @param  string  $type  选择器类型
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findByIndex('li', 2); // 获取第三个li元素
+     * $element = $doc->findByIndex('.item', 0); // 获取第一个.item元素
+     */
+    public function findByIndex(string $selector, int $index, string $type = Query::TYPE_CSS): ?Element
+    {
+        $elements = $this->find($selector, $type);
+        return $elements[$index] ?? null;
+    }
+
+    /**
+     * 查找最后匹配的元素
+     *
+     * @param  string  $selector  选择器表达式
+     * @param  string  $type  选择器类型
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findLast('li');
+     * $element = $doc->findLast('.item');
+     */
+    public function findLast(string $selector, string $type = Query::TYPE_CSS): ?Element
+    {
+        $elements = $this->find($selector, $type);
+        if (empty($elements)) {
+            return null;
+        }
+        return end($elements);
+    }
+
+    /**
+     * 查找指定范围内的元素
+     *
+     * @param  string  $selector  选择器表达式
+     * @param  int  $start  起始索引（从0开始）
+     * @param  int  $end  结束索引（不包含）
+     * @param  string  $type  选择器类型
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * $elements = $doc->findRange('li', 0, 3); // 获取前3个li元素
+     * $elements = $doc->findRange('li', 5, 10); // 获取索引5-9的li元素
+     */
+    public function findRange(string $selector, int $start, int $end, string $type = Query::TYPE_CSS): array
+    {
+        $elements = $this->find($selector, $type);
+        return array_slice($elements, $start, $end - $start);
+    }
+
+    /**
+     * 查找包含指定HTML内容的元素
+     *
+     * @param  string  $html  HTML内容
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * $elements = $doc->findByHtml('<span class="highlight">');
+     */
+    public function findByHtml(string $html, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+
+        foreach ($elements as $element) {
+            if ($element instanceof Element && str_contains($element->html(), $html)) {
+                $result[] = $element;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 查找包含指定HTML内容的第一个元素
+     *
+     * @param  string  $html  HTML内容
+     * @param  string  $selector  选择器表达式（默认为所有元素）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->findFirstByHtml('<span class="highlight">');
+     */
+    public function findFirstByHtml(string $html, string $selector = '*'): ?Element
+    {
+        $elements = $this->findByHtml($html, $selector);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 使用 XPath 获取单个元素
+     *
+     * 此方法返回匹配XPath表达式的第一个元素，是 xpath() 方法的便捷版本。
+     * 适用于只需要单个匹配结果的场景。
+     *
+     * @param  string  $xpathExpression  XPath 表达式
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * // 获取单个元素
+     * $element = $doc->xpathFirst('//div[@class="container"]');
+     * $element = $doc->xpathFirst('//li[1]');
+     *
+     * // 使用全路径获取
+     * $element = $doc->xpathFirst('/html/body/div[1]/div[2]/span');
+     *
+     * // 使用复杂条件
+     * $element = $doc->xpathFirst('//div[@class="item" and @data-active="true"]');
+     */
+    public function xpathFirst(string $xpathExpression): ?Element
+    {
+        $elements = $this->xpath($xpathExpression);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 使用正则表达式查找元素（便捷别名）
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  string|null  $attribute  要匹配的属性名（可选）
+     * @return array<int, Element> 匹配的元素数组
+     *
+     * @example
+     * $elements = $doc->regexFind('/test/');
+     * $elements = $doc->regexFind('/\d+/', 'data-id');
+     */
+    public function regexFind(string $pattern, ?string $attribute = null): array
+    {
+        return $this->findByRegex($pattern, null, $attribute);
+    }
+
+    /**
+     * 使用正则表达式查找第一个元素
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  string|null  $attribute  要匹配的属性名（可选）
+     * @return Element|null 匹配的元素或null
+     *
+     * @example
+     * $element = $doc->regexFirst('/\d{4}-\d{2}-\d{2}/');
+     * $element = $doc->regexFirst('/example\.com/', 'href');
+     */
+    public function regexFirst(string $pattern, ?string $attribute = null): ?Element
+    {
+        $elements = $this->findByRegex($pattern, null, $attribute);
+        return $elements[0] ?? null;
+    }
+
+    /**
+     * 使用 XPath 获取文本内容
+     *
+     * 此方法专门用于获取文本节点，支持 text() 函数和节点类型选择。
+     * 适用于需要提取纯文本内容的场景。
+     *
+     * @param  string  $xpathExpression  XPath 表达式
+     * @return array<int, string> 文本内容数组
+     *
+     * @example
+     * // 获取元素的直接文本节点
+     * $texts = $doc->xpathTexts('//div[@class="item"]/text()');
+     *
+     * // 获取所有文本节点（包括后代）
+     * $texts = $doc->xpathTexts('//div[@class="content"]//text()');
+     *
+     * // 获取段落文本
+     * $texts = $doc->xpathTexts('//p/text()');
+     *
+     * // 使用全路径获取文本
+     * $texts = $doc->xpathTexts('/html/body/div[1]/p/text()');
+     */
+    public function xpathTexts(string $xpathExpression): array
+    {
+        $nodeList = $this->createXpath()->query($xpathExpression);
+
+        $result = [];
+        if ($nodeList) {
+            foreach ($nodeList as $node) {
+                $text = trim($node->nodeValue ?? '');
+                if ($text !== '') {
+                    $result[] = $text;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 使用 XPath 获取属性值
+     *
+     * 此方法专门用于获取元素的属性值，是属性提取的便捷方法。
+     * 返回匹配XPath表达式的所有元素的指定属性值数组。
+     *
+     * @param  string  $xpathExpression  XPath 表达式
+     * @param  string  $attributeName  属性名
+     * @return array<int, string|null> 属性值数组
+     *
+     * @example
+     * // 获取所有链接的 href
+     * $hrefs = $doc->xpathAttrs('//a', 'href');
+     *
+     * // 获取所有图片的 src
+     * $srcs = $doc->xpathAttrs('//img', 'src');
+     *
+     * // 使用条件过滤
+     * $hrefs = $doc->xpathAttrs('//a[contains(@class, "external")]', 'href');
+     *
+     * // 使用全路径
+     * $hrefs = $doc->xpathAttrs('/html/body/div[1]/ul/li/a', 'href');
+     */
+    public function xpathAttrs(string $xpathExpression, string $attributeName): array
+    {
+        $nodeList = $this->createXpath()->query($xpathExpression);
+
+        $result = [];
+        if ($nodeList) {
+            foreach ($nodeList as $node) {
+                if ($node instanceof DOMElement && $node->hasAttribute($attributeName)) {
+                    $result[] = $node->getAttribute($attributeName);
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -1049,6 +2144,73 @@ class Document
     protected function isRemoteUrl(string $url): bool
     {
         return preg_match('/^https?:\/\//i', $url) === 1;
+    }
+
+    /**
+     * 获取调试信息
+     * 
+     * 返回文档的调试信息，包括：
+     * - 文档类型
+     * - 编码
+     * - 节点数量
+     * - 元素数量
+     * - 文本节点数量
+     * 
+     * @return array<string, mixed> 调试信息数组
+     */
+    public function getDebugInfo(): array
+    {
+        $xpath = $this->createXpath();
+        
+        return [
+            'type' => $this->type,
+            'encoding' => $this->encoding,
+            'total_nodes' => $xpath->query('//*')->length,
+            'total_elements' => $xpath->query('//*')->length,
+            'total_text_nodes' => $xpath->query('//text()')->length,
+            'document_element' => $this->document->documentElement ? $this->document->documentElement->tagName : null,
+        ];
+    }
+
+    /**
+     * 验证文档是否有效
+     * 
+     * @return bool 如果文档有效返回 true
+     */
+    public function isValid(): bool
+    {
+        return $this->document->documentElement !== null;
+    }
+
+    /**
+     * 获取文档统计信息
+     * 
+     * @param  string|null  $tagName  标签名（如果提供则统计特定标签）
+     * @return array<string, int> 统计信息数组
+     */
+    public function getStatistics(?string $tagName = null): array
+    {
+        $xpath = $this->createXpath();
+        
+        if ($tagName !== null) {
+            $count = $xpath->query('//' . $tagName)->length;
+            return [$tagName => $count];
+        }
+        
+        // 统计所有元素标签
+        $allElements = $xpath->query('//*');
+        $stats = [];
+        
+        foreach ($allElements as $element) {
+            $tag = $element->nodeName;
+            if (!isset($stats[$tag])) {
+                $stats[$tag] = 0;
+            }
+            $stats[$tag]++;
+        }
+        
+        arsort($stats); // 按数量降序排列
+        return $stats;
     }
 
     /**

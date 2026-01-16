@@ -1431,6 +1431,250 @@ echo "week: " . count($doc->find(':week')) . "\n";
 echo "file: " . count($doc->find(':file')) . "\n";
 echo "image: " . count($doc->find(':image')) . "\n";
 
+// ==================== 示例 39: 文本节点处理 ====================
+
+echo "\n--- 示例 39: 文本节点处理 ---\n\n";
+
+$html39 = '<div class="content">
+    这是直接文本1
+    <span class="highlight">这是span内的文本</span>
+    这是直接文本2
+</div>';
+
+$doc39 = new Document($html39);
+
+// 获取直接文本节点（不包括子元素）
+echo "获取直接文本节点:\n";
+$directTexts = $doc39->directText('div.content');
+echo "直接文本数量: " . count($directTexts) . "\n";
+foreach ($directTexts as $i => $text) {
+    echo "  [$i] $text\n";
+}
+
+// 获取所有文本节点（包括子元素）
+echo "\n获取所有文本节点:\n";
+$allTexts = $doc39->allTextNodes('div.content');
+echo "文本数量: " . count($allTexts) . "\n";
+foreach ($allTexts as $i => $text) {
+    echo "  [$i] $text\n";
+}
+
+// 使用XPath的text()函数
+echo "\n使用XPath的text()函数:\n";
+$xpathTexts = $doc39->find('//div[@class="content"]/text()', Query::TYPE_XPATH);
+echo "文本节点数量: " . count($xpathTexts) . "\n";
+
+// ==================== 示例 40: 便捷查找方法 ====================
+
+echo "\n--- 示例 40: 便捷查找方法 ---\n\n";
+
+$html40 = '<div id="container">
+    <div class="item" data-id="123" data-type="primary">项目1</div>
+    <div class="item" data-id="456">项目2</div>
+    <div class="item active">激活项目</div>
+    <div class="item">项目3</div>
+</div>';
+
+$doc40 = new Document($html40);
+
+// findFirstByText - 查找包含指定文本的第一个元素
+echo "findFirstByText():\n";
+$element = $doc40->findFirstByText('项目1');
+if ($element) {
+    echo "找到: " . trim($element->text()) . "\n";
+}
+
+// findFirstByAttribute - 查找具有指定属性值的第一个元素
+echo "\nfindFirstByAttribute():\n";
+$element = $doc40->findFirstByAttribute('data-id', '123');
+if ($element) {
+    echo "找到: " . trim($element->text()) . "\n";
+}
+
+// findFirstByAttributeContains - 查找属性包含指定值的第一个元素
+echo "\nfindFirstByAttributeContains():\n";
+$element = $doc40->findFirstByAttributeContains('class', 'active');
+if ($element) {
+    echo "找到: " . trim($element->text()) . "\n";
+}
+
+// findFirstByAttributeStartsWith - 查找属性值以指定前缀开头的第一个元素
+echo "\nfindFirstByAttributeStartsWith():\n";
+$element = $doc40->findFirstByAttributeStartsWith('data-id', '1');
+if ($element) {
+    echo "找到: " . trim($element->text()) . "\n";
+}
+
+// findByIndex - 查找指定索引位置的元素
+echo "\nfindByIndex():\n";
+$element = $doc40->findByIndex('.item', 2);
+if ($element) {
+    echo "索引2的元素: " . trim($element->text()) . "\n";
+}
+
+// findLast - 查找最后一个匹配的元素
+echo "\nfindLast():\n";
+$element = $doc40->findLast('.item');
+if ($element) {
+    echo "最后一个元素: " . trim($element->text()) . "\n";
+}
+
+// findRange - 查找指定范围内的元素
+echo "\nfindRange(0, 3):\n";
+$elements = $doc40->findRange('.item', 0, 3);
+echo "找到 " . count($elements) . " 个元素:\n";
+foreach ($elements as $i => $el) {
+    echo "  [$i] " . trim($el->text()) . "\n";
+}
+
+// ==================== 示例 40: 选择器数组回退查找 ====================
+
+echo "\n--- 示例 40: 选择器数组回退查找 ---\n\n";
+
+$html41 = '<!DOCTYPE html>
+<html>
+<head><title>回退查找示例</title></head>
+<body>
+    <div class="main-content">
+        <h1 class="page-title">新版标题</h1>
+        <p>这是新版的内容。</p>
+    </div>
+    <div id="content">
+        <h2 class="article-title">旧版标题</h2>
+    </div>
+    <a href="https://example.com" class="external-link">外部链接</a>
+    <span class="date">2026-01-15</span>
+</body>
+</html>';
+
+$doc41 = new Document($html41);
+
+// 使用 findWithFallback 应对不同网页结构
+echo "使用回退查找获取标题:\n";
+$titles = $doc41->findWithFallback([
+    ['selector' => '.page-title'],                           // 尝试新版
+    ['selector' => '.article-title'],                         // 尝试旧版
+    ['selector' => '//h1[@class="page-title"]', 'type' => 'xpath'], // XPath
+    ['selector' => 'h1, h2']                                  // 通用选择器
+]);
+if (!empty($titles)) {
+    echo "找到标题: " . trim($titles[0]->text()) . "\n";
+} else {
+    echo "未找到标题\n";
+}
+
+// 混合使用 CSS 和 XPath
+echo "\n混合使用多种选择器:\n";
+$elements = $doc41->findWithFallback([
+    ['selector' => '.main-content > h1'],                     // CSS 子选择器
+    ['selector' => '//div[@class="main-content"]/h1', 'type' => 'xpath'], // XPath
+    ['selector' => '/html/body/div/h1', 'type' => 'xpath']    // XPath 绝对路径
+]);
+if (!empty($elements)) {
+    echo "找到元素: " . trim($elements[0]->text()) . "\n";
+}
+
+// 使用正则表达式作为最后备选
+echo "\n使用正则表达式查找日期:\n";
+$dates = $doc41->findWithFallback([
+    ['selector' => 'time.date'],
+    ['selector' => '[data-date]'],
+    ['selector' => '.date'],                                  // 匹配到
+    ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
+]);
+if (!empty($dates)) {
+    echo "找到日期: " . trim($dates[0]->text()) . "\n";
+}
+
+// 查找外部链接
+echo "\n查找外部链接:\n";
+$links = $doc41->findWithFallback([
+    ['selector' => 'a.external-link'],
+    ['selector' => 'a[href^="https"]'],
+    ['selector' => '/^https:\/\//', 'type' => 'regex', 'attribute' => 'href']
+]);
+if (!empty($links)) {
+    echo "找到 " . count($links) . " 个外部链接\n";
+    foreach ($links as $link) {
+        echo "  - " . $link->attr('href') . "\n";
+    }
+}
+
+// 使用 findFirstWithFallback
+echo "\n使用 findFirstWithFallback:\n";
+$titleElement = $doc41->findFirstWithFallback([
+    ['selector' => 'h1.page-title'],
+    ['selector' => 'h2.article-title'],
+    ['selector' => '//h1|//h2', 'type' => 'xpath']
+]);
+if ($titleElement) {
+    echo "首个标题元素: " . trim($titleElement->text()) . " (" . $titleElement->tagName() . ")\n";
+}
+
+// 所有选择器都不匹配的情况
+echo "\n所有选择器都不匹配:\n";
+$results = $doc41->findWithFallback([
+    ['selector' => '.not-exist-1'],
+    ['selector' => '.not-exist-2'],
+    ['selector' => '//div[@class="wrong"]', 'type' => 'xpath']
+]);
+echo "找到元素: " . count($results) . " 个\n";
+
+// ==================== 示例 41: 智能选择器类型检测 ====================
+
+echo "\n--- 示例 41: 智能选择器类型检测 ---\n\n";
+
+// Query::detectSelectorType() 示例
+echo "自动检测选择器类型:\n";
+$testSelectors = [
+    'div.container',
+    '.active',
+    '#main',
+    'ul > li',
+    '//div[@class="item"]',
+    '/html/body/div[1]',
+    '//a[contains(@href, "example")]',
+    '/\d{4}-\d{2}-\d{2}/',
+    '/test.*/i'
+];
+
+foreach ($testSelectors as $sel) {
+    $type = Query::detectSelectorType($sel);
+    echo "  '$sel' -> $type\n";
+}
+
+// Query::isXPathAbsolute() 示例
+echo "\n检测 XPath 绝对路径:\n";
+$absoluteTests = [
+    '/html/body/div' => true,
+    '/html/body//div[@class="item"]' => true,
+    '//div' => false,
+    'div.container' => false,
+    '.class' => false
+];
+
+foreach ($absoluteTests as $path => $expected) {
+    $result = Query::isXPathAbsolute($path);
+    $status = $result === $expected ? '✓' : '✗';
+    echo "  $status isXPathAbsolute('$path'): " . ($result ? 'true' : 'false') . "\n";
+}
+
+// Query::isXPathRelative() 示例
+echo "\n检测 XPath 相对路径:\n";
+$relativeTests = [
+    '//div[@class="item"]' => true,
+    '//a[@href]' => true,
+    '//ul/li' => true,
+    '/html/body' => false,
+    'div' => false
+];
+
+foreach ($relativeTests as $path => $expected) {
+    $result = Query::isXPathRelative($path);
+    $status = $result === $expected ? '✓' : '✗';
+    echo "  $status isXPathRelative('$path'): " . ($result ? 'true' : 'false') . "\n";
+}
+
 // ==================== 总结 ====================
 
 echo "\n=== 示例完成 ===\n";

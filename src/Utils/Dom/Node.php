@@ -241,6 +241,124 @@ abstract class Node
     }
 
     /**
+     * 获取节点的规范化文本内容（去除多余空白）
+     * 
+     * @return string 规范化的文本内容
+     */
+    public function normalizedText(): string
+    {
+        $text = $this->text();
+        // 替换多个空白为单个空格
+        $text = preg_replace('/\s+/', ' ', $text);
+        // 去除首尾空白
+        return trim($text);
+    }
+
+    /**
+     * 获取节点的HTML内容（格式化）
+     * 
+     * @param  bool  $format  是否格式化（美化输出）
+     * @return string HTML内容
+     */
+    public function formattedHtml(bool $format = true): string
+    {
+        $doc = $this->node->ownerDocument;
+        if ($doc === null) {
+            return '';
+        }
+
+        // 保存原始格式设置
+        $originalFormat = $doc->formatOutput;
+        $doc->formatOutput = $format;
+        
+        $html = $doc->saveHTML($this->node);
+        
+        // 恢复原始格式设置
+        $doc->formatOutput = $originalFormat;
+        
+        return $html;
+    }
+
+    /**
+     * 获取节点的 outerHTML（包括自身）
+     * 
+     * @return string outerHTML 内容
+     */
+    public function outerHtml(): string
+    {
+        return $this->html();
+    }
+
+    /**
+     * 获取节点在兄弟节点中的索引（从0开始）
+     * 
+     * @return int 索引值
+     */
+    public function index(): int
+    {
+        return $this->getNodeIndex();
+    }
+
+    /**
+     * 获取节点路径（从根节点到当前节点的路径）
+     * 
+     * @param  string  $separator  路径分隔符
+     * @return string 节点路径
+     */
+    public function getPath(string $separator = ' > '): string
+    {
+        $path = [];
+        $current = $this->node;
+
+        while ($current !== null) {
+            if ($current->nodeType === XML_ELEMENT_NODE) {
+                $nodeName = $current->nodeName;
+                // 添加索引以区分同名兄弟节点
+                $index = 1;
+                $sibling = $current->previousSibling;
+                while ($sibling !== null) {
+                    if ($sibling->nodeName === $nodeName) {
+                        $index++;
+                    }
+                    $sibling = $sibling->previousSibling;
+                }
+                array_unshift($path, $nodeName . ($index > 1 ? "[$index]" : ''));
+            }
+            $current = $current->parentNode;
+        }
+
+        return implode($separator, $path);
+    }
+
+    /**
+     * 检查节点是否包含指定文本
+     * 
+     * @param  string  $text  要检查的文本
+     * @param  bool  $caseSensitive  是否区分大小写
+     * @return bool 如果包含返回 true
+     */
+    public function containsText(string $text, bool $caseSensitive = false): bool
+    {
+        $nodeText = $this->text();
+        if (!$caseSensitive) {
+            $nodeText = strtolower($nodeText);
+            $text = strtolower($text);
+        }
+        return str_contains($nodeText, $text);
+    }
+
+    /**
+     * 检查节点是否包含指定HTML
+     * 
+     * @param  string  $html  要检查的HTML
+     * @return bool 如果包含返回 true
+     */
+    public function containsHtml(string $html): bool
+    {
+        return str_contains($this->html(), $html);
+    }
+
+    /**
      * 设置节点值
      * 
      * @param  string|int|float|bool  $value  节点值
@@ -529,11 +647,11 @@ abstract class Node
     }
 
     /**
-     * 获取节点在父节点的子节点列表中的索引
+     * 节点在父节点的子节点列表中的索引
      * 
      * @return int
      */
-    public function index(): int
+    public function getNodeIndex(): int
     {
         $index = 0;
         $node = $this->node->previousSibling;

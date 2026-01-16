@@ -17,6 +17,8 @@
 - [编码处理](#编码处理)
 - [错误处理](#错误处理)
 - [高级用法](#高级用法)
+- [选择器数组回退查找](#选择器数组回退查找)
+- [智能选择器类型检测](#智能选择器类型检测)
 - [最佳实践](#最佳实践)
 - [常见问题](#常见问题)
 
@@ -845,6 +847,137 @@ $lastElement = $doc->xpath('(//div)[last()]');
 $elements = $doc->xpath('//div[@class="container" and count(.//p) > 2]');
 ```
 
+### 选择器数组回退查找
+
+选择器数组回退查找是一项强大的功能，允许您传入多个选择器，按顺序尝试，找到第一个非空结果即返回：
+
+```php
+// 应对不同网页结构
+$titles = $doc->findWithFallback([
+    ['selector' => '.main-content > h1.title'],      // 新版结构
+    ['selector' => '#content > h1.article-title'],    // 旧版结构
+    ['selector' => '//h1[contains(@class, "title")]', 'type' => 'xpath']
+]);
+
+if (!empty($titles)) {
+    echo "标题: " . $titles[0]->text() . "\n";
+}
+
+// 使用 findFirstWithFallback 获取单个元素
+$element = $doc->findFirstWithFallback([
+    ['selector' => '.main-title'],
+    ['selector' => 'h1.title'],
+    ['selector' => '//h1[1]', 'type' => 'xpath']
+]);
+
+if ($element !== null) {
+    echo $element->text();
+}
+
+// 混合使用 CSS、XPath 和正则表达式
+$dates = $doc->findWithFallback([
+    ['selector' => 'time.date'],
+    ['selector' => '[data-date]'],
+    ['selector' => '.date'],
+    ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
+]);
+```
+
+### 智能选择器类型检测
+
+库提供了智能的选择器类型检测功能：
+
+```php
+use zxf\Utils\Dom\Query;
+
+// 自动检测选择器类型
+$type = Query::detectSelectorType('div.container');           // 'css'
+$type = Query::detectSelectorType('//div[@class="item"]');      // 'xpath'
+$type = Query::detectSelectorType('/\d{4}-\d{2}-\d{2}/');      // 'regex'
+
+// 检测 XPath 路径类型
+$isAbsolute = Query::isXPathAbsolute('/html/body/div');         // true
+$isRelative = Query::isXPathRelative('//div[@class="item"]');   // true
+```
+
+---
+
+## 选择器数组回退查找
+
+选择器数组回退查找是一项强大的功能，允许您传入多个选择器，按顺序尝试，找到第一个非空结果即返回。这为处理不同结构的网页提供了极大的灵活性。
+
+### 基本用法
+
+```php
+// 应对不同网页结构
+$titles = $doc->findWithFallback([
+    ['selector' => '.main-content > h1.title'],      // 新版结构
+    ['selector' => '#content > h1.article-title'],    // 旧版结构
+    ['selector' => '//h1[contains(@class, "title")]', 'type' => 'xpath']
+]);
+
+if (!empty($titles)) {
+    echo "标题: " . $titles[0]->text() . "\n";
+}
+```
+
+### findFirstWithFallback
+
+```php
+// 使用 findFirstWithFallback 获取单个元素
+$element = $doc->findFirstWithFallback([
+    ['selector' => '.main-title'],
+    ['selector' => 'h1.title'],
+    ['selector' => '//h1[1]', 'type' => 'xpath']
+]);
+
+if ($element !== null) {
+    echo $element->text();
+}
+```
+
+### 混合使用多种选择器
+
+```php
+// 混合使用 CSS、XPath 和正则表达式
+$dates = $doc->findWithFallback([
+    ['selector' => 'time.date'],
+    ['selector' => '[data-date]'],
+    ['selector' => '.date'],
+    ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
+]);
+```
+
+---
+
+## 智能选择器类型检测
+
+库提供了智能的选择器类型检测功能，可以自动识别 CSS、XPath 和正则表达式。
+
+### 检测选择器类型
+
+```php
+use zxf\Utils\Dom\Query;
+
+// 自动检测选择器类型
+$type = Query::detectSelectorType('div.container');           // 'css'
+$type = Query::detectSelectorType('//div[@class="item"]');      // 'xpath'
+$type = Query::detectSelectorType('/\d{4}-\d{2}-\d{2}/');      // 'regex'
+```
+
+### 检测 XPath 路径类型
+
+```php
+// 检测 XPath 绝对路径
+$isAbsolute = Query::isXPathAbsolute('/html/body/div');         // true
+$isAbsolute = Query::isXPathAbsolute('//div');                 // false
+
+// 检测 XPath 相对路径
+$isRelative = Query::isXPathRelative('//div[@class="item"]');   // true
+$isRelative = Query::isXPathRelative('/html/body');           // false
+```
+
+---
 ---
 
 ## 最佳实践

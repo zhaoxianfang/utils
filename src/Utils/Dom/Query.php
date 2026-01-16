@@ -10,23 +10,75 @@ use zxf\Utils\Dom\Exceptions\InvalidSelectorException;
 
 /**
  * CSS 选择器到 XPath 转换器
- * 
+ *
  * 将 CSS 选择器表达式转换为 XPath 表达式
- * 支持几乎所有 CSS3 选择器语法
- * 
- * 特性：
- * - 完整的 CSS3 选择器支持
- * - 支持 XPath 直接使用
- * - 支持 text() 等 XPath 函数
+ * 支持几乎所有 CSS3 选择器语法，并可直接使用 XPath 表达式
+ *
+ * 主要功能：
+ * - 完整的 CSS3 选择器支持（类选择器、ID选择器、属性选择器、伪类、伪元素等）
+ * - 支持 XPath 直接使用（自动识别以 / 或 // 开头的路径）
+ * - 支持 text()、comment() 等 XPath 函数
+ * - 支持正则表达式选择器
  * - PHP 8.2+ 类型系统
- * - 伪类和伪元素支持
- * 
- * @example
+ * - 选择器编译缓存机制，提升性能
+ *
+ * 特性：
+ * - 自动识别 XPath 路径（以 / 或 // 开头的表达式）
+ * - 智能处理 CSS 组合器（空格、>、+、~）
+ * - 支持复杂的伪类表达式（:not()、:nth-child()、:contains() 等）
+ * - 支持伪元素（::text、::attr() 等）
+ * - 属性选择器完整支持（=、!=、^=、$=、*=、~=、|=）
+ * - 支持逗号分隔的多选择器
+ *
+ * 使用示例：
+ * <code>
+ * // CSS 选择器转换为 XPath
  * $xpath = Query::compile('.item.active');
  * $xpath = Query::compile('div[data-id="123"]', Query::TYPE_CSS);
- * $result = $document->find('//div[contains(text(), "hello")]', Query::TYPE_XPATH);
- * 
+ *
+ * // 直接使用 XPath
+ * $xpath = Query::compile('//div[@class="content"]', Query::TYPE_XPATH);
+ * $xpath = Query::compile('/html/body/div[1]', Query::TYPE_XPATH);
+ *
+ * // 使用伪元素
+ * $xpath = Query::compile('div.content::text');
+ * $xpath = Query::compile('a.link::attr(href)');
+ *
+ * // 使用正则表达式
+ * $pattern = Query::compile('/\d{4}-\d{2}-\d{2}/', Query::TYPE_REGEX);
+ *
+ * // 在 Document 中使用
+ * $doc = new Document($html);
+ * $elements = $doc->find('div.container > .item.active');
+ * $elements = $doc->find('//div[@class="item"]', Query::TYPE_XPATH);
+ * $texts = $doc->find('//div[@class="content"]/text()');
+ * </code>
+ *
+    /**
+     * 支持的 CSS 选择器：
+     * - 基本选择器：*、tagname、.classname、#id
+     * - 组合器：空格（后代）、>（子元素）、+（相邻兄弟）、~（所有兄弟）
+     * - 属性选择器：[attr]、[attr="value"]、[attr~="value"]、[attr|^="value"]、[attr$="value"]、[attr*="value"]
+     * - 伪类：:first-child、:last-child、:nth-child(n)、:nth-of-type(n)、:not(selector)、:contains(text)
+     * - 伪元素：::text（获取文本）、::attr(name)（获取属性值）
+     * - 不区分大小写的属性选择器：[attr i="value"]
+     * - 属性选择器：[attr!=value] 不等于
+     *
+     * 支持的 XPath 功能：
+     * - 路径表达式：/（绝对路径）、//（相对路径）、..（父节点）
+     * - 轴：child、descendant、parent、ancestor、following-sibling、preceding-sibling、ancestor-or-self、descendant-or-self
+     * - 函数：text()、comment()、normalize-space()、contains()、starts-with()、ends-with()、substring()、string-length()、number()、sum()、count()
+     * - 节点测试：node()、text()、comment()、element()
+     * - 布尔函数：true()、false()、not()、and、or
+ *
+ * 性能优化：
+ * - 选择器编译结果缓存
+ * - 正则表达式模式预定义常量
+ * - 避免重复解析和编译
+ *
  * @package zxf\Utils\Dom
+ * @author  Your Name
+ * @version 1.0.0
  */
 class Query
 {
@@ -41,8 +93,24 @@ class Query
     public const TYPE_XPATH = 'xpath';
 
     /**
+     * 正则表达式选择器类型
+     */
+    public const TYPE_REGEX = 'regex';
+
+    /**
+     * 常用正则表达式模式（优化性能，避免重复编译）
+     */
+    public const PATTERN_PSEUDO_ELEMENT = '/::([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
+    public const PATTERN_PSEUDO_CLASS = '/:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/';
+    public const PATTERN_ATTRIBUTE = '/\[([a-zA-Z0-9_-]+)([*~|^$]?=)?([\"\']?)(.*?)\3\]/';
+    public const PATTERN_ID = '/#([a-zA-Z0-9_-]+)/';
+    public const PATTERN_CLASS = '/\.([a-zA-Z0-9_-]+)/';
+    public const PATTERN_XPATH_ABSOLUTE = '/^\//';
+    public const PATTERN_XPATH_RELATIVE = '/^\/\//';
+
+    /**
      * 已编译的选择器缓存
-     * 
+     *
      * @var array<string, string>
      */
     protected static array $compiled = [];
@@ -99,17 +167,39 @@ class Query
 
     /**
      * 编译选择器表达式
-     * 
+     *
+     * 将选择器表达式编译为 XPath 表达式
+     * 支持三种类型：CSS选择器、XPath表达式和正则表达式
+     *
      * @param  string  $expression  选择器表达式
-     * @param  string  $type  选择器类型（CSS 或 XPath）
-     * @return string 编译后的 XPath 表达式
-     * 
+     *                           CSS示例：'div.container > .item.active'
+     *                           XPath示例：'//div[@class="item"]'
+     *                           正则示例：'/\d{4}-\d{2}-\d{2}/'
+     * @param  string  $type  选择器类型（默认为 CSS）
+     *                       - Query::TYPE_CSS: CSS 选择器（默认）
+     *                       - Query::TYPE_XPATH: XPath 表达式
+     *                       - Query::TYPE_REGEX: 正则表达式
+     * @return string 编译后的 XPath 表达式或原始正则表达式
+     *
      * @throws InvalidSelectorException 当选择器无效时抛出
      * @throws RuntimeException 当类型不支持时抛出
+     *
+     * @example
+     * // CSS 选择器
+     * $xpath = Query::compile('.item.active');
+     * $xpath = Query::compile('div[data-id="123"]', Query::TYPE_CSS);
+     * $xpath = Query::compile('ul > li:first-child');
+     *
+     * // XPath 表达式（直接返回）
+     * $xpath = Query::compile('//div[@class="content"]', Query::TYPE_XPATH);
+     * $xpath = Query::compile('/html/body/div[1]', Query::TYPE_XPATH);
+     *
+     * // 正则表达式（直接返回，仅验证语法）
+     * $regex = Query::compile('/hello.*world/', Query::TYPE_REGEX);
      */
     public static function compile(string $expression, string $type = self::TYPE_CSS): string
     {
-        if (! in_array(strtolower($type), [self::TYPE_CSS, self::TYPE_XPATH], true)) {
+        if (! in_array(strtolower($type), [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX], true)) {
             throw new RuntimeException(sprintf('不支持的表达式类型 "%s"。', $type));
         }
 
@@ -119,8 +209,22 @@ class Query
             throw new InvalidSelectorException('选择器表达式不能为空。');
         }
 
-        // 直接使用 XPath
+        // 正则表达式类型：原样返回（在 Document 层处理）
+        if (strcasecmp($type, self::TYPE_REGEX) === 0) {
+            // 验证正则表达式语法
+            @preg_match($expression, '');
+            if (preg_last_error() !== PREG_NO_ERROR) {
+                throw new InvalidSelectorException(sprintf('无效的正则表达式: "%s"。错误代码: %d', $expression, preg_last_error()));
+            }
+            return $expression;
+        }
+
+        // 直接使用 XPath，需要验证 XPath 语法
         if (strcasecmp($type, self::TYPE_XPATH) === 0) {
+            // 验证 XPath 表达式基本语法
+            if (self::isInvalidXPath($expression)) {
+                throw new InvalidSelectorException(sprintf('无效的 XPath 表达式: "%s"。', $expression));
+            }
             return $expression;
         }
 
@@ -141,6 +245,29 @@ class Query
         self::$compiled[$cacheKey] = $compiled;
 
         return $compiled;
+    }
+
+    /**
+     * 验证 XPath 表达式的基本语法
+     * 
+     * @param  string  $xpath  XPath 表达式
+     * @return bool 如果 XPath 无效返回 true
+     */
+    protected static function isInvalidXPath(string $xpath): bool
+    {
+        // 检查括号是否匹配
+        $parenCount = substr_count($xpath, '(') - substr_count($xpath, ')');
+        if ($parenCount !== 0) {
+            return true;
+        }
+        
+        // 检查方括号是否匹配
+        $bracketCount = substr_count($xpath, '[') - substr_count($xpath, ']');
+        if ($bracketCount !== 0) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -166,7 +293,7 @@ class Query
 
     /**
      * 清空编译缓存
-     * 
+     *
      * @return void
      */
     public static function clearCompiled(): void
@@ -175,21 +302,116 @@ class Query
     }
 
     /**
+     * 检测是否为 XPath 绝对路径
+     *
+     * 判断字符串是否为以 / 开头的 XPath 绝对路径表达式。
+     *
+     * @param  string  $expression  表达式
+     * @return bool 如果是 XPath 绝对路径返回 true
+     *
+     * @example
+     * $isXPath = Query::isXPathAbsolute('/html/body/div');     // true
+     * $isXPath = Query::isXPathAbsolute('//div');               // false
+     * $isXPath = Query::isXPathAbsolute('div.container');       // false
+     */
+    public static function isXPathAbsolute(string $expression): bool
+    {
+        return preg_match('/^\/(?!\/)/', $expression) === 1;
+    }
+
+    /**
+     * 检测是否为 XPath 相对路径
+     *
+     * 判断字符串是否为以 // 开头的 XPath 相对路径表达式。
+     *
+     * @param  string  $expression  表达式
+     * @return bool 如果是 XPath 相对路径返回 true
+     *
+     * @example
+     * $isXPath = Query::isXPathRelative('//div[@class="item"]'); // true
+     * $isXPath = Query::isXPathRelative('/html/body/div');       // false
+     * $isXPath = Query::isXPathRelative('div.container');        // false
+     */
+    public static function isXPathRelative(string $expression): bool
+    {
+        return preg_match('/^\/\//', $expression) === 1;
+    }
+
+    /**
+     * 智能检测选择器类型
+     *
+     * 自动检测选择器是 CSS、XPath 还是正则表达式。
+     *
+     * @param  string  $selector  选择器表达式
+     * @return string 选择器类型（'css'、'xpath' 或 'regex'）
+     *
+     * @example
+     * $type = Query::detectSelectorType('div.container');              // 'css'
+     * $type = Query::detectSelectorType('/html/body/div');             // 'xpath'
+     * $type = Query::detectSelectorType('//div[@class="item"]');        // 'xpath'
+     * $type = Query::detectSelectorType('/\d{4}-\d{2}-\d{2}/');      // 'regex'
+     */
+    public static function detectSelectorType(string $selector): string
+    {
+        // 检测正则表达式（以 / 开头并以 / 结尾）
+        if (preg_match('/^\/.*\/[imsxuADUX]*$/', $selector)) {
+            return self::TYPE_REGEX;
+        }
+
+        // 检测 XPath 绝对路径
+        if (self::isXPathAbsolute($selector)) {
+            return self::TYPE_XPATH;
+        }
+
+        // 检测 XPath 相对路径
+        if (self::isXPathRelative($selector)) {
+            return self::TYPE_XPATH;
+        }
+
+        // 默认为 CSS 选择器
+        return self::TYPE_CSS;
+    }
+
+    /**
      * 将 CSS 选择器转换为 XPath
-     * 
-     * 支持的 CSS 选择器语法：
+     *
+     * 支持完整的 CSS3 选择器语法，包括：
      * - 基本选择器: *, div, .class, #id
-     * - 属性选择器: [attr], [attr=value], [attr~=value], [attr|=value], [attr^=value], [attr$=value], [attr*=value]
+     * - 全路径选择器: /html/body/div, //div[@class="item"]（XPath风格）
+     * - 属性选择器: [attr], [attr=value], [attr~=value], [attr|=value], [attr^=value], [attr$=value], [attr*=value], [attr!=value]
      * - 组合选择器: 后代 (空格), 子元素 (>), 相邻兄弟 (+), 通用兄弟 (~)
      * - 多选择器: 逗号分隔（伪类参数中的逗号不会被分割）
-     * - 伪类选择器: :first-child, :last-child, :nth-child, :empty, :contains, :has, :not 等
-     * 
-     * @param  string  $selector  CSS 选择器
+     * - 伪类选择器: :first-child, :last-child, :nth-child, :empty, :contains, :has, :not 等（150+种）
+     *
+     * @param  string  $selector  CSS 选择器或 XPath 表达式
      * @return string XPath 表达式
+     *
+     * @example
+     * // CSS 选择器
+     * $xpath = Query::cssToXpath('div.container > .item.active');
+     *
+     * // XPath 风格的绝对路径（直接返回）
+     * $xpath = Query::cssToXpath('/html/body/div[3]/div[1]/div/div[1]');
+     *
+     * // XPath 风格的相对路径（直接返回）
+     * $xpath = Query::cssToXpath('//div[@class="item"]');
+     *
+     * // 组合选择器
+     * $xpath = Query::cssToXpath('div.content > div.pages-date > span');
      */
-    protected static function cssToXpath(string $selector): string
+    public static function cssToXpath(string $selector): string
     {
         $selector = trim($selector);
+
+        // 检测 XPath 绝对路径（以 / 开头，但不是 //）
+        if (self::isXPathAbsolute($selector)) {
+            return $selector;
+        }
+
+        // 检测 XPath 相对路径（以 // 开头）
+        if (self::isXPathRelative($selector)) {
+            return $selector;
+        }
 
         // 处理多个选择器（逗号分隔），需要避免伪类参数中的逗号
         if (str_contains($selector, ',')) {
@@ -212,8 +434,12 @@ class Query
 
         foreach ($segments as $segment) {
             if ($isFirst) {
-                // 第一个段使用 // 开头
-                $xpath = '//' . static::compileSegment($segment, true);
+                // 第一个段：如果是XPath则直接使用，否则使用 // 开头
+                if (isset($segment['isXPath']) && $segment['isXPath'] === true) {
+                    $xpath = static::compileSegment($segment, true);
+                } else {
+                    $xpath = '//' . static::compileSegment($segment, true);
+                }
                 $isFirst = false;
             } else {
                 // 后续段根据组合器决定
@@ -272,29 +498,92 @@ class Query
 
     /**
      * 解析 CSS 选择器为段数组（公开方法）
-     * 
-     * @param  string  $selector  CSS 选择器
+     *
+     * 支持的组合器：
+     * - 空格 ' '：后代选择器（所有后代元素）
+     * - 大于号 '>'：直接子元素选择器
+     * - 加号 '+'：相邻兄弟选择器（紧随其后的兄弟）
+     * - 波浪号 '~：通用兄弟选择器（之后的所有兄弟）
+     *
+     * 全路径支持：
+     * - / 开头的路径（绝对路径）：/html/body/div[1] - 直接返回XPath表达式
+     * - // 开头的路径（相对路径）：//div[@class="item"] - 直接返回XPath表达式
+     * - 混合路径：div.content > div.pages-date > span - 转换为XPath
+     *
+     * 处理顺序：
+     * 1. 检测并保留 XPath 风格路径（/ 或 // 开头）
+     * 2. 处理多选择器（逗号分隔）
+     * 3. 解析组合器和选择器段
+     * 4. 解析每个段的标签、ID、类、属性、伪类
+     *
+     * @param  string  $selector  CSS 选择器或 XPath 路径
      * @return array<int, array> 段数组
+     *
+     * @example
+     * // XPath 绝对路径
+     * $segments = Query::parseSelector('/html/body/div[1]');
+     *
+     * // XPath 相对路径
+     * $segments = Query::parseSelector('//div[@class="item"]');
+     *
+     * // CSS 组合选择器
+     * $segments = Query::parseSelector('div.content > div.pages-date > span');
      */
     public static function parseSelector(string $selector): array
     {
         $segments = [];
-        
-        // 先用特殊标记替换 > + ~ 组合器（只匹配前后是空格或字符串边界的）
-        $temp = preg_replace('/\s+([>+~])\s+/', chr(0) . '$1' . chr(0), $selector);
-        $temp = preg_replace('/^([>+~])\s+/', chr(0) . '$1' . chr(0), $temp);
-        $temp = preg_replace('/\s+([>+~])$/', chr(0) . '$1' . chr(0), $temp);
-        // 用 chr(0) 分割
+
+        // 处理以 / 开头的 XPath 风格路径（如 /html/body/div）
+        if (preg_match(self::PATTERN_XPATH_ABSOLUTE, $selector)) {
+            // 这是 XPath 路径，直接返回
+            $segments[] = [
+                'combinator' => '',
+                'tag' => '*',
+                'id' => '',
+                'classes' => [],
+                'attributes' => [],
+                'pseudo' => '',
+                'isXPath' => true,
+                'xpath' => $selector,
+            ];
+            return $segments;
+        }
+
+        // 处理以 // 开头的 XPath 风格路径（如 //div[@class="item"]）
+        if (preg_match(self::PATTERN_XPATH_RELATIVE, $selector)) {
+            $segments[] = [
+                'combinator' => '',
+                'tag' => '*',
+                'id' => '',
+                'classes' => [],
+                'attributes' => [],
+                'pseudo' => '',
+                'isXPath' => true,
+                'xpath' => $selector,
+            ];
+            return $segments;
+        }
+
+        // 使用更精确的正则表达式解析组合器
+        // 1. 首先用特殊标记替换 > + ~ 组合器（只在选择器之间替换）
+        $temp = preg_replace('/\s*([>+~])\s*/', chr(0) . '$1' . chr(0), $selector);
+        $temp = preg_replace('/^([>+~])\s*/', chr(0) . '$1' . chr(0), $temp);
+        $temp = preg_replace('/\s*([>+~])$/', chr(0) . '$1' . chr(0), $temp);
+
+        // 2. 用 chr(0) 分割
         $parts = explode(chr(0), $temp);
-        
+
         $selectorParts = [];
         $combinators = [];
-        
+
         foreach ($parts as $part) {
             $part = trim($part);
-            if ($part === '') continue;
-            
+            if ($part === '') {
+                continue;
+            }
+
             if (in_array($part, ['>', '+', '~'], true)) {
+                // 这是组合器
                 $combinators[] = $part;
             } else {
                 // 这个 part 可能包含空格分隔的后代选择器
@@ -305,10 +594,13 @@ class Query
                     foreach ($subParts as $subPart) {
                         if ($subPart !== '') {
                             $selectorParts[] = $subPart;
-                            // 添加空格组合器
-                            if (count($selectorParts) > 1 && 
-                                ($combinators[count($selectorParts)-2] ?? '') !== ' ') {
-                                array_splice($combinators, count($selectorParts)-1, 0, ' ');
+                            // 在非第一个子部分前添加空格组合器
+                            $prevIndex = count($selectorParts) - 2;
+                            if ($prevIndex >= 0) {
+                                // 检查当前位置是否已经有组合器
+                                if (!isset($combinators[$prevIndex])) {
+                                    array_splice($combinators, $prevIndex, 0, ' ');
+                                }
                             }
                         }
                     }
@@ -317,19 +609,28 @@ class Query
                 }
             }
         }
-        
-        // 对于后代选择器（原始选择器中有空格但不是 > + ~），添加空格组合器
+
+        // 3. 对于后代选择器（原始选择器中有空格但不是 > + ~），添加空格组合器
         if (count($selectorParts) > 1 && count($combinators) < count($selectorParts) - 1) {
             $needed = count($selectorParts) - 1 - count($combinators);
             for ($i = 0; $i < $needed; $i++) {
                 $combinators[] = ' ';
             }
         }
-        
+
+        // 4. 验证和修正组合器数组长度
+        // 组合器数量应该等于选择器段数减一
+        while (count($combinators) < count($selectorParts) - 1) {
+            $combinators[] = ' ';
+        }
+        while (count($combinators) > count($selectorParts) - 1 && count($selectorParts) > 0) {
+            array_pop($combinators);
+        }
+
         if (empty($selectorParts)) {
             $selectorParts = [$selector];
         }
-        
+
         $current = [
             'combinator' => '',
             'tag' => '*',
@@ -356,7 +657,6 @@ class Query
         }
 
         return $segments;
-
     }
 
     /**
@@ -370,13 +670,13 @@ class Query
     {
         // 先处理伪类和伪元素（必须在提取类名之前，因为 :not(.active) 中的 .active 不应该被提取）
         // 处理双冒号伪元素 ::text, ::attr()
-        if (preg_match('/::([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/', $part, $matches)) {
+        if (preg_match(self::PATTERN_PSEUDO_ELEMENT, $part, $matches)) {
             $current['pseudo'] = '::' . $matches[1];
             $current['pseudoArg'] = $matches[2] ?? '';
             $part = preg_replace('/::[a-zA-Z0-9_-]+(?:\([^)]*\))?/', '', $part);
         }
         // 处理单冒号伪类
-        elseif (preg_match('/:([a-zA-Z0-9_-]+)(?:\(([^)]*)\))?/', $part, $matches)) {
+        elseif (preg_match(self::PATTERN_PSEUDO_CLASS, $part, $matches)) {
             $current['pseudo'] = $matches[1];
             $current['pseudoArg'] = $matches[2] ?? '';
             // 删除整个伪类（包括参数） - 使用匹配的完整文本
@@ -384,7 +684,7 @@ class Query
         }
 
         // 先提取属性（包含在 [] 中，避免与类/ID混淆）
-        if (preg_match_all('/\[([a-zA-Z0-9_-]+)([*~|^$]?=)?([\\"\']?)(.*?)\3\]/', $part, $matches, PREG_SET_ORDER)) {
+        if (preg_match_all(self::PATTERN_ATTRIBUTE, $part, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $attr) {
                 $current['attributes'][] = [
                     'name' => $attr[1],
@@ -396,13 +696,13 @@ class Query
         }
 
         // 提取 ID
-        if (preg_match('/#([a-zA-Z0-9_-]+)/', $part, $matches)) {
+        if (preg_match(self::PATTERN_ID, $part, $matches)) {
             $current['id'] = $matches[1];
             $part = str_replace('#' . $matches[1], '', $part);
         }
 
         // 提取类名
-        if (preg_match_all('/\.([a-zA-Z0-9_-]+)/', $part, $matches)) {
+        if (preg_match_all(self::PATTERN_CLASS, $part, $matches)) {
             $current['classes'] = $matches[1];
             $part = preg_replace('/\.[a-zA-Z0-9_-]+/', '', $part);
         }
@@ -422,6 +722,11 @@ class Query
      */
     protected static function compileSegment(array $segment, bool $isFirst = false): string
     {
+        // 如果这是一个XPath段，直接返回原始XPath表达式
+        if (isset($segment['isXPath']) && $segment['isXPath'] === true) {
+            return $segment['xpath'] ?? '';
+        }
+
         $xpath = '';
 
         // 处理组合器
@@ -482,9 +787,30 @@ class Query
 
     /**
      * 编译属性选择器
-     * 
+     *
+     * 支持的属性选择器：
+     * - [attr] - 存在属性
+     * - [attr=value] - 完全匹配
+     * - [attr!=value] - 不匹配
+     * - [attr~=value] - 词列表匹配
+     * - [attr|=value] - 语言或前缀匹配
+     * - [attr^=value] - 前缀匹配
+     * - [attr$=value] - 后缀匹配
+     * - [attr*=value] - 包含匹配
+     * - [attr i="value"] - 不区分大小写匹配（XPath 1.0限制：需要使用translate函数）
+     *
      * @param  array{name: string, operator: string|null, value: string|null}  $attr  属性信息
      * @return string XPath 属性条件
+     *
+     * @example
+     * // 存在 href 属性
+     * $xpath = Query::compileAttribute(['name' => 'href']);
+     *
+     * // class 包含 "active"
+     * $xpath = Query::compileAttribute(['name' => 'class', 'operator' => '~=', 'value' => 'active']);
+     *
+     * // data-id 不等于 2
+     * $xpath = Query::compileAttribute(['name' => 'data-id', 'operator' => '!=', 'value' => '2']);
      */
     protected static function compileAttribute(array $attr): string
     {
@@ -494,16 +820,17 @@ class Query
 
         // XPath 1.0 不支持 ends-with，需要用 substring 实现
         if ($operator === '$=') {
-            return sprintf('[@%s and substring(@%s, string-length(@%s) - string-length("%s") + 1) = "%s"]', 
+            return sprintf('[@%s and substring(@%s, string-length(@%s) - string-length("%s") + 1) = "%s"]',
                 $name, $name, $name, $value, $value);
         }
 
         return match ($operator) {
             '^=' => sprintf('[starts-with(@%s, "%s")]', $name, $value),
             '*=' => sprintf('[contains(@%s, "%s")]', $name, $value),
-            '~=' => sprintf('[contains(concat(" ", normalize-space(@%s), " "), " %s ")]', $name, $value),
+            '~=' => sprintf('[contains(concat(" ", normalize-space(@%s), " "), " %s ")]', $name, $value), // 保持不变，这个语法是正确的
             '|=' => sprintf('[@%s="%s" or starts-with(@%s, "%s-")]', $name, $value, $name, $value),
             '=' => sprintf('[@%s="%s"]', $name, $value),
+            '!=' => sprintf('[@%s and @%s!="%s"]', $name, $name, $value), // 修复XPath 1.0语法
             default => sprintf('[@%s]', $name),
         };
     }
@@ -511,7 +838,7 @@ class Query
     /**
      * 编译伪类选择器
      *
-     * 支持的伪类列表（120+ 种）：
+     * 支持的伪类列表（150+ 种）：
      * - 结构伪类: first-child, last-child, only-child, nth-child, nth-last-child, nth-last-child(扩展), nth-last-of-type
      * - 类型伪类: first-of-type, last-of-type, only-of-type, nth-of-type
      * - 内容伪类: empty, contains, has, not, contains-text, starts-with, ends-with, text-match
@@ -528,14 +855,27 @@ class Query
      * - 节点类型伪类: element, processing-instruction, document-node, document-fragment
      * - 自定义伪类: match, filter, each, map, reduce
      * - 属性长度伪类: attr-length-gt/lt/eq
-     * - 深度伪类: depth-0/1/2/3, depth-between
+     * - 深度伪类: depth-0/1/2/3/4/5, depth-between
      * - 子元素数量伪类: children-gt/lt/eq
      * - 属性数量伪类: attr-count-gt/lt/eq
+     * - 输入状态伪类: default, checked, indeterminate, placeholder-shown
+     * - 焦点状态伪类: focus, focus-within, focus-visible
+     * - 链接状态伪类: any-link, link, local-link, target, target-within
      *
      * @param  string  $pseudo  伪类名
      * @param  string  $arg  伪类参数
      * @param  string  $tagName  元素标签名（用于 of-type 伪类）
      * @return string XPath 伪类条件
+     *
+     * @example
+     * // 结构伪类
+     * $xpath = Query::compilePseudo('nth-child', '2n+1', 'li');
+     *
+     * // 内容伪类
+     * $xpath = Query::compilePseudo('contains', 'Hello', 'div');
+     *
+     * // 表单伪类
+     * $xpath = Query::compilePseudo('enabled', '', 'input');
      */
     protected static function compilePseudo(string $pseudo, string $arg, string $tagName = '*'): string
     {
@@ -560,6 +900,7 @@ class Query
             // 文档状态伪类
             'root' => '[not(parent::*)]',
             'target' => '[@name=substring-after(., "#") and substring-after(., "#")!=""]',
+            'target-within' => '[descendant::*[@name=substring-after(., "#") and substring-after(., "#")!=""]]',
             // 表单状态伪类
             'enabled' => '[not(@disabled="disabled") and not(@disabled) and not(@type="hidden")]',
             'disabled' => '[@disabled="disabled" or @disabled]',
@@ -571,6 +912,8 @@ class Query
             'read-write' => '[not(@readonly="readonly") and not(@readonly)]',
             // 用户交互伪类
             'focus' => '[@focus]',
+            'focus-within' => '[descendant::*[@focus] or ancestor::*[@focus]]',
+            'focus-visible' => '[@focus and @tabindex]',
             'hover' => '[@hover]',
             'active' => '[@active]',
             // 可见性伪类
@@ -583,6 +926,8 @@ class Query
             'text' => '[self::text()]',
             'comment' => '[self::comment()]',
             'link' => '[self::a and @href]',
+            'any-link' => '[self::a[@href] or self::area[@href]]',
+            'local-link' => '[self::a and @href and starts-with(@href, "#")]',
             'visited' => '[self::a]', // XPath无法准确判断visited状态
             'image' => '[self::img]',
             // 表单元素类型伪类
@@ -618,6 +963,12 @@ class Query
             'head' => '[self::head]',
             'body' => '[self::body]',
             'title' => '[self::title]',
+            'figure' => '[self::figure]',
+            'figcaption' => '[self::figcaption]',
+            'details' => '[self::details]',
+            'summary' => '[self::summary]',
+            'dialog' => '[self::dialog]',
+            'menu' => '[self::menu]',
             // 内容匹配伪类
             'contains-text' => sprintf('[contains(., "%s")]', $arg),
             'starts-with' => sprintf('[starts-with(., "%s")]', $arg),
@@ -630,6 +981,7 @@ class Query
             'text-node' => '[self::text()]',
             'comment-node' => '[self::comment()]',
             'cdata' => '[self::cdata-section()]',
+            'processing-instruction' => '[self::processing-instruction()]',
             // 位置伪类（简写）
             'first' => '[1]',
             'last' => '[last()]',
@@ -681,12 +1033,6 @@ class Query
             'nav' => '[self::nav]',
             'main' => '[self::main]',
             'footer' => '[self::footer]',
-            'figure' => '[self::figure]',
-            'figcaption' => '[self::figcaption]',
-            'details' => '[self::details]',
-            'summary' => '[self::summary]',
-            'dialog' => '[self::dialog]',
-            'menu' => '[self::menu]',
             // 表格行伪类
             'table-row' => '[self::tr]',
             'table-cell' => '[self::td or self::th]',
@@ -706,6 +1052,8 @@ class Query
             'depth-1' => '[count(ancestor::*) = 1]',
             'depth-2' => '[count(ancestor::*) = 2]',
             'depth-3' => '[count(ancestor::*) = 3]',
+            'depth-4' => '[count(ancestor::*) = 4]',
+            'depth-5' => '[count(ancestor::*) = 5]',
             // 索引范围伪类
             'between' => static::compileBetween($arg),
             // 文本长度伪类（使用 normalize-space 来正确处理文本）
@@ -739,12 +1087,30 @@ class Query
 
     /**
      * 编译 nth-child 伪类
-     * 
+     *
+     * 支持多种公式格式：
+     * - 数字：如 2、3、5
+     * - 关键字：odd（奇数）、even（偶数）
+     * - 公式：an+b，如 2n+1、3n+2、-2n+5
+     *
      * @param  string  $formula  nth 公式
      * @param  bool  $reverse  是否反向（nth-last-*）
      * @param  bool  $ofType  是否按类型（nth-of-type）
      * @param  string  $tagName  元素标签名（用于 of-type）
      * @return string XPath 条件
+     *
+     * @example
+     * // 奇数位置
+     * $xpath = Query::compileNthChild('odd', false, false, 'li');
+     *
+     * // 偶数位置
+     * $xpath = Query::compileNthChild('even', false, false, 'li');
+     *
+     * // 2n+1 公式
+     * $xpath = Query::compileNthChild('2n+1', false, false, 'li');
+     *
+     * // 倒数第2个
+     * $xpath = Query::compileNthChild('2', true, false, 'li');
      */
     protected static function compileNthChild(string $formula, bool $reverse = false, bool $ofType = false, string $tagName = '*'): string
     {
@@ -797,23 +1163,26 @@ class Query
             if ($a > 0) {
                 if ($b > 0) {
                     if ($ofType) {
-                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]',
                             $tagName, $b, $tagName, $a, $b % $a);
                     }
-                    return sprintf('[position() >= %d and position() mod %d = %d]', $b, $a, $b % $a);
+                    // 简化公式：当 a>0 且 b>0 时，position >= b 且 position mod a = b mod a
+                    $mod = $b % $a;
+                    return sprintf('[position() >= %d and position() mod %d = %d]', $b, $a, $mod);
                 } else {
                     $absB = abs($b);
                     if ($ofType) {
-                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                        return sprintf('[count(preceding-sibling::%s) >= %d and count(preceding-sibling::%s) mod %d = %d]',
                             $tagName, $absB, $tagName, $a, $a - ($absB % $a));
                     }
-                    return sprintf('[position() >= %d and position() mod %d = %d]', $absB, $a, $a - ($absB % $a));
+                    $mod = ($a - ($absB % $a)) % $a;
+                    return sprintf('[position() >= %d and position() mod %d = %d]', $absB, $a, $mod);
                 }
             } else {
                 $absA = abs($a);
                 if ($b > 0) {
                     if ($ofType) {
-                        return sprintf('[count(preceding-sibling::%s) <= %d and count(preceding-sibling::%s) mod %d = %d]', 
+                        return sprintf('[count(preceding-sibling::%s) <= %d and count(preceding-sibling::%s) mod %d = %d]',
                             $tagName, $b, $tagName, $absA, $b % $absA);
                     }
                     return sprintf('[position() <= %d and position() mod %d = %d]', $b, $absA, $b % $absA);
@@ -829,7 +1198,7 @@ class Query
         // 纯数字
         if (is_numeric($formula)) {
             if ($ofType) {
-                return $reverse 
+                return $reverse
                     ? sprintf('[count(following-sibling::%s) + 1 = %d]', $tagName, (int)$formula)
                     : sprintf('[count(preceding-sibling::%s) + 1 = %d]', $tagName, (int)$formula);
             }
@@ -842,9 +1211,18 @@ class Query
 
     /**
      * 编译 :not() 伪类
-     * 
+     *
+     * 反向选择，选择不匹配指定选择器的元素
+     *
      * @param  string  $selector  内部选择器
      * @return string XPath 条件
+     *
+     * @example
+     * // 不包含 .active 类的 div
+     * $xpath = Query::compileNot('.active');
+     *
+     * // data-id 不等于 2 的元素
+     * $xpath = Query::compileNot('[data-id="2"]');
      */
     protected static function compileNot(string $selector): string
     {
@@ -893,8 +1271,17 @@ class Query
     /**
      * 编译 :has() 伪类
      *
+     * 选择包含指定后代元素的父元素
+     *
      * @param  string  $selector  内部选择器
      * @return string XPath 条件
+     *
+     * @example
+     * // 包含链接的 div
+     * $xpath = Query::compileHas('a');
+     *
+     * // 包含 .item 类的后代的 div
+     * $xpath = Query::compileHas('.item');
      */
     protected static function compileHas(string $selector): string
     {

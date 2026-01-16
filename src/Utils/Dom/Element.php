@@ -651,12 +651,158 @@ class Element extends Node
     }
 
     /**
+     * 使用 XPath 查找后代元素
+     *
+     * @param  string  $xpathExpression  XPath 表达式
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function xpath(string $xpathExpression): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        // 直接调用Document的xpath方法
+        return $document->xpath($xpathExpression);
+        // 注意：这将返回整个文档的结果，不是相对于当前元素
+        // 如果需要相对查找，需要在XPath中使用 . 开头的表达式
+    }
+
+    /**
+     * 使用正则表达式查找后代元素
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  string|null  $attribute  要匹配的属性名（如果提供则匹配属性值）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function regex(string $pattern, ?string $attribute = null): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->findByRegex($pattern, $this->node, $attribute);
+    }
+
+    /**
+     * 查找包含指定文本的后代元素
+     *
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  CSS选择器（可选）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByText(string $text, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if ($element instanceof Element && str_contains($element->text(), $text)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找包含指定文本的后代元素（不区分大小写）
+     *
+     * @param  string  $text  要查找的文本
+     * @param  string  $selector  CSS选择器（可选）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByTextIgnoreCase(string $text, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        $lowerText = strtolower($text);
+        
+        foreach ($elements as $element) {
+            if (is_string($element)) {
+                continue;
+            }
+            if ($element instanceof Element && str_contains(strtolower($element->text()), $lowerText)) {
+                $result[] = $element;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找具有指定属性的后代元素
+     *
+     * @param  string  $attribute  属性名
+     * @param  string|null  $value  属性值（如果为null则只检查属性存在）
+     * @param  string  $selector  CSS选择器（可选）
+     * @return array<int, Element> 匹配的元素数组
+     */
+    public function findByAttribute(string $attribute, ?string $value = null, string $selector = '*'): array
+    {
+        $elements = $this->find($selector);
+        $result = [];
+        
+        foreach ($elements as $element) {
+            if (!($element instanceof Element)) {
+                continue;
+            }
+            
+            if ($value === null) {
+                if ($element->hasAttribute($attribute)) {
+                    $result[] = $element;
+                }
+            } else {
+                if ($element->getAttribute($attribute) === $value) {
+                    $result[] = $element;
+                }
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找直接子元素
+     *
+     * @param  string  $selector  CSS选择器
+     * @return array<int, Element> 匹配的子元素数组
+     */
+    public function findChildren(string $selector = '*'): array
+    {
+        $children = $this->children();
+        $result = [];
+        
+        foreach ($children as $child) {
+            if ($child instanceof Element && $child->matches($selector)) {
+                $result[] = $child;
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 查找第一个直接子元素
+     *
+     * @param  string  $selector  CSS选择器
+     * @return Element|null 第一个匹配的子元素
+     */
+    public function findFirstChild(string $selector = '*'): ?Element
+    {
+        $children = $this->findChildren($selector);
+        return $children[0] ?? null;
+    }
+
+    /**
      * 移除样式
      *
      * @param  string  ...$names  样式名列表
-     * @return self
+     * @return StyleAttribute
      */
-    public function removeStyle(string ...$names): self
+    public function removeStyle(string ...$names): StyleAttribute
     {
         return $this->style()->remove(...$names);
     }
