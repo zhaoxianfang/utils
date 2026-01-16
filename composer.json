@@ -54,6 +54,13 @@
       "zxf\\Utils\\Tests\\": "tests/"
     }
   },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "zxf\\Utils\\Providers\\UtilsServiceProvider"
+      ]
+    }
+  },
   "config": {
     "sort-packages": true,
     "optimize-autoloader": true
