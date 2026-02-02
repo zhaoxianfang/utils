@@ -102,13 +102,10 @@ class Element extends Node
     public function matches(string $selector, string|bool $typeOrStrict = false): bool
     {
         // 兼容旧版 API：如果第二个参数是布尔值，则视为 strict 模式
-        $type = Query::TYPE_CSS;
         $strict = false;
-        
+
         if (is_bool($typeOrStrict)) {
             $strict = $typeOrStrict;
-        } else {
-            $type = $typeOrStrict;
         }
         if (! $this->node instanceof DOMElement) {
             return false;
@@ -162,8 +159,6 @@ class Element extends Node
         $attributes = $this->attributes();
 
         unset($attributes['id'], $attributes['class']);
-
-        $segmentAttrs = $segment['attributes'] ?? [];
 
         $diff1 = array_diff_assoc($segments['attributes'], $attributes);
         $diff2 = array_diff_assoc($attributes, $segments['attributes']);
@@ -397,7 +392,7 @@ class Element extends Node
             return $this;
         }
 
-        foreach ($this->attributes() as $name => $value) {
+        foreach ($this->attributes() as $name => $_) {
             if (in_array($name, $preserved, true)) {
                 continue;
             }
@@ -688,6 +683,89 @@ class Element extends Node
     }
 
     /**
+     * 使用正则表达式查找元素并提取所有匹配的文本
+     *
+     * 此方法使用正则表达式匹配元素的文本内容，并提取所有匹配的文本。
+     * 支持分组捕获和多数据提取。
+     *
+     * @param  string  $pattern  正则表达式模式（支持分组捕获）
+     * @param  string|null  $attribute  属性名（如果提供则匹配属性值）
+     * @return array<int, string|array> 匹配的文本数组或分组数组
+     *
+     * @example
+     * // 提取所有日期
+     * $matches = $element->regexMatch('/\d{4}-\d{2}-\d{2}/');
+     *
+     * // 提取分组数据（姓名和年龄）
+     * $matches = $element->regexMatch('/(\w+)\s*[:：]\s*(\d+)/');
+     * // 返回: [['张三', '30'], ['李四', '25'], ...]
+     */
+    public function regexMatch(string $pattern, ?string $attribute = null): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->regexMatch($pattern, $this->node, $attribute);
+    }
+
+    /**
+     * 使用正则表达式查找元素并提取所有匹配的文本（带元素信息）
+     *
+     * 此方法与 regexMatch 类似，但返回包含元素信息的详细结果。
+     * 返回格式：[['element' => Element, 'matches' => string[]], ...]
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  string|null  $attribute  属性名（如果提供则匹配属性值）
+     * @return array<int, array{element: Element, matches: array<string>}> 匹配结果数组
+     */
+    public function regexMatchWithElement(string $pattern, ?string $attribute = null): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->regexMatchWithElement($pattern, $this->node, $attribute);
+    }
+
+    /**
+     * 使用多个正则表达式同时查找元素（多列数据匹配）
+     *
+     * @param  array<string, string>  $patterns  正则表达式数组
+     * @param  string|null  $attribute  属性名（如果提供则匹配属性值）
+     * @return array<string, array<int, string>> 按模式名称索引的匹配结果数组
+     */
+    public function regexMulti(array $patterns, ?string $attribute = null): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->regexMulti($patterns, $this->node, $attribute);
+    }
+
+    /**
+     * 使用正则表达式替换文本内容
+     *
+     * @param  string  $pattern  正则表达式模式
+     * @param  string  $replacement  替换字符串
+     * @param  string|null  $attribute  属性名（如果提供则替换属性值）
+     * @return Element 返回当前元素以支持链式调用
+     */
+    public function regexReplace(string $pattern, string $replacement, ?string $attribute = null): Element
+    {
+        $document = $this->ownerDocument();
+        if ($document !== null) {
+            $document->regexReplace($pattern, $replacement, $this->node, $attribute);
+        }
+
+        return $this;
+    }
+
+    /**
      * 查找包含指定文本的后代元素
      *
      * @param  string  $text  要查找的文本
@@ -860,5 +938,359 @@ class Element extends Node
     public function __unset(string $name)
     {
         $this->removeAttribute($name);
+    }
+
+    /**
+     * 提取子表格数据
+     *
+     * 从当前元素的子元素中提取表格数据。
+     * 支持CSS选择器、XPath选择器和正则表达式。
+     * 确保返回完整的表格数据（每行每列）。
+     *
+     * @param  string|null  $selector  表格选择器（相对于当前元素），null表示提取当前元素（如果它本身是table）
+     * @param  array<string, mixed>  $options  提取选项
+     *                                     - 'selectorType': 选择器类型（'css'/'xpath'/'regex'/'auto'），默认'auto'
+     *                                     - 'headerRow': 表头行索引（0-based），默认0
+     *                                     - 'skipRows': 跳过的行数，默认0
+     *                                     - 'includeHeader': 是否包含表头，默认true
+     *                                     - 'includeHeaderAsFirstRow': 是否将表头作为第一行返回，默认false
+     *                                     - 'trimText': 是否修剪空白，默认true
+     *                                     - 'removeEmpty': 是否移除空行，默认true
+     *                                     - 'cellSelector': 单元格选择器，默认'td, th'
+     *                                     - 'rowSelector': 行选择器，默认'tr'
+     *                                     - 'returnFormat': 返回格式（'associative'/'indexed'/'both'），默认'associative'
+     *                                     - 'preserveStructure': 是否保留表格结构（thead/tbody/tfoot），默认false
+     * @return array<int, array<string|int, string>>|array<int, array<int, array<string|int, string>>> 表格数据数组
+     *
+     * @example
+     * // 提取当前元素下的第一个表格
+     * $tableData = $element->extractTable();
+     * // 返回: [['姓名' => '张三', '年龄' => '30'], ...]
+     *
+     * // 使用CSS选择器提取
+     * $tableData = $element->extractTable('table.data-table');
+     *
+     * // 使用XPath选择器提取
+     * $tableData = $element->extractTable('//table[@class="data"]');
+     *
+     * // 使用正则表达式提取
+     * $tableData = $element->extractTable('/<table[^>]*class="data"[^>]*>/is');
+     *
+     * // 自定义选项
+     * $tableData = $element->extractTable('table', [
+     *     'headerRow' => 0,
+     *     'skipRows' => 1,
+     *     'includeHeader' => false,
+     *     'returnFormat' => 'indexed'
+     * ]);
+     *
+     * // 如果当前元素本身就是table
+     * if ($element->tagName() === 'table') {
+     *     $tableData = $element->extractTableData();
+     * }
+     */
+    public function extractTable(?string $selector = 'table', array $options = []): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        // 如果selector为null且当前元素是table，直接提取当前元素
+        if ($selector === null && $this->tagName() === 'table') {
+            return $document->extractTable($this, $options);
+        }
+
+        $tableElement = $this->first($selector ?? 'table');
+        if ($tableElement === null) {
+            return [];
+        }
+
+        return $document->extractTable($tableElement, $options);
+    }
+
+    /**
+     * 提取当前元素作为表格的数据（如果元素是table）
+     *
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, array<string|int, string>> 表格数据
+     *
+     * @example
+     * // 先获取table元素
+     * $tableElement = $doc->first('table');
+     *
+     * // 直接提取表格数据
+     * $tableData = $tableElement->extractTableData();
+     * $tableData = $tableElement->extractTableData([
+     *     'returnFormat' => 'indexed'
+     * ]);
+     */
+    public function extractTableData(array $options = []): array
+    {
+        if ($this->tagName() !== 'table') {
+            return [];
+        }
+
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->extractTable($this, $options);
+    }
+
+    /**
+     * 提取子列表数据
+     *
+     * 从当前元素的子元素中提取列表数据。
+     *
+     * @param  string  $selector  列表选择器（相对于当前元素）
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, string|array> 列表数据
+     *
+     * @example
+     * $listData = $element->extractList();
+     * $listData = $element->extractList('ul.products');
+     */
+    public function extractList(string $selector = 'ul', array $options = []): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $listElement = $this->first($selector);
+        if ($listElement === null) {
+            return [];
+        }
+
+        return $document->extractList($listElement, $options);
+    }
+
+    /**
+     * 提取表格行数据
+     *
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, array<string>> 行数据数组
+     */
+    public function extractTableRows(array $options = []): array
+    {
+        if ($this->tagName() !== 'table') {
+            return [];
+        }
+
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $tableData = $document->extractTable($this, $options);
+        return $tableData[0]['tbody'] ?? [];
+    }
+
+    /**
+     * 提取表格表头
+     *
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, string> 表头数组
+     */
+    public function extractTableHeaders(array $options = []): array
+    {
+        if ($this->tagName() !== 'table') {
+            return [];
+        }
+
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $tableData = $document->extractTable($this, $options);
+        return $tableData[0]['thead'] ?? [];
+    }
+
+    /**
+     * 提取表格列数据
+     *
+     * @param  int|string  $column  列索引或列名
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, string> 列数据数组
+     */
+    public function extractTableColumn(int|string $column, array $options = []): array
+    {
+        if ($this->tagName() !== 'table') {
+            return [];
+        }
+
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $tableData = $document->extractTable($this, $options);
+        $headers = $tableData[0]['thead'] ?? [];
+        $rows = $tableData[0]['tbody'] ?? [];
+
+        $columnData = [];
+        $columnIndex = is_numeric($column) ? (int)$column : array_search($column, $headers);
+
+        if ($columnIndex !== false) {
+            foreach ($rows as $row) {
+                if (isset($row[$columnIndex])) {
+                    $columnData[] = $row[$columnIndex];
+                }
+            }
+        }
+
+        return $columnData;
+    }
+
+    /**
+     * 按列名获取关联数组格式的表格数据
+     *
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, array<string, string>> 关联数组格式的表格数据
+     */
+    public function extractTableAsAssociative(array $options = []): array
+    {
+        if ($this->tagName() !== 'table') {
+            return [];
+        }
+
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $tableData = $document->extractTable($this, array_merge($options, ['preserveStructure' => false, 'returnFormat' => 'associative']));
+        return $tableData;
+    }
+
+    /**
+     * 查找并提取嵌套表格
+     *
+     * @param  string  $selector  内层表格选择器
+     * @param  array<string, mixed>  $options  提取选项
+     * @return array<int, array<string, mixed>> 嵌套表格数据数组
+     */
+    public function extractNestedTables(string $selector = 'table', array $options = []): array
+    {
+        $nestedTables = $this->find($selector);
+        $allData = [];
+
+        foreach ($nestedTables as $table) {
+            if ($table->tagName() === 'table') {
+                $tableData = $table->extractTableData($options);
+                if (!empty($tableData)) {
+                    $allData[] = $tableData[0];
+                }
+            }
+        }
+
+        return $allData;
+    }
+
+    /**
+     * 提取子表单数据
+     *
+     * 从当前元素的子元素中提取表单数据。
+     *
+     * @param  string  $selector  表单选择器（相对于当前元素）
+     * @return array<string, string|array> 表单数据
+     *
+     * @example
+     * $formData = $element->extractFormData('form');
+     */
+    public function extractFormData(string $selector = 'form'): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $formElement = $this->first($selector);
+        if ($formElement === null) {
+            return [];
+        }
+
+        return $document->extractFormData($formElement);
+    }
+
+    /**
+     * 提取子链接数据
+     *
+     * 从当前元素的子元素中提取链接数据。
+     *
+     * @param  string  $selector  链接选择器（相对于当前元素）
+     * @return array<int, array{href: string, text: string, title: string|null}> 链接数据
+     *
+     * @example
+     * $links = $element->extractLinks();
+     * $links = $element->extractLinks('a.external');
+     */
+    public function extractLinks(string $selector = 'a'): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->extractLinks($selector);
+    }
+
+    /**
+     * 提取子图片数据
+     *
+     * 从当前元素的子元素中提取图片数据。
+     *
+     * @param  string  $selector  图片选择器（相对于当前元素）
+     * @return array<int, array{src: string, alt: string, title: string|null}> 图片数据
+     *
+     * @example
+     * $images = $element->extractImages();
+     * $images = $element->extractImages('img.thumbnail');
+     */
+    public function extractImages(string $selector = 'img'): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        return $document->extractImages($selector);
+    }
+
+    /**
+     * 提取子元素文本内容
+     *
+     * 从当前元素的子元素中提取文本内容。
+     *
+     * @param  string  $selector  选择器（相对于当前元素）
+     * @param  bool  $trim  是否修剪空白
+     * @return array<int, string> 文本内容数组
+     *
+     * @example
+     * $texts = $element->extractTexts('div.item');
+     */
+    public function extractTexts(string $selector, bool $trim = true): array
+    {
+        $document = $this->ownerDocument();
+        if ($document === null) {
+            return [];
+        }
+
+        $elements = $this->find($selector);
+        $texts = [];
+
+        foreach ($elements as $element) {
+            $text = $element->text();
+            if ($trim) {
+                $text = trim($text);
+                $text = preg_replace('/\s+/', ' ', $text);
+            }
+            $texts[] = $text;
+        }
+
+        return $texts;
     }
 }

@@ -4,11 +4,13 @@
 
 ## 特性
 
-- ✅ **完整的 CSS3 选择器支持** - 支持 130+ 种 CSS 选择器类型
+- ✅ **完整的 CSS3 选择器支持** - 支持 150+ 种 CSS 选择器类型
 - ✅ **原生 XPath 支持** - 可直接使用 XPath 表达式查询
 - ✅ **丰富的伪类** - 支持 100+ 种伪类选择器
 - ✅ **伪元素支持** - 支持 `::text` 和 `::attr()` 伪元素
 - ✅ **扩展选择器功能** - 文本长度匹配、属性长度/数量选择器、基于深度的选择器
+- ✅ **正则表达式支持** - 强大的正则表达式匹配和数据提取功能
+- ✅ **表格数据提取** - 重构后的表格处理，严格分离表头表体，避免数据混杂
 - ✅ **链式调用** - 流畅的 API 设计，支持链式操作
 - ✅ **PHP 8.2+ 类型系统** - 完整的类型注解，更好的 IDE 支持
 - ✅ **HTML/XML 双模式** - 同时支持 HTML 和 XML 文档处理
@@ -225,6 +227,71 @@ $doc->hasClass('.selector', 'class-name');
 $doc->css('.selector', 'property', 'value');
 $doc->attr('.selector', 'attribute', 'value');
 $doc->removeAttr('.selector', 'attribute');
+
+// 正则表达式功能
+$elements = $doc->regex('/\d{4}-\d{2}-\d{2}/');  // 查找匹配的元素
+$matches = $doc->regexMatch('/(\w+)\s*[:：]\s*(\d+)/');  // 提取匹配数据
+$data = $doc->regexMulti(['dates' => '/.../', 'emails' => '/.../']);  // 多列数据提取
+$doc->regexReplace('/\s+/', ' ');  // 正则替换
+
+// 数据提取功能
+$tableData = $doc->extractTable();  // 提取表格数据
+$listData = $doc->extractList('ul');  // 提取列表数据
+$formData = $doc->extractFormData('form');  // 提取表单数据
+$links = $doc->extractLinks();  // 提取链接数据
+$images = $doc->extractImages();  // 提取图片数据
+
+// 表格数据提取详细示例（重构后）
+// CSS选择器提取
+$tableData = $doc->extractTable('table.data-table');
+// 返回格式：['thead' => ['姓名', '年龄'], 'tbody' => [['张三', '25'], ...]]
+
+// XPath选择器提取
+$tableData = $doc->extractTable('//table[@id="myTable"]');
+
+// 通过类名提取
+$tableData = $doc->extractTableByClass('data-table');
+
+// 通过ID提取
+$tableData = $doc->extractTableById('myTable');
+
+// 通过属性提取
+$tableData = $doc->extractTableByAttribute('data-type', 'user-list');
+
+// 批量提取所有表格
+$allTables = $doc->extractAllTables();
+
+// Element类表格方法
+$tableElement = $doc->first('table');
+$headers = $tableElement->extractTableHeaders();  // ['姓名', '年龄']
+$rows = $tableElement->extractTableRows();       // [['张三', '25'], ...]
+$column = $tableElement->extractTableColumn(0);  // ['张三', '李四', ...]
+$column = $tableElement->extractTableColumn('姓名');  // ['张三', '李四', ...]
+
+// 正则表达式提取
+$tableData = $doc->extractTable('/<table[^>]*class="data"[^>]*>/is');
+
+// 自定义选项提取
+$tableData = $doc->extractTable('table', [
+    'headerRow' => 0,              // 表头行索引
+    'skipRows' => 1,                // 跳过1行
+    'includeHeader' => true,         // 包含表头
+    'returnFormat' => 'indexed'      // 返回索引格式
+]);
+
+// 提取所有表格
+$allTables = $doc->extractTable(null);
+
+// Element对象提取
+$tableElement = $doc->first('table');
+$tableData = $doc->extractTable($tableElement);
+
+// findWithFallback 增强
+$dates = $doc->findWithFallback([
+    ['selector' => 'table.date-table'],
+    ['selector' => '//table[contains(@class, "date")]', 'type' => 'xpath'],
+    ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex', 'extractMode' => 'text']
+]);
 
 // XPath 查询
 $elements = $doc->xpath('//div[@class="item"]');
@@ -478,6 +545,8 @@ php examples.php
 
 - **[USER_GUIDE.md](USER_GUIDE.md)** - 完整的用户指南和示例
 - **[RULE_GUIDE.md](RULE_GUIDE.md)** - 全面选择器参考手册
+- **[REGEX_ENHANCED.md](docs/REGEX_ENHANCED.md)** - 正则表达式增强功能详解
+- **[TABLE_EXTRACTION.md](docs/TABLE_EXTRACTION.md)** - 表格数据提取完整指南
 
 ## 贡献
 
