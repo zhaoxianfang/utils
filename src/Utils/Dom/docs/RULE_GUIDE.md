@@ -24,238 +24,239 @@
 
 ## 所有支持的选择器总览
 
-| 选择器                               | 类型          | 参数说明                                      | 使用示例                                                              | 描述                                                                                                                                    |
-|-----------------------------------|-------------|-------------------------------------------|-------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| 选择器                               | 类型            | 参数说明                                      | 使用示例                                                                                              | 描述                                                                                                                                    |
+|-----------------------------------|---------------|-------------------------------------------|---------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | **便捷查找方法**                        |
-| `findWithFallback()`              | 回退查找        | selectors: 选择器数组                          | `$doc->findWithFallback([...])`                                   | 传入多个选择器，按顺序尝试，找到第一个非空结果即返回。支持混合使用CSS、XPath和正则表达式选择器。适用于处理不同结构的网页，提供极大的灵活性。                                                            |
-| `findFirstWithFallback()`         | 回退查找首个      | selectors: 选择器数组                          | `$doc->findFirstWithFallback([...])`                              | `findWithFallback()` 的便捷版本，只返回第一个匹配的元素。适用于只需要获取单个匹配元素的场景。                                                                             |
-| `findByPath()`                    | 路径查找        | path: 路径表达式, relative: 是否相对路径             | `$doc->findByPath('/html/body/div')`                              | 按路径表达式查找元素，支持类似文件系统的路径语法。提供完整的全路径选择能力，包括XPath绝对路径、相对路径和CSS路径。                                                                         |
-| `findByText()`                    | 文本查找        | text: 文本内容, context: 上下文节点                | `$doc->findByText('Hello')`                                       | 查找包含指定文本的元素。搜索范围包括元素自身和所有子元素的文本内容。常用于快速定位包含特定关键词的元素。                                                                                  |
-| `findByAttribute()`               | 属性查找        | attr: 属性名, value: 属性值                     | `$doc->findByAttribute('href', 'https://')`                       | 查找具有指定属性或属性值的元素。如果只提供属性名，则查找所有具有该属性的元素；如果同时提供属性值，则查找属性值完全匹配的元素。                                                                       |
-| `findByAttributeContains()`       | 属性包含查找      | attr: 属性名, value: 包含值                     | `$doc->findByAttributeContains('class', 'nav')`                   | 查找属性值包含指定字符串的元素。与CSS的 `[attr*=value]` 选择器功能相同，但以方法形式提供，更直观易用。                                                                         |
-| `findByAttributeStartsWith()`     | 属性前缀查找      | attr: 属性名, value: 前缀                      | `$doc->findByAttributeStartsWith('src', 'https')`                 | 查找属性值以指定字符串开头的元素。适用于查找特定协议的链接、特定前缀的图片等。                                                                                               |
-| `findByIndex()`                   | 索引查找        | selector: 选择器, index: 索引                  | `$doc->findByIndex('.item', 2)`                                   | 查找匹配选择器的元素集合中指定索引位置的元素。索引从0开始，负数表示从后往前计数（-1表示最后一个）。                                                                                   |
-| `findLast()`                      | 查找最后一个      | selector: 选择器                             | `$doc->findLast('.item')`                                         | 查找匹配选择器的所有元素中的最后一个元素。等同于获取结果集的最后一个元素，语法更简洁。                                                                                           |
-| `findRange()`                     | 范围查找        | selector: 选择器, start: 开始, end: 结束         | `$doc->findRange('.item', 0, 5)`                                  | 查找匹配选择器的元素集合中指定索引范围内的元素。返回从start到end（包含）之间的所有元素。索引从0开始。                                                                               |
-| `extractTable()`                  | 表格查找        | CSS/XPath/正则/Element 选择器                  | `$doc->extractTable() 或者 $doc->extractTable('table.mymy_table') ` | 提取表格数据（CSS/XPath/正则/Element）                                                                                                          |
-| `extractList()`                   | 表格查找：提取列表数据 | CSS/XPath/正则/Element 选择器                  | `$doc->extractList()`                                             | 提取列表数据                                                                                                                                |
-| `extractFormData()`               | 表格查找：提取表单数据 | CSS/XPath/正则/Element 选择器                  | `$doc->extractFormData()`                                         | 提取表单数据                                                                                                                                |
-| `extractLinks()`                  | 提取链接数据      | CSS/XPath/正则/Element 选择器                  | `$doc->extractLinks()`                                            | 提取链接数据                                                                                                                                |
-| `extractImages()`                 | 提取图片数据      | CSS/XPath/正则/Element 选择器                  | `$doc->extractImages()`                                           | 提取图片数据                                                                                                                                |
+| `findWithFallback()`              | 回退查找          | selectors: 选择器数组                          | `$doc->findWithFallback([...])`                                                                   | 传入多个选择器，按顺序尝试，找到第一个非空结果即返回。支持混合使用CSS、XPath和正则表达式选择器。适用于处理不同结构的网页，提供极大的灵活性。                                                            |
+| `findFirstWithFallback()`         | 回退查找首个        | selectors: 选择器数组                          | `$doc->findFirstWithFallback([...])`                                                              | `findWithFallback()` 的便捷版本，只返回第一个匹配的元素。适用于只需要获取单个匹配元素的场景。                                                                             |
+| `findByPath()`                    | 路径查找          | path: 路径表达式, relative: 是否相对路径             | `$doc->findByPath('/html/body/div')`                                                              | 按路径表达式查找元素，支持类似文件系统的路径语法。提供完整的全路径选择能力，包括XPath绝对路径、相对路径和CSS路径。                                                                         |
+| `findByText()`                    | 文本查找          | text: 文本内容, context: 上下文节点                | `$doc->findByText('Hello')`                                                                       | 查找包含指定文本的元素。搜索范围包括元素自身和所有子元素的文本内容。常用于快速定位包含特定关键词的元素。                                                                                  |
+| `findByAttribute()`               | 属性查找          | attr: 属性名, value: 属性值                     | `$doc->findByAttribute('href', 'https://')`                                                       | 查找具有指定属性或属性值的元素。如果只提供属性名，则查找所有具有该属性的元素；如果同时提供属性值，则查找属性值完全匹配的元素。                                                                       |
+| `findByAttributeContains()`       | 属性包含查找        | attr: 属性名, value: 包含值                     | `$doc->findByAttributeContains('class', 'nav')`                                                   | 查找属性值包含指定字符串的元素。与CSS的 `[attr*=value]` 选择器功能相同，但以方法形式提供，更直观易用。                                                                         |
+| `findByAttributeStartsWith()`     | 属性前缀查找        | attr: 属性名, value: 前缀                      | `$doc->findByAttributeStartsWith('src', 'https')`                                                 | 查找属性值以指定字符串开头的元素。适用于查找特定协议的链接、特定前缀的图片等。                                                                                               |
+| `findByIndex()`                   | 索引查找          | selector: 选择器, index: 索引                  | `$doc->findByIndex('.item', 2)`                                                                   | 查找匹配选择器的元素集合中指定索引位置的元素。索引从0开始，负数表示从后往前计数（-1表示最后一个）。                                                                                   |
+| `findLast()`                      | 查找最后一个        | selector: 选择器                             | `$doc->findLast('.item')`                                                                         | 查找匹配选择器的所有元素中的最后一个元素。等同于获取结果集的最后一个元素，语法更简洁。                                                                                           |
+| `findRange()`                     | 范围查找          | selector: 选择器, start: 开始, end: 结束         | `$doc->findRange('.item', 0, 5)`                                                                  | 查找匹配选择器的元素集合中指定索引范围内的元素。返回从start到end（包含）之间的所有元素。索引从0开始。                                                                               |
+| `extractTable()`                  | 表格查找          | CSS/XPath/正则/Element 选择器                  | `$doc->extractTable() 或者 $doc->extractTable('table.mymy_table') `                                 | 提取表格数据（CSS/XPath/正则/Element）                                                                                                          |
+| `extractList()`                   | 表格查找：提取列表数据   | CSS/XPath/正则/Element 选择器                  | `$doc->extractList()`                                                                             | 提取列表数据                                                                                                                                |
+| `extractFormData()`               | 表格查找：提取表单数据   | CSS/XPath/正则/Element 选择器                  | `$doc->extractFormData()`                                                                         | 提取表单数据                                                                                                                                |
+| `extractLinks()`                  | 提取链接数据        | CSS/XPath/正则/Element 选择器                  | `$doc->extractLinks()`                                                                            | 提取链接数据                                                                                                                                |
+| `extractImages()`                 | 提取图片数据        | CSS/XPath/正则/Element 选择器                  | `$doc->extractImages()`                                                                           | 提取图片数据                                                                                                                                |
+| `queryMatrix()`                   | 类似表格结构的「矩阵」数据 | CSS/XPath/正则/Element 选择器                  | `$matrix = $doc->queryMatrix('.matrix', [ 'rowSelector' => '.row', 'cellSelector' => '.cell' ]);` | 提取图片数据                                                                                                                                |
 | **选择器类型检测方法**                     |
-| `Query::detectSelectorType()`     | 类型检测        | selector: 选择器表达式                          | `Query::detectSelectorType('div')`                                | 智能识别选择器类型，返回 'css'、'xpath' 或 'regex'。可以自动区分CSS选择器、XPath表达式和正则表达式，为开发者提供便利的类型判断功能。                                                     |
-| `Query::isXPathAbsolute()`        | XPath绝对路径检测 | expression: XPath表达式                      | `Query::isXPathAbsolute('/html/body/div')`                        | 检测字符串是否为XPath绝对路径（以/开头但不是//）。XPath绝对路径从文档根元素开始，提供精确的元素定位路径。                                                                           |
-| `Query::isXPathRelative()`        | XPath相对路径检测 | expression: XPath表达式                      | `Query::isXPathRelative('//div')`                                 | 检测字符串是否为XPath相对路径（以//开头）。XPath相对路径从文档中任意位置开始查找，提供更灵活的查询方式。                                                                            |
+| `Query::detectSelectorType()`     | 类型检测          | selector: 选择器表达式                          | `Query::detectSelectorType('div')`                                                                | 智能识别选择器类型，返回 'css'、'xpath' 或 'regex'。可以自动区分CSS选择器、XPath表达式和正则表达式，为开发者提供便利的类型判断功能。                                                     |
+| `Query::isXPathAbsolute()`        | XPath绝对路径检测   | expression: XPath表达式                      | `Query::isXPathAbsolute('/html/body/div')`                                                        | 检测字符串是否为XPath绝对路径（以/开头但不是//）。XPath绝对路径从文档根元素开始，提供精确的元素定位路径。                                                                           |
+| `Query::isXPathRelative()`        | XPath相对路径检测   | expression: XPath表达式                      | `Query::isXPathRelative('//div')`                                                                 | 检测字符串是否为XPath相对路径（以//开头）。XPath相对路径从文档中任意位置开始查找，提供更灵活的查询方式。                                                                            |
 | **XPath便捷方法**                     |
-| `xpath()`                         | XPath查询     | expression: XPath表达式                      | `$doc->xpath('//div[@class="item"]')`                             | 执行XPath查询，返回匹配的元素数组。支持完整的XPath 1.0语法，包括所有标准函数、轴和节点测试。提供比CSS更强大和灵活的查询能力。                                                               |
-| `xpathFirst()`                    | 首个XPath     | expression: XPath表达式                      | `$doc->xpathFirst('//div[@class="item"]')`                        | 执行XPath查询并返回第一个匹配的元素。等同于 `xpath()` 的便捷版本，适用于只需要获取单个元素的场景。                                                                             |
-| `xpathTexts()`                    | XPath文本     | expression: XPath表达式                      | `$doc->xpathTexts('//div/text()')`                                | 执行XPath查询并返回匹配元素的文本内容数组。适用于快速提取多个元素的文本。                                                                                               |
-| `xpathAttrs()`                    | XPath属性     | expression: XPath表达式, attr: 属性名           | `$doc->xpathAttrs('//a', 'href')`                                 | 执行XPath查询并返回匹配元素的指定属性值数组。适用于批量提取元素的特定属性。                                                                                              |
+| `xpath()`                         | XPath查询       | expression: XPath表达式                      | `$doc->xpath('//div[@class="item"]')`                                                             | 执行XPath查询，返回匹配的元素数组。支持完整的XPath 1.0语法，包括所有标准函数、轴和节点测试。提供比CSS更强大和灵活的查询能力。                                                               |
+| `xpathFirst()`                    | 首个XPath       | expression: XPath表达式                      | `$doc->xpathFirst('//div[@class="item"]')`                                                        | 执行XPath查询并返回第一个匹配的元素。等同于 `xpath()` 的便捷版本，适用于只需要获取单个元素的场景。                                                                             |
+| `xpathTexts()`                    | XPath文本       | expression: XPath表达式                      | `$doc->xpathTexts('//div/text()')`                                                                | 执行XPath查询并返回匹配元素的文本内容数组。适用于快速提取多个元素的文本。                                                                                               |
+| `xpathAttrs()`                    | XPath属性       | expression: XPath表达式, attr: 属性名           | `$doc->xpathAttrs('//a', 'href')`                                                                 | 执行XPath查询并返回匹配元素的指定属性值数组。适用于批量提取元素的特定属性。                                                                                              |
 | **正则表达式方法**                       |
-| `regex()`                         | 正则匹配        | pattern: 正则表达式                            | `$doc->regex('/\d{4}-\d{2}-\d{2}/')`                              | 使用正则表达式匹配元素的文本内容。支持所有PCRE正则表达式语法，提供灵活的文本匹配能力。                                                                                         |
-| `regexMatch()`                    | 正则匹配,       | pattern: 正则表达式                            | `$doc->regexMatch('/(\d{4})-(\d{2})-(\d{2})/')`                   | 提取所有匹配文本                                                                                                                              |
-| `regexMatchWithElement()`         | 正则匹配,       | pattern: 正则表达式                            | `$doc->regexMatchWithElement('/\d+/')`                            | 提取匹配及元素信息                                                                                                                             |
-| `regexMulti()`                    | 正则匹配        | pattern: 正则表达式                            | `$doc->regexMulti(['dates' => '/.../', 'emails' => '/.../'])`     | 多列数据同时匹配                                                                                                                              |
-| `regexReplace()`                  | 正则匹配        | pattern: 正则表达式                            | `$doc->regexReplace('/\s+/', ' ')`                                | 正则替换文本                                                                                                                                |
-| `regexFind()`                     | 正则查找        | pattern: 正则表达式, context: 上下文节点            | `$doc->regexFind('/test/', $element)`                             | 在指定上下文节点中使用正则表达式查找匹配的元素。上下文节点可以是任意DOMElement，支持局部范围内的文本匹配。                                                                            |
-| `regexFirst()`                    | 正则首个        | pattern: 正则表达式                            | `$doc->regexFirst('/\d{4}-\d{2}-\d{2}/')`                         | 使用正则表达式匹配并返回第一个匹配的文本内容。适用于只需要获取单个匹配结果的场景。                                                                                             |
-| `regexByAttr()`                   | 正则属性匹配      | pattern: 正则表达式, attr: 属性名                 | `$doc->regexByAttr('/^https/', 'href')`                           | 使用正则表达式匹配元素的属性值。支持在指定属性中进行正则匹配，适用于查找特定模式的属性值，如URL、邮箱、电话等。                                                                             |
-| `regexByAttrFind()`               | 正则属性查找      | pattern: 正则表达式, attr: 属性名, context: 上下文节点 | `$doc->regexByAttrFind('/^https/', 'href', $div)`                 | 在指定上下文节点中使用正则表达式匹配元素的属性值。提供局部范围内的属性匹配能力。                                                                                              |
-| `regexByAttrFirst()`              | 正则属性首个      | pattern: 正则表达式, attr: 属性名                 | `$doc->regexByAttrFirst('/^https/', 'href')`                      | 使用正则表达式匹配并返回第一个元素的属性值。适用于只需要获取单个属性匹配结果的场景。                                                                                            |
+| `regex()`                         | 正则匹配          | pattern: 正则表达式                            | `$doc->regex('/\d{4}-\d{2}-\d{2}/')`                                                              | 使用正则表达式匹配元素的文本内容。支持所有PCRE正则表达式语法，提供灵活的文本匹配能力。                                                                                         |
+| `regexMatch()`                    | 正则匹配,         | pattern: 正则表达式                            | `$doc->regexMatch('/(\d{4})-(\d{2})-(\d{2})/')`                                                   | 提取所有匹配文本                                                                                                                              |
+| `regexMatchWithElement()`         | 正则匹配,         | pattern: 正则表达式                            | `$doc->regexMatchWithElement('/\d+/')`                                                            | 提取匹配及元素信息                                                                                                                             |
+| `regexMulti()`                    | 正则匹配          | pattern: 正则表达式                            | `$doc->regexMulti(['dates' => '/.../', 'emails' => '/.../'])`                                     | 多列数据同时匹配                                                                                                                              |
+| `regexReplace()`                  | 正则匹配          | pattern: 正则表达式                            | `$doc->regexReplace('/\s+/', ' ')`                                                                | 正则替换文本                                                                                                                                |
+| `regexFind()`                     | 正则查找          | pattern: 正则表达式, context: 上下文节点            | `$doc->regexFind('/test/', $element)`                                                             | 在指定上下文节点中使用正则表达式查找匹配的元素。上下文节点可以是任意DOMElement，支持局部范围内的文本匹配。                                                                            |
+| `regexFirst()`                    | 正则首个          | pattern: 正则表达式                            | `$doc->regexFirst('/\d{4}-\d{2}-\d{2}/')`                                                         | 使用正则表达式匹配并返回第一个匹配的文本内容。适用于只需要获取单个匹配结果的场景。                                                                                             |
+| `regexByAttr()`                   | 正则属性匹配        | pattern: 正则表达式, attr: 属性名                 | `$doc->regexByAttr('/^https/', 'href')`                                                           | 使用正则表达式匹配元素的属性值。支持在指定属性中进行正则匹配，适用于查找特定模式的属性值，如URL、邮箱、电话等。                                                                             |
+| `regexByAttrFind()`               | 正则属性查找        | pattern: 正则表达式, attr: 属性名, context: 上下文节点 | `$doc->regexByAttrFind('/^https/', 'href', $div)`                                                 | 在指定上下文节点中使用正则表达式匹配元素的属性值。提供局部范围内的属性匹配能力。                                                                                              |
+| `regexByAttrFirst()`              | 正则属性首个        | pattern: 正则表达式, attr: 属性名                 | `$doc->regexByAttrFirst('/^https/', 'href')`                                                      | 使用正则表达式匹配并返回第一个元素的属性值。适用于只需要获取单个属性匹配结果的场景。                                                                                            |
 | **基础选择器**                         |
-| `*`                               | 通配符         | 无                                         | `$doc->find('*')`                                                 | 匹配文档中的所有元素。通常与其他选择器组合使用，如 `div *` 匹配 div 内的所有后代元素。注意：此选择器性能开销较大，谨慎使用。                                                                 |
-| `tag`                             | 标签          | tag: 标签名                                  | `$doc->find('div')`                                               | 根据标签名匹配所有指定的 HTML 元素。不区分大小写（HTML 模式下）。可以匹配任何有效的 HTML 标签，如 div、p、span、a 等。这是最基本和最常用的选择器之一。                                             |
-| `.class`                          | 类           | class: 类名                                 | `$doc->find('.item')`                                             | 匹配所有具有指定 class 属性值的元素。一个元素可以有多个类，`.class` 会匹配所有包含该类的元素。可以链式使用多个类选择器（如 `.class1.class2`）来匹配同时拥有多个类的元素。                                 |
-| `#id`                             | ID          | id: ID名                                   | `$doc->find('#main')`                                             | 根据元素的 id 属性值匹配元素。在 HTML 文档中，id 应该是唯一的。如果有多个元素使用相同 ID，此选择器只返回第一个。ID 选择器具有很高的优先级和性能优势。                                                  |
-| `s1, s2`                          | 多选          | 多个选择器                                     | `$doc->find('div, p')`                                            | 使用逗号分隔多个选择器，匹配任意一个选择器选中的元素。这允许您一次性选择多种不同类型的元素。选择器之间用逗号分隔，每个选择器可以独立工作。                                                                 |
-| `s1 s2`                           | 后代          | 父选择器 子选择器                                 | `$doc->find('div p')`                                             | 匹配作为第一个选择器后代的第二个选择器的所有元素。后代关系不限层级，可以是直接子元素、孙元素、曾孙元素等。这是最常用的组合选择器之一。                                                                   |
-| `s1 > s2`                         | 子代          | 父选择器 > 子选择器                               | `$doc->find('ul > li')`                                           | 匹配作为第一个选择器直接子元素的第二个选择器的所有元素。只匹配直接子元素，不包括更深层级的后代。此选择器比后代选择器更精确，性能也更好。                                                                  |
-| `s1 + s2`                         | 相邻兄弟        | 前一个 + 后一个                                 | `$doc->find('h2 + p')`                                            | 匹配紧接在第一个选择器之后的第二个选择器。两个元素必须拥有相同的父元素，并且第二个元素必须紧跟在第一个元素之后。只匹配一个元素。                                                                      |
-| `s1 ~ s2`                         | 通用兄弟        | 前一个 ~ 后面所有                                | `$doc->find('h2 ~ p')`                                            | 匹配第一个选择器之后的所有第二个选择器元素。两个元素必须拥有相同的父元素，但不要求相邻。会匹配所有满足条件的兄弟元素。                                                                           |
+| `*`                               | 通配符           | 无                                         | `$doc->find('*')`                                                                                 | 匹配文档中的所有元素。通常与其他选择器组合使用，如 `div *` 匹配 div 内的所有后代元素。注意：此选择器性能开销较大，谨慎使用。                                                                 |
+| `tag`                             | 标签            | tag: 标签名                                  | `$doc->find('div')`                                                                               | 根据标签名匹配所有指定的 HTML 元素。不区分大小写（HTML 模式下）。可以匹配任何有效的 HTML 标签，如 div、p、span、a 等。这是最基本和最常用的选择器之一。                                             |
+| `.class`                          | 类             | class: 类名                                 | `$doc->find('.item')`                                                                             | 匹配所有具有指定 class 属性值的元素。一个元素可以有多个类，`.class` 会匹配所有包含该类的元素。可以链式使用多个类选择器（如 `.class1.class2`）来匹配同时拥有多个类的元素。                                 |
+| `#id`                             | ID            | id: ID名                                   | `$doc->find('#main')`                                                                             | 根据元素的 id 属性值匹配元素。在 HTML 文档中，id 应该是唯一的。如果有多个元素使用相同 ID，此选择器只返回第一个。ID 选择器具有很高的优先级和性能优势。                                                  |
+| `s1, s2`                          | 多选            | 多个选择器                                     | `$doc->find('div, p')`                                                                            | 使用逗号分隔多个选择器，匹配任意一个选择器选中的元素。这允许您一次性选择多种不同类型的元素。选择器之间用逗号分隔，每个选择器可以独立工作。                                                                 |
+| `s1 s2`                           | 后代            | 父选择器 子选择器                                 | `$doc->find('div p')`                                                                             | 匹配作为第一个选择器后代的第二个选择器的所有元素。后代关系不限层级，可以是直接子元素、孙元素、曾孙元素等。这是最常用的组合选择器之一。                                                                   |
+| `s1 > s2`                         | 子代            | 父选择器 > 子选择器                               | `$doc->find('ul > li')`                                                                           | 匹配作为第一个选择器直接子元素的第二个选择器的所有元素。只匹配直接子元素，不包括更深层级的后代。此选择器比后代选择器更精确，性能也更好。                                                                  |
+| `s1 + s2`                         | 相邻兄弟          | 前一个 + 后一个                                 | `$doc->find('h2 + p')`                                                                            | 匹配紧接在第一个选择器之后的第二个选择器。两个元素必须拥有相同的父元素，并且第二个元素必须紧跟在第一个元素之后。只匹配一个元素。                                                                      |
+| `s1 ~ s2`                         | 通用兄弟          | 前一个 ~ 后面所有                                | `$doc->find('h2 ~ p')`                                                                            | 匹配第一个选择器之后的所有第二个选择器元素。两个元素必须拥有相同的父元素，但不要求相邻。会匹配所有满足条件的兄弟元素。                                                                           |
 | **属性选择器**                         |
-| `[attr]`                          | 存在          | attr: 属性名                                 | `$doc->find('[href]')`                                            | 匹配所有具有指定属性的元素，无论属性值是什么。只要元素存在该属性就会被选中。这是属性选择器中最简单的一种，常用于检查元素是否有某个特性。                                                                  |
-| `[attr=value]`                    | 等于          | attr, value                               | `$doc->find('[id="123"]')`                                        | 匹配属性值完全等于指定值的元素。比较是区分大小写的。值必须完全匹配，包括空格和特殊字符。常用于精确匹配特定的属性值。                                                                            |
-| `[attr~=value]`                   | 包含单词        | attr, value                               | `$doc->find('[class~="active"]')`                                 | 匹配属性值包含指定单词的元素。属性值通常是由空格分隔的单词列表，此选择器会匹配包含其中某个单词的元素。不会匹配部分字符串（如 "item-active" 不会匹配 "active"）。                                          |
-| `[attr\|=value]`                  | 等于或前缀       | attr, value                               | `$doc->find('[lang\|="en"]')`                                     | 匹配属性值等于指定值，或以指定值加连字符开头的元素。最常用于语言选择，例如 `lang="en"`、`lang="en-US"`、`lang="en-GB"` 都会被 `[lang\|="en"]` 匹配。                               |
-| `[attr^=value]`                   | 以...开头      | attr, value                               | `$doc->find('[src^="https"]')`                                    | 匹配属性值以指定字符串开头的元素。比较是区分大小写的。常用于匹配具有特定前缀的 URL、类名或 ID。例如，`[href^="http"]` 匹配所有 HTTP 链接。                                                  |
-| `[attr$=value]`                   | 以...结尾      | attr, value                               | `$doc->find('[src$=".jpg"]')`                                     | 匹配属性值以指定字符串结尾的元素。比较是区分大小写的。常用于匹配特定文件类型的 URL，如 `[src$=".png"]` 匹配所有 PNG 图片。                                                            |
-| `[attr*=value]`                   | 包含          | attr, value                               | `$doc->find('[class*="nav"]')`                                    | 匹配属性值包含指定子字符串的元素。可以在属性值的任何位置匹配。例如，`[class*="nav"]` 可以匹配 `class="main-nav"`、`class="navbar"`、`class="navigation"` 等。                   |
+| `[attr]`                          | 存在            | attr: 属性名                                 | `$doc->find('[href]')`                                                                            | 匹配所有具有指定属性的元素，无论属性值是什么。只要元素存在该属性就会被选中。这是属性选择器中最简单的一种，常用于检查元素是否有某个特性。                                                                  |
+| `[attr=value]`                    | 等于            | attr, value                               | `$doc->find('[id="123"]')`                                                                        | 匹配属性值完全等于指定值的元素。比较是区分大小写的。值必须完全匹配，包括空格和特殊字符。常用于精确匹配特定的属性值。                                                                            |
+| `[attr~=value]`                   | 包含单词          | attr, value                               | `$doc->find('[class~="active"]')`                                                                 | 匹配属性值包含指定单词的元素。属性值通常是由空格分隔的单词列表，此选择器会匹配包含其中某个单词的元素。不会匹配部分字符串（如 "item-active" 不会匹配 "active"）。                                          |
+| `[attr\|=value]`                  | 等于或前缀         | attr, value                               | `$doc->find('[lang\|="en"]')`                                                                     | 匹配属性值等于指定值，或以指定值加连字符开头的元素。最常用于语言选择，例如 `lang="en"`、`lang="en-US"`、`lang="en-GB"` 都会被 `[lang\|="en"]` 匹配。                               |
+| `[attr^=value]`                   | 以...开头        | attr, value                               | `$doc->find('[src^="https"]')`                                                                    | 匹配属性值以指定字符串开头的元素。比较是区分大小写的。常用于匹配具有特定前缀的 URL、类名或 ID。例如，`[href^="http"]` 匹配所有 HTTP 链接。                                                  |
+| `[attr$=value]`                   | 以...结尾        | attr, value                               | `$doc->find('[src$=".jpg"]')`                                                                     | 匹配属性值以指定字符串结尾的元素。比较是区分大小写的。常用于匹配特定文件类型的 URL，如 `[src$=".png"]` 匹配所有 PNG 图片。                                                            |
+| `[attr*=value]`                   | 包含            | attr, value                               | `$doc->find('[class*="nav"]')`                                                                    | 匹配属性值包含指定子字符串的元素。可以在属性值的任何位置匹配。例如，`[class*="nav"]` 可以匹配 `class="main-nav"`、`class="navbar"`、`class="navigation"` 等。                   |
 | **结构伪类**                          |
-| `:first-child`                    | 第一个子元素      | 无                                         | `$doc->find('li:first-child')`                                    | 匹配作为其父元素第一个子元素的元素。与 `:first` 不同，`:first-child` 是基于 DOM 结构中父元素的子元素位置，不是基于查询结果集。每个父元素可以有多个 `:first-child`。                              |
-| `:last-child`                     | 最后一个子元素     | 无                                         | `$doc->find('li:last-child')`                                     | 匹配作为其父元素最后一个子元素的元素。同样基于父元素的子元素位置，不是基于查询结果集。每个父元素可以有多个 `:last-child`。                                                                  |
-| `:only-child`                     | 唯一子元素       | 无                                         | `$doc->find('div:only-child')`                                    | 匹配作为其父元素唯一子元素的元素。即该父元素只有一个子元素，并且就是当前元素。常用于判断元素是否是独生子元素。                                                                               |
-| `:nth-child(n)`                   | 第n个子元素      | n: 数字/odd/even/an+b                       | `$doc->find('li:nth-child(2)')`                                   | 匹配作为其父元素第 n 个子元素的元素。参数 n 可以是：1) 数字（如 2、3）表示具体位置；2) odd 表示奇数位置（1,3,5...）；3) even 表示偶数位置（2,4,6...）；4) an+b 公式（如 2n+1、3n+2）表示符合特定模式的子元素。 |
-| `:nth-last-child(n)`              | 倒数第n个       | n: 数字/odd/even/an+b                       | `$doc->find('li:nth-last-child(2)')`                              | 与 `:nth-child(n)` 类似，但从后往前计数。即匹配作为其父元素倒数第 n 个子元素的元素。参数格式与 `:nth-child` 相同。                                                            |
-| `:first-of-type`                  | 同类型第一个      | 无                                         | `$doc->find('p:first-of-type')`                                   | 匹配作为其父元素第一个同类型子元素的元素。只考虑相同标签名的元素，忽略其他类型的元素。如果一个父元素有 p、span、div，那么 p、span、div 各自会有一个 first-of-type。                                    |
-| `:last-of-type`                   | 同类型最后一个     | 无                                         | `$doc->find('p:last-of-type')`                                    | 匹配作为其父元素最后一个同类型子元素的元素。同样只考虑相同标签名的元素。常用于选择某种类型的最后一个元素。                                                                                 |
-| `:only-of-type`                   | 唯一同类型       | 无                                         | `$doc->find('div:only-of-type')`                                  | 匹配作为其父元素中唯一同类型子元素的元素。即该父元素中只有一个该类型的元素。不同于 `:only-child`，`only-of-type` 允许有其他类型的兄弟元素。                                                  |
-| `:nth-of-type(n)`                 | 同类型第n个      | n: 数字/odd/even/an+b                       | `$doc->find('p:nth-of-type(2)')`                                  | 匹配作为其父元素第 n 个同类型子元素的元素。只计算同标签名的元素，忽略其他类型。参数格式与 `:nth-child` 相同。                                                                       |
-| `:nth-last-of-type(n)`            | 同类型倒数第n个    | n: 数字/odd/even/an+b                       | `$doc->find('p:nth-last-of-type(2)')`                             | 与 `:nth-of-type(n)` 类似，但从后往前计数。匹配作为其父元素倒数第 n 个同类型子元素的元素。                                                                              |
+| `:first-child`                    | 第一个子元素        | 无                                         | `$doc->find('li:first-child')`                                                                    | 匹配作为其父元素第一个子元素的元素。与 `:first` 不同，`:first-child` 是基于 DOM 结构中父元素的子元素位置，不是基于查询结果集。每个父元素可以有多个 `:first-child`。                              |
+| `:last-child`                     | 最后一个子元素       | 无                                         | `$doc->find('li:last-child')`                                                                     | 匹配作为其父元素最后一个子元素的元素。同样基于父元素的子元素位置，不是基于查询结果集。每个父元素可以有多个 `:last-child`。                                                                  |
+| `:only-child`                     | 唯一子元素         | 无                                         | `$doc->find('div:only-child')`                                                                    | 匹配作为其父元素唯一子元素的元素。即该父元素只有一个子元素，并且就是当前元素。常用于判断元素是否是独生子元素。                                                                               |
+| `:nth-child(n)`                   | 第n个子元素        | n: 数字/odd/even/an+b                       | `$doc->find('li:nth-child(2)')`                                                                   | 匹配作为其父元素第 n 个子元素的元素。参数 n 可以是：1) 数字（如 2、3）表示具体位置；2) odd 表示奇数位置（1,3,5...）；3) even 表示偶数位置（2,4,6...）；4) an+b 公式（如 2n+1、3n+2）表示符合特定模式的子元素。 |
+| `:nth-last-child(n)`              | 倒数第n个         | n: 数字/odd/even/an+b                       | `$doc->find('li:nth-last-child(2)')`                                                              | 与 `:nth-child(n)` 类似，但从后往前计数。即匹配作为其父元素倒数第 n 个子元素的元素。参数格式与 `:nth-child` 相同。                                                            |
+| `:first-of-type`                  | 同类型第一个        | 无                                         | `$doc->find('p:first-of-type')`                                                                   | 匹配作为其父元素第一个同类型子元素的元素。只考虑相同标签名的元素，忽略其他类型的元素。如果一个父元素有 p、span、div，那么 p、span、div 各自会有一个 first-of-type。                                    |
+| `:last-of-type`                   | 同类型最后一个       | 无                                         | `$doc->find('p:last-of-type')`                                                                    | 匹配作为其父元素最后一个同类型子元素的元素。同样只考虑相同标签名的元素。常用于选择某种类型的最后一个元素。                                                                                 |
+| `:only-of-type`                   | 唯一同类型         | 无                                         | `$doc->find('div:only-of-type')`                                                                  | 匹配作为其父元素中唯一同类型子元素的元素。即该父元素中只有一个该类型的元素。不同于 `:only-child`，`only-of-type` 允许有其他类型的兄弟元素。                                                  |
+| `:nth-of-type(n)`                 | 同类型第n个        | n: 数字/odd/even/an+b                       | `$doc->find('p:nth-of-type(2)')`                                                                  | 匹配作为其父元素第 n 个同类型子元素的元素。只计算同标签名的元素，忽略其他类型。参数格式与 `:nth-child` 相同。                                                                       |
+| `:nth-last-of-type(n)`            | 同类型倒数第n个      | n: 数字/odd/even/an+b                       | `$doc->find('p:nth-last-of-type(2)')`                                                             | 与 `:nth-of-type(n)` 类似，但从后往前计数。匹配作为其父元素倒数第 n 个同类型子元素的元素。                                                                              |
 | **内容伪类**                          |
-| `:empty`                          | 空元素         | 无                                         | `$doc->find('div:empty')`                                         | 匹配没有任何子元素和文本内容的元素。包括没有子元素、文本内容为空或仅包含空白字符的元素都不会被匹配。这是判断元素是否为空的精确方法。                                                                    |
-| `:contains(text)`                 | 包含文本        | text: 文本                                  | `$doc->find('div:contains(Hello)')`                               | 匹配包含指定文本的元素。搜索范围包括元素自身的文本内容和所有子元素的文本内容。区分大小写。常用于查找包含特定关键词的元素。                                                                         |
-| `:contains-text(text)`            | 直接包含文本      | text: 文本                                  | `$doc->find('div:contains-text(Hello)')`                          | 匹配直接包含指定文本的元素。与 `:contains` 不同，此选择器只检查元素自身的文本内容，不包括子元素的文本。用于精确定位直接包含某文本的元素。                                                           |
-| `:starts-with(text)`              | 以...开头      | text: 文本                                  | `$doc->find('div:starts-with(Hello)')`                            | 匹配文本内容以指定字符串开头的元素。只检查元素自身的文本内容。常用于查找具有特定前缀的文本内容。区分大小写。                                                                                |
-| `:ends-with(text)`                | 以...结尾      | text: 文本                                  | `$doc->find('div:ends-with(World)')`                              | 匹配文本内容以指定字符串结尾的元素。只检查元素自身的文本内容。常用于查找具有特定后缀的文本内容。区分大小写。                                                                                |
-| `:has(selector)`                  | 包含后代        | selector: 选择器                             | `$doc->find('div:has(a)')`                                        | 匹配包含匹配指定选择器后代元素的父元素。即如果某个元素的后代中（不限层级）有元素匹配给定的选择器，那么该父元素就会被选中。这是查找特定结构元素的强大工具。                                                         |
-| `:not(selector)`                  | 不匹配         | selector: 选择器                             | `$doc->find('div:not(.active)')`                                  | 匹配不匹配指定选择器的元素。即反向选择，选择所有不满足给定条件的元素。可以用于排除特定类型的元素。注意：参数选择器不能过于复杂。                                                                      |
-| `:blank`                          | 空白          | 无                                         | `$doc->find('p:blank')`                                           | 匹配空白元素（无可见文本或子元素）。与 `:empty` 类似，但允许包含空白字符。元素如果没有任何可见内容或只有空白字符（如空格、换行、制表符），则会被匹配。                                                      |
-| `:parent-only-text`               | 只有文本        | 无                                         | `$doc->find('div:parent-only-text')`                              | 匹配只有文本内容且没有子元素的元素。即元素必须包含非空白文本，但不能有任何子元素。常用于查找纯文本节点。                                                                                  |
+| `:empty`                          | 空元素           | 无                                         | `$doc->find('div:empty')`                                                                         | 匹配没有任何子元素和文本内容的元素。包括没有子元素、文本内容为空或仅包含空白字符的元素都不会被匹配。这是判断元素是否为空的精确方法。                                                                    |
+| `:contains(text)`                 | 包含文本          | text: 文本                                  | `$doc->find('div:contains(Hello)')`                                                               | 匹配包含指定文本的元素。搜索范围包括元素自身的文本内容和所有子元素的文本内容。区分大小写。常用于查找包含特定关键词的元素。                                                                         |
+| `:contains-text(text)`            | 直接包含文本        | text: 文本                                  | `$doc->find('div:contains-text(Hello)')`                                                          | 匹配直接包含指定文本的元素。与 `:contains` 不同，此选择器只检查元素自身的文本内容，不包括子元素的文本。用于精确定位直接包含某文本的元素。                                                           |
+| `:starts-with(text)`              | 以...开头        | text: 文本                                  | `$doc->find('div:starts-with(Hello)')`                                                            | 匹配文本内容以指定字符串开头的元素。只检查元素自身的文本内容。常用于查找具有特定前缀的文本内容。区分大小写。                                                                                |
+| `:ends-with(text)`                | 以...结尾        | text: 文本                                  | `$doc->find('div:ends-with(World)')`                                                              | 匹配文本内容以指定字符串结尾的元素。只检查元素自身的文本内容。常用于查找具有特定后缀的文本内容。区分大小写。                                                                                |
+| `:has(selector)`                  | 包含后代          | selector: 选择器                             | `$doc->find('div:has(a)')`                                                                        | 匹配包含匹配指定选择器后代元素的父元素。即如果某个元素的后代中（不限层级）有元素匹配给定的选择器，那么该父元素就会被选中。这是查找特定结构元素的强大工具。                                                         |
+| `:not(selector)`                  | 不匹配           | selector: 选择器                             | `$doc->find('div:not(.active)')`                                                                  | 匹配不匹配指定选择器的元素。即反向选择，选择所有不满足给定条件的元素。可以用于排除特定类型的元素。注意：参数选择器不能过于复杂。                                                                      |
+| `:blank`                          | 空白            | 无                                         | `$doc->find('p:blank')`                                                                           | 匹配空白元素（无可见文本或子元素）。与 `:empty` 类似，但允许包含空白字符。元素如果没有任何可见内容或只有空白字符（如空格、换行、制表符），则会被匹配。                                                      |
+| `:parent-only-text`               | 只有文本          | 无                                         | `$doc->find('div:parent-only-text')`                                                              | 匹配只有文本内容且没有子元素的元素。即元素必须包含非空白文本，但不能有任何子元素。常用于查找纯文本节点。                                                                                  |
 | **表单伪类**                          |
-| `:enabled`                        | 启用          | 无                                         | `$doc->find(':enabled')`                                          | 启用的表单元素                                                                                                                               |
-| `:disabled`                       | 禁用          | 无                                         | `$doc->find(':disabled')`                                         | 禁用的表单元素                                                                                                                               |
-| `:checked`                        | 选中          | 无                                         | `$doc->find(':checked')`                                          | 选中的复选框/单选                                                                                                                             |
-| `:selected`                       | 选中的选项       | 无                                         | `$doc->find('option:selected')`                                   | 选中的选项                                                                                                                                 |
-| `:required`                       | 必填          | 无                                         | `$doc->find(':required')`                                         | 必填字段                                                                                                                                  |
-| `:optional`                       | 可选          | 无                                         | `$doc->find(':optional')`                                         | 可选字段                                                                                                                                  |
-| `:read-only`                      | 只读          | 无                                         | `$doc->find(':read-only')`                                        | 只读字段                                                                                                                                  |
-| `:read-write`                     | 可写          | 无                                         | `$doc->find(':read-write')`                                       | 可写字段                                                                                                                                  |
+| `:enabled`                        | 启用            | 无                                         | `$doc->find(':enabled')`                                                                          | 启用的表单元素                                                                                                                               |
+| `:disabled`                       | 禁用            | 无                                         | `$doc->find(':disabled')`                                                                         | 禁用的表单元素                                                                                                                               |
+| `:checked`                        | 选中            | 无                                         | `$doc->find(':checked')`                                                                          | 选中的复选框/单选                                                                                                                             |
+| `:selected`                       | 选中的选项         | 无                                         | `$doc->find('option:selected')`                                                                   | 选中的选项                                                                                                                                 |
+| `:required`                       | 必填            | 无                                         | `$doc->find(':required')`                                                                         | 必填字段                                                                                                                                  |
+| `:optional`                       | 可选            | 无                                         | `$doc->find(':optional')`                                                                         | 可选字段                                                                                                                                  |
+| `:read-only`                      | 只读            | 无                                         | `$doc->find(':read-only')`                                                                        | 只读字段                                                                                                                                  |
+| `:read-write`                     | 可写            | 无                                         | `$doc->find(':read-write')`                                                                       | 可写字段                                                                                                                                  |
 | **表单元素类型**                        |
-| `:text`                           | 文本输入        | 无                                         | `$doc->find('input:text')`                                        | 文本输入框                                                                                                                                 |
-| `:password`                       | 密码          | 无                                         | `$doc->find('input:password')`                                    | 密码框                                                                                                                                   |
-| `:checkbox`                       | 复选框         | 无                                         | `$doc->find('input:checkbox')`                                    | 复选框                                                                                                                                   |
-| `:radio`                          | 单选按钮        | 无                                         | `$doc->find('input:radio')`                                       | 单选按钮                                                                                                                                  |
-| `:file`                           | 文件          | 无                                         | `$doc->find('input:file')`                                        | 文件上传                                                                                                                                  |
-| `:email`                          | 邮箱          | 无                                         | `$doc->find('input:email')`                                       | 邮箱输入                                                                                                                                  |
-| `:url`                            | URL         | 无                                         | `$doc->find('input:url')`                                         | URL输入                                                                                                                                 |
-| `:number`                         | 数字          | 无                                         | `$doc->find('input:number')`                                      | 数字输入                                                                                                                                  |
-| `:tel`                            | 电话          | 无                                         | `$doc->find('input:tel')`                                         | 电话输入                                                                                                                                  |
-| `:search`                         | 搜索          | 无                                         | `$doc->find('input:search')`                                      | 搜索框                                                                                                                                   |
-| `:date`                           | 日期          | 无                                         | `$doc->find('input:date')`                                        | 日期选择                                                                                                                                  |
-| `:time`                           | 时间          | 无                                         | `$doc->find('input:time')`                                        | 时间选择                                                                                                                                  |
-| `:datetime`                       | 日期时间        | 无                                         | `$doc->find('input:datetime')`                                    | 日期时间                                                                                                                                  |
-| `:datetime-local`                 | 本地日期时间      | 无                                         | `$doc->find('input:datetime-local')`                              | 本地日期时间                                                                                                                                |
-| `:month`                          | 月份          | 无                                         | `$doc->find('input:month')`                                       | 月份选择                                                                                                                                  |
-| `:week`                           | 周           | 无                                         | `$doc->find('input:week')`                                        | 周选择                                                                                                                                   |
-| `:color`                          | 颜色          | 无                                         | `$doc->find('input:color')`                                       | 颜色选择器                                                                                                                                 |
-| `:range`                          | 范围          | 无                                         | `$doc->find('input:range')`                                       | 范围滑块                                                                                                                                  |
-| `:submit`                         | 提交按钮        | 无                                         | `$doc->find('input:submit')`                                      | 提交按钮                                                                                                                                  |
-| `:reset`                          | 重置按钮        | 无                                         | `$doc->find('input:reset')`                                       | 重置按钮                                                                                                                                  |
-| `:image`                          | 图片按钮        | 无                                         | `$doc->find('input:image')`                                       | 图片按钮                                                                                                                                  |
+| `:text`                           | 文本输入          | 无                                         | `$doc->find('input:text')`                                                                        | 文本输入框                                                                                                                                 |
+| `:password`                       | 密码            | 无                                         | `$doc->find('input:password')`                                                                    | 密码框                                                                                                                                   |
+| `:checkbox`                       | 复选框           | 无                                         | `$doc->find('input:checkbox')`                                                                    | 复选框                                                                                                                                   |
+| `:radio`                          | 单选按钮          | 无                                         | `$doc->find('input:radio')`                                                                       | 单选按钮                                                                                                                                  |
+| `:file`                           | 文件            | 无                                         | `$doc->find('input:file')`                                                                        | 文件上传                                                                                                                                  |
+| `:email`                          | 邮箱            | 无                                         | `$doc->find('input:email')`                                                                       | 邮箱输入                                                                                                                                  |
+| `:url`                            | URL           | 无                                         | `$doc->find('input:url')`                                                                         | URL输入                                                                                                                                 |
+| `:number`                         | 数字            | 无                                         | `$doc->find('input:number')`                                                                      | 数字输入                                                                                                                                  |
+| `:tel`                            | 电话            | 无                                         | `$doc->find('input:tel')`                                                                         | 电话输入                                                                                                                                  |
+| `:search`                         | 搜索            | 无                                         | `$doc->find('input:search')`                                                                      | 搜索框                                                                                                                                   |
+| `:date`                           | 日期            | 无                                         | `$doc->find('input:date')`                                                                        | 日期选择                                                                                                                                  |
+| `:time`                           | 时间            | 无                                         | `$doc->find('input:time')`                                                                        | 时间选择                                                                                                                                  |
+| `:datetime`                       | 日期时间          | 无                                         | `$doc->find('input:datetime')`                                                                    | 日期时间                                                                                                                                  |
+| `:datetime-local`                 | 本地日期时间        | 无                                         | `$doc->find('input:datetime-local')`                                                              | 本地日期时间                                                                                                                                |
+| `:month`                          | 月份            | 无                                         | `$doc->find('input:month')`                                                                       | 月份选择                                                                                                                                  |
+| `:week`                           | 周             | 无                                         | `$doc->find('input:week')`                                                                        | 周选择                                                                                                                                   |
+| `:color`                          | 颜色            | 无                                         | `$doc->find('input:color')`                                                                       | 颜色选择器                                                                                                                                 |
+| `:range`                          | 范围            | 无                                         | `$doc->find('input:range')`                                                                       | 范围滑块                                                                                                                                  |
+| `:submit`                         | 提交按钮          | 无                                         | `$doc->find('input:submit')`                                                                      | 提交按钮                                                                                                                                  |
+| `:reset`                          | 重置按钮          | 无                                         | `$doc->find('input:reset')`                                                                       | 重置按钮                                                                                                                                  |
+| `:image`                          | 图片按钮          | 无                                         | `$doc->find('input:image')`                                                                       | 图片按钮                                                                                                                                  |
 | **HTML元素伪类**                      |
-| `:header`                         | 标题          | 无                                         | `$doc->find(':header')`                                           | h1-h6                                                                                                                                 |
-| `:input`                          | 表单输入        | 无                                         | `$doc->find(':input')`                                            | input/textarea/select/button                                                                                                          |
-| `:button`                         | 按钮          | 无                                         | `$doc->find(':button')`                                           | button/input button                                                                                                                   |
-| `:link`                           | 链接          | 无                                         | `$doc->find('a:link')`                                            | 有href的a标签                                                                                                                             |
-| `:visited`                        | 已访问链接       | 无                                         | `$doc->find('a:visited')`                                         | a标签                                                                                                                                   |
-| `:image`                          | 图片          | 无                                         | `$doc->find(':image')`                                            | img标签                                                                                                                                 |
-| `:video`                          | 视频          | 无                                         | `$doc->find(':video')`                                            | video标签                                                                                                                               |
-| `:audio`                          | 音频          | 无                                         | `$doc->find(':audio')`                                            | audio标签                                                                                                                               |
-| `:canvas`                         | 画布          | 无                                         | `$doc->find(':canvas')`                                           | canvas标签                                                                                                                              |
-| `:svg`                            | SVG         | 无                                         | `$doc->find(':svg')`                                              | svg标签                                                                                                                                 |
-| `:script`                         | 脚本          | 无                                         | `$doc->find(':script')`                                           | script标签                                                                                                                              |
-| `:style`                          | 样式          | 无                                         | `$doc->find(':style')`                                            | style标签                                                                                                                               |
-| `:meta`                           | 元信息         | 无                                         | `$doc->find(':meta')`                                             | meta标签                                                                                                                                |
-| `:link`                           | 链接          | 无                                         | `$doc->find(':link')`                                             | link标签                                                                                                                                |
-| `:base`                           | 基准URL       | 无                                         | `$doc->find(':base')`                                             | base标签                                                                                                                                |
-| `:head`                           | 头部          | 无                                         | `$doc->find(':head')`                                             | head标签                                                                                                                                |
-| `:body`                           | 主体          | 无                                         | `$doc->find(':body')`                                             | body标签                                                                                                                                |
-| `:title`                          | 标题          | 无                                         | `$doc->find(':title')`                                            | title标签                                                                                                                               |
+| `:header`                         | 标题            | 无                                         | `$doc->find(':header')`                                                                           | h1-h6                                                                                                                                 |
+| `:input`                          | 表单输入          | 无                                         | `$doc->find(':input')`                                                                            | input/textarea/select/button                                                                                                          |
+| `:button`                         | 按钮            | 无                                         | `$doc->find(':button')`                                                                           | button/input button                                                                                                                   |
+| `:link`                           | 链接            | 无                                         | `$doc->find('a:link')`                                                                            | 有href的a标签                                                                                                                             |
+| `:visited`                        | 已访问链接         | 无                                         | `$doc->find('a:visited')`                                                                         | a标签                                                                                                                                   |
+| `:image`                          | 图片            | 无                                         | `$doc->find(':image')`                                                                            | img标签                                                                                                                                 |
+| `:video`                          | 视频            | 无                                         | `$doc->find(':video')`                                                                            | video标签                                                                                                                               |
+| `:audio`                          | 音频            | 无                                         | `$doc->find(':audio')`                                                                            | audio标签                                                                                                                               |
+| `:canvas`                         | 画布            | 无                                         | `$doc->find(':canvas')`                                                                           | canvas标签                                                                                                                              |
+| `:svg`                            | SVG           | 无                                         | `$doc->find(':svg')`                                                                              | svg标签                                                                                                                                 |
+| `:script`                         | 脚本            | 无                                         | `$doc->find(':script')`                                                                           | script标签                                                                                                                              |
+| `:style`                          | 样式            | 无                                         | `$doc->find(':style')`                                                                            | style标签                                                                                                                               |
+| `:meta`                           | 元信息           | 无                                         | `$doc->find(':meta')`                                                                             | meta标签                                                                                                                                |
+| `:link`                           | 链接            | 无                                         | `$doc->find(':link')`                                                                             | link标签                                                                                                                                |
+| `:base`                           | 基准URL         | 无                                         | `$doc->find(':base')`                                                                             | base标签                                                                                                                                |
+| `:head`                           | 头部            | 无                                         | `$doc->find(':head')`                                                                             | head标签                                                                                                                                |
+| `:body`                           | 主体            | 无                                         | `$doc->find(':body')`                                                                             | body标签                                                                                                                                |
+| `:title`                          | 标题            | 无                                         | `$doc->find(':title')`                                                                            | title标签                                                                                                                               |
 | **HTML5结构元素**                     |
-| `:table`                          | 表格          | 无                                         | `$doc->find(':table')`                                            | table标签                                                                                                                               |
-| `:tr`                             | 表格行         | 无                                         | `$doc->find(':tr')`                                               | tr标签                                                                                                                                  |
-| `:td`                             | 表格单元格       | 无                                         | `$doc->find(':td')`                                               | td标签                                                                                                                                  |
-| `:th`                             | 表格头         | 无                                         | `$doc->find(':th')`                                               | th标签                                                                                                                                  |
-| `:thead`                          | 表格头         | 无                                         | `$doc->find(':thead')`                                            | thead标签                                                                                                                               |
-| `:tbody`                          | 表格主体        | 无                                         | `$doc->find(':tbody')`                                            | tbody标签                                                                                                                               |
-| `:tfoot`                          | 表格尾         | 无                                         | `$doc->find(':tfoot')`                                            | tfoot标签                                                                                                                               |
-| `:ul`                             | 无序列表        | 无                                         | `$doc->find(':ul')`                                               | ul标签                                                                                                                                  |
-| `:ol`                             | 有序列表        | 无                                         | `$doc->find(':ol')`                                               | ol标签                                                                                                                                  |
-| `:li`                             | 列表项         | 无                                         | `$doc->find(':li')`                                               | li标签                                                                                                                                  |
-| `:dl`                             | 定义列表        | 无                                         | `$doc->find(':dl')`                                               | dl标签                                                                                                                                  |
-| `:dt`                             | 定义术语        | 无                                         | `$doc->find(':dt')`                                               | dt标签                                                                                                                                  |
-| `:dd`                             | 定义描述        | 无                                         | `$doc->find(':dd')`                                               | dd标签                                                                                                                                  |
-| `:form`                           | 表单          | 无                                         | `$doc->find(':form')`                                             | form标签                                                                                                                                |
-| `:label`                          | 标签          | 无                                         | `$doc->find(':label')`                                            | label标签                                                                                                                               |
-| `:fieldset`                       | 字段集         | 无                                         | `$doc->find(':fieldset')`                                         | fieldset标签                                                                                                                            |
-| `:legend`                         | 图例          | 无                                         | `$doc->find(':legend')`                                           | legend标签                                                                                                                              |
-| `:section`                        | 章节          | 无                                         | `$doc->find(':section')`                                          | section标签                                                                                                                             |
-| `:article`                        | 文章          | 无                                         | `$doc->find(':article')`                                          | article标签                                                                                                                             |
-| `:aside`                          | 侧边栏         | 无                                         | `$doc->find(':aside')`                                            | aside标签                                                                                                                               |
-| `:nav`                            | 导航          | 无                                         | `$doc->find(':nav')`                                              | nav标签                                                                                                                                 |
-| `:main`                           | 主内容         | 无                                         | `$doc->find(':main')`                                             | main标签                                                                                                                                |
-| `:footer`                         | 页脚          | 无                                         | `$doc->find(':footer')`                                           | footer标签                                                                                                                              |
-| `:figure`                         | 图表          | 无                                         | `$doc->find(':figure')`                                           | figure标签                                                                                                                              |
-| `:figcaption`                     | 图表标题        | 无                                         | `$doc->find(':figcaption')`                                       | figcaption标签                                                                                                                          |
-| `:details`                        | 详情          | 无                                         | `$doc->find(':details')`                                          | details标签                                                                                                                             |
-| `:summary`                        | 摘要          | 无                                         | `$doc->find(':summary')`                                          | summary标签                                                                                                                             |
-| `:dialog`                         | 对话框         | 无                                         | `$doc->find(':dialog')`                                           | dialog标签                                                                                                                              |
-| `:menu`                           | 菜单          | 无                                         | `$doc->find(':menu')`                                             | menu标签                                                                                                                                |
+| `:table`                          | 表格            | 无                                         | `$doc->find(':table')`                                                                            | table标签                                                                                                                               |
+| `:tr`                             | 表格行           | 无                                         | `$doc->find(':tr')`                                                                               | tr标签                                                                                                                                  |
+| `:td`                             | 表格单元格         | 无                                         | `$doc->find(':td')`                                                                               | td标签                                                                                                                                  |
+| `:th`                             | 表格头           | 无                                         | `$doc->find(':th')`                                                                               | th标签                                                                                                                                  |
+| `:thead`                          | 表格头           | 无                                         | `$doc->find(':thead')`                                                                            | thead标签                                                                                                                               |
+| `:tbody`                          | 表格主体          | 无                                         | `$doc->find(':tbody')`                                                                            | tbody标签                                                                                                                               |
+| `:tfoot`                          | 表格尾           | 无                                         | `$doc->find(':tfoot')`                                                                            | tfoot标签                                                                                                                               |
+| `:ul`                             | 无序列表          | 无                                         | `$doc->find(':ul')`                                                                               | ul标签                                                                                                                                  |
+| `:ol`                             | 有序列表          | 无                                         | `$doc->find(':ol')`                                                                               | ol标签                                                                                                                                  |
+| `:li`                             | 列表项           | 无                                         | `$doc->find(':li')`                                                                               | li标签                                                                                                                                  |
+| `:dl`                             | 定义列表          | 无                                         | `$doc->find(':dl')`                                                                               | dl标签                                                                                                                                  |
+| `:dt`                             | 定义术语          | 无                                         | `$doc->find(':dt')`                                                                               | dt标签                                                                                                                                  |
+| `:dd`                             | 定义描述          | 无                                         | `$doc->find(':dd')`                                                                               | dd标签                                                                                                                                  |
+| `:form`                           | 表单            | 无                                         | `$doc->find(':form')`                                                                             | form标签                                                                                                                                |
+| `:label`                          | 标签            | 无                                         | `$doc->find(':label')`                                                                            | label标签                                                                                                                               |
+| `:fieldset`                       | 字段集           | 无                                         | `$doc->find(':fieldset')`                                                                         | fieldset标签                                                                                                                            |
+| `:legend`                         | 图例            | 无                                         | `$doc->find(':legend')`                                                                           | legend标签                                                                                                                              |
+| `:section`                        | 章节            | 无                                         | `$doc->find(':section')`                                                                          | section标签                                                                                                                             |
+| `:article`                        | 文章            | 无                                         | `$doc->find(':article')`                                                                          | article标签                                                                                                                             |
+| `:aside`                          | 侧边栏           | 无                                         | `$doc->find(':aside')`                                                                            | aside标签                                                                                                                               |
+| `:nav`                            | 导航            | 无                                         | `$doc->find(':nav')`                                                                              | nav标签                                                                                                                                 |
+| `:main`                           | 主内容           | 无                                         | `$doc->find(':main')`                                                                             | main标签                                                                                                                                |
+| `:footer`                         | 页脚            | 无                                         | `$doc->find(':footer')`                                                                           | footer标签                                                                                                                              |
+| `:figure`                         | 图表            | 无                                         | `$doc->find(':figure')`                                                                           | figure标签                                                                                                                              |
+| `:figcaption`                     | 图表标题          | 无                                         | `$doc->find(':figcaption')`                                                                       | figcaption标签                                                                                                                          |
+| `:details`                        | 详情            | 无                                         | `$doc->find(':details')`                                                                          | details标签                                                                                                                             |
+| `:summary`                        | 摘要            | 无                                         | `$doc->find(':summary')`                                                                          | summary标签                                                                                                                             |
+| `:dialog`                         | 对话框           | 无                                         | `$doc->find(':dialog')`                                                                           | dialog标签                                                                                                                              |
+| `:menu`                           | 菜单            | 无                                         | `$doc->find(':menu')`                                                                             | menu标签                                                                                                                                |
 | **位置伪类**                          |
-| `:first`                          | 第一个         | 无                                         | `$doc->find('li:first')`                                          | 结果集第一个                                                                                                                                |
-| `:last`                           | 最后一个        | 无                                         | `$doc->find('li:last')`                                           | 结果集最后一个                                                                                                                               |
-| `:even`                           | 偶数          | 无                                         | `$doc->find('li:even')`                                           | 偶数位置(1,3,5)                                                                                                                           |
-| `:odd`                            | 奇数          | 无                                         | `$doc->find('li:odd')`                                            | 奇数位置(0,2,4)                                                                                                                           |
-| `:eq(n)`                          | 等于索引        | n: 索引                                     | `$doc->find('li:eq(2)')`                                          | 索引等于n                                                                                                                                 |
-| `:gt(n)`                          | 大于索引        | n: 索引                                     | `$doc->find('li:gt(2)')`                                          | 索引大于n                                                                                                                                 |
-| `:lt(n)`                          | 小于索引        | n: 索引                                     | `$doc->find('li:lt(3)')`                                          | 索引小于n                                                                                                                                 |
-| `:parent`                         | 父元素         | 无                                         | `$doc->find(':parent')`                                           | 有子元素的元素                                                                                                                               |
-| `:between(start,end)`             | 索引范围        | start, end                                | `$doc->find('li:between(2,5)')`                                   | 索引在2-5之间                                                                                                                              |
-| `:slice(start:end)`               | 切片          | start:end                                 | `$doc->find('li:slice(1:3)')`                                     | 切片范围                                                                                                                                  |
+| `:first`                          | 第一个           | 无                                         | `$doc->find('li:first')`                                                                          | 结果集第一个                                                                                                                                |
+| `:last`                           | 最后一个          | 无                                         | `$doc->find('li:last')`                                                                           | 结果集最后一个                                                                                                                               |
+| `:even`                           | 偶数            | 无                                         | `$doc->find('li:even')`                                                                           | 偶数位置(1,3,5)                                                                                                                           |
+| `:odd`                            | 奇数            | 无                                         | `$doc->find('li:odd')`                                                                            | 奇数位置(0,2,4)                                                                                                                           |
+| `:eq(n)`                          | 等于索引          | n: 索引                                     | `$doc->find('li:eq(2)')`                                                                          | 索引等于n                                                                                                                                 |
+| `:gt(n)`                          | 大于索引          | n: 索引                                     | `$doc->find('li:gt(2)')`                                                                          | 索引大于n                                                                                                                                 |
+| `:lt(n)`                          | 小于索引          | n: 索引                                     | `$doc->find('li:lt(3)')`                                                                          | 索引小于n                                                                                                                                 |
+| `:parent`                         | 父元素           | 无                                         | `$doc->find(':parent')`                                                                           | 有子元素的元素                                                                                                                               |
+| `:between(start,end)`             | 索引范围          | start, end                                | `$doc->find('li:between(2,5)')`                                                                   | 索引在2-5之间                                                                                                                              |
+| `:slice(start:end)`               | 切片            | start:end                                 | `$doc->find('li:slice(1:3)')`                                                                     | 切片范围                                                                                                                                  |
 | **可见性伪类**                         |
-| `:visible`                        | 可见          | 无                                         | `$doc->find(':visible')`                                          | 可见元素                                                                                                                                  |
-| `:hidden`                         | 隐藏          | 无                                         | `$doc->find(':hidden')`                                           | 隐藏元素                                                                                                                                  |
+| `:visible`                        | 可见            | 无                                         | `$doc->find(':visible')`                                                                          | 可见元素                                                                                                                                  |
+| `:hidden`                         | 隐藏            | 无                                         | `$doc->find(':hidden')`                                                                           | 隐藏元素                                                                                                                                  |
 | **状态伪类**                          |
-| `:root`                           | 根元素         | 无                                         | `$doc->find(':root')`                                             | 文档根元素                                                                                                                                 |
-| `:target`                         | 目标          | 无                                         | `$doc->find(':target')`                                           | URL锚点目标                                                                                                                               |
-| `:focus`                          | 焦点          | 无                                         | `$doc->find(':focus')`                                            | 获得焦点                                                                                                                                  |
-| `:hover`                          | 悬停          | 无                                         | `$doc->find(':hover')`                                            | 鼠标悬停                                                                                                                                  |
-| `:active`                         | 激活          | 无                                         | `$doc->find(':active')`                                           | 被激活                                                                                                                                   |
+| `:root`                           | 根元素           | 无                                         | `$doc->find(':root')`                                                                             | 文档根元素                                                                                                                                 |
+| `:target`                         | 目标            | 无                                         | `$doc->find(':target')`                                                                           | URL锚点目标                                                                                                                               |
+| `:focus`                          | 焦点            | 无                                         | `$doc->find(':focus')`                                                                            | 获得焦点                                                                                                                                  |
+| `:hover`                          | 悬停            | 无                                         | `$doc->find(':hover')`                                                                            | 鼠标悬停                                                                                                                                  |
+| `:active`                         | 激活            | 无                                         | `$doc->find(':active')`                                                                           | 被激活                                                                                                                                   |
 | **语言和方向**                         |
-| `:lang(lang)`                     | 语言          | lang: 语言代码                                | `$doc->find(':lang(zh)')`                                         | 指定语言                                                                                                                                  |
-| `:dir-ltr`                        | 左到右         | 无                                         | `$doc->find(':dir-ltr')`                                          | 左到右方向                                                                                                                                 |
-| `:dir-rtl`                        | 右到左         | 无                                         | `$doc->find(':dir-rtl')`                                          | 右到左方向                                                                                                                                 |
-| `:dir-auto`                       | 自动          | 无                                         | `$doc->find(':dir-auto')`                                         | 自动方向                                                                                                                                  |
+| `:lang(lang)`                     | 语言            | lang: 语言代码                                | `$doc->find(':lang(zh)')`                                                                         | 指定语言                                                                                                                                  |
+| `:dir-ltr`                        | 左到右           | 无                                         | `$doc->find(':dir-ltr')`                                                                          | 左到右方向                                                                                                                                 |
+| `:dir-rtl`                        | 右到左           | 无                                         | `$doc->find(':dir-rtl')`                                                                          | 右到左方向                                                                                                                                 |
+| `:dir-auto`                       | 自动            | 无                                         | `$doc->find(':dir-auto')`                                                                         | 自动方向                                                                                                                                  |
 | **深度伪类**                          |
-| `:depth-0`                        | 根级别         | 无                                         | `$doc->find(':depth-0')`                                          | 无祖先元素                                                                                                                                 |
-| `:depth-1`                        | 深度1         | 无                                         | `$doc->find(':depth-1')`                                          | 1层祖先                                                                                                                                  |
-| `:depth-2`                        | 深度2         | 无                                         | `$doc->find(':depth-2')`                                          | 2层祖先                                                                                                                                  |
-| `:depth-3`                        | 深度3         | 无                                         | `$doc->find(':depth-3')`                                          | 3层祖先                                                                                                                                  |
+| `:depth-0`                        | 根级别           | 无                                         | `$doc->find(':depth-0')`                                                                          | 无祖先元素                                                                                                                                 |
+| `:depth-1`                        | 深度1           | 无                                         | `$doc->find(':depth-1')`                                                                          | 1层祖先                                                                                                                                  |
+| `:depth-2`                        | 深度2           | 无                                         | `$doc->find(':depth-2')`                                                                          | 2层祖先                                                                                                                                  |
+| `:depth-3`                        | 深度3           | 无                                         | `$doc->find(':depth-3')`                                                                          | 3层祖先                                                                                                                                  |
 | **文本相关伪类**                        |
-| `:text-node`                      | 文本节点        | 无                                         | `$doc->find(':text-node')`                                        | 文本节点                                                                                                                                  |
-| `:comment-node`                   | 注释节点        | 无                                         | `$doc->find(':comment-node')`                                     | 注释节点                                                                                                                                  |
-| `:whitespace`                     | 空白文本        | 无                                         | `$doc->find(':whitespace')`                                       | 空白文本节点                                                                                                                                |
-| `:non-whitespace`                 | 非空白文本       | 无                                         | `$doc->find(':non-whitespace')`                                   | 非空白文本                                                                                                                                 |
-| `:text-length-gt(n)`              | 文本长度大于      | n: 长度                                     | `$doc->find(':text-length-gt(10)')`                               | 文本长度>n                                                                                                                                |
-| `:text-length-lt(n)`              | 文本长度小于      | n: 长度                                     | `$doc->find(':text-length-lt(10)')`                               | 文本长度<n                                                                                                                                |
-| `:text-length-eq(n)`              | 文本长度等于      | n: 长度                                     | `$doc->find(':text-length-eq(10)')`                               | 文本长度=n                                                                                                                                |
-| `:text-length-between(start,end)` | 文本长度范围      | start, end                                | `$doc->find(':text-length-between(5,10)')`                        | 文本长度在5-10之间                                                                                                                           |
+| `:text-node`                      | 文本节点          | 无                                         | `$doc->find(':text-node')`                                                                        | 文本节点                                                                                                                                  |
+| `:comment-node`                   | 注释节点          | 无                                         | `$doc->find(':comment-node')`                                                                     | 注释节点                                                                                                                                  |
+| `:whitespace`                     | 空白文本          | 无                                         | `$doc->find(':whitespace')`                                                                       | 空白文本节点                                                                                                                                |
+| `:non-whitespace`                 | 非空白文本         | 无                                         | `$doc->find(':non-whitespace')`                                                                   | 非空白文本                                                                                                                                 |
+| `:text-length-gt(n)`              | 文本长度大于        | n: 长度                                     | `$doc->find(':text-length-gt(10)')`                                                               | 文本长度>n                                                                                                                                |
+| `:text-length-lt(n)`              | 文本长度小于        | n: 长度                                     | `$doc->find(':text-length-lt(10)')`                                                               | 文本长度<n                                                                                                                                |
+| `:text-length-eq(n)`              | 文本长度等于        | n: 长度                                     | `$doc->find(':text-length-eq(10)')`                                                               | 文本长度=n                                                                                                                                |
+| `:text-length-between(start,end)` | 文本长度范围        | start, end                                | `$doc->find(':text-length-between(5,10)')`                                                        | 文本长度在5-10之间                                                                                                                           |
 | **子元素数量伪类**                       |
-| `:children-gt(n)`                 | 子元素大于       | n: 数量                                     | `$doc->find(':children-gt(3)')`                                   | 子元素数>n                                                                                                                                |
-| `:children-lt(n)`                 | 子元素小于       | n: 数量                                     | `$doc->find(':children-lt(3)')`                                   | 子元素数<n                                                                                                                                |
-| `:children-eq(n)`                 | 子元素等于       | n: 数量                                     | `$doc->find(':children-eq(3)')`                                   | 子元素数=n                                                                                                                                |
+| `:children-gt(n)`                 | 子元素大于         | n: 数量                                     | `$doc->find(':children-gt(3)')`                                                                   | 子元素数>n                                                                                                                                |
+| `:children-lt(n)`                 | 子元素小于         | n: 数量                                     | `$doc->find(':children-lt(3)')`                                                                   | 子元素数<n                                                                                                                                |
+| `:children-eq(n)`                 | 子元素等于         | n: 数量                                     | `$doc->find(':children-eq(3)')`                                                                   | 子元素数=n                                                                                                                                |
 | **属性数量伪类**                        |
-| `:attr-count-gt(n)`               | 属性数大于       | n: 数量                                     | `$doc->find(':attr-count-gt(3)')`                                 | 属性数>n                                                                                                                                 |
-| `:attr-count-lt(n)`               | 属性数小于       | n: 数量                                     | `$doc->find(':attr-count-lt(3)')`                                 | 属性数<n                                                                                                                                 |
-| `:attr-count-eq(n)`               | 属性数等于       | n: 数量                                     | `$doc->find(':attr-count-eq(3)')`                                 | 属性数=n                                                                                                                                 |
+| `:attr-count-gt(n)`               | 属性数大于         | n: 数量                                     | `$doc->find(':attr-count-gt(3)')`                                                                 | 属性数>n                                                                                                                                 |
+| `:attr-count-lt(n)`               | 属性数小于         | n: 数量                                     | `$doc->find(':attr-count-lt(3)')`                                                                 | 属性数<n                                                                                                                                 |
+| `:attr-count-eq(n)`               | 属性数等于         | n: 数量                                     | `$doc->find(':attr-count-eq(3)')`                                                                 | 属性数=n                                                                                                                                 |
 | **属性值长度伪类**                       |
-| `:attr-length-gt(attr,n)`         | 属性值长度大于     | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-gt(href,10)')`                          | 属性值长度>n                                                                                                                               |
-| `:attr-length-lt(attr,n)`         | 属性值长度小于     | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-lt(href,10)')`                          | 属性值长度<n                                                                                                                               |
-| `:attr-length-eq(attr,n)`         | 属性值长度等于     | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-eq(href,10)')`                          | 属性值长度=n                                                                                                                               |
+| `:attr-length-gt(attr,n)`         | 属性值长度大于       | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-gt(href,10)')`                                                          | 属性值长度>n                                                                                                                               |
+| `:attr-length-lt(attr,n)`         | 属性值长度小于       | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-lt(href,10)')`                                                          | 属性值长度<n                                                                                                                               |
+| `:attr-length-eq(attr,n)`         | 属性值长度等于       | attr: 属性名, n: 长度                          | `$doc->find(':attr-length-eq(href,10)')`                                                          | 属性值长度=n                                                                                                                               |
 | **节点类型伪类**                        |
-| `:element`                        | 元素节点        | 无                                         | `$doc->find(':element')`                                          | 元素节点                                                                                                                                  |
-| `:cdata`                          | CDATA节点     | 无                                         | `$doc->find(':cdata')`                                            | CDATA节点                                                                                                                               |
+| `:element`                        | 元素节点          | 无                                         | `$doc->find(':element')`                                                                          | 元素节点                                                                                                                                  |
+| `:cdata`                          | CDATA节点       | 无                                         | `$doc->find(':cdata')`                                                                            | CDATA节点                                                                                                                               |
 | **深度范围伪类**                        |
-| `:depth-between(start,end)`       | 深度范围        | start, end                                | `$doc->find(':depth-between(1,3)')`                               | 深度在1-3之间                                                                                                                              |
+| `:depth-between(start,end)`       | 深度范围          | start, end                                | `$doc->find(':depth-between(1,3)')`                                                               | 深度在1-3之间                                                                                                                              |
 | **文本内容匹配伪类**                      |
-| `:text-match(pattern)`            | 文本匹配        | pattern: 正则模式                             | `$doc->find(':text-match(^test)')`                                | 文本匹配正则表达式                                                                                                                             |
+| `:text-match(pattern)`            | 文本匹配          | pattern: 正则模式                             | `$doc->find(':text-match(^test)')`                                                                | 文本匹配正则表达式                                                                                                                             |
 | **属性值匹配伪类**                       |
-| `:attr-match(attr,pattern)`       | 属性值匹配       | attr: 属性名, pattern: 正则模式                  | `$doc->find(':attr-match(href,^http)')`                           | 属性值匹配正则表达式                                                                                                                            |
-| `:data(name)`                     | data属性      | name: data名                               | `$doc->find(':data(id)')`                                         | data-*属性                                                                                                                              |
+| `:attr-match(attr,pattern)`       | 属性值匹配         | attr: 属性名, pattern: 正则模式                  | `$doc->find(':attr-match(href,^http)')`                                                           | 属性值匹配正则表达式                                                                                                                            |
+| `:data(name)`                     | data属性        | name: data名                               | `$doc->find(':data(id)')`                                                                         | data-*属性                                                                                                                              |
 | **表单验证伪类**                        |
-| `:in-range`                       | 在范围内        | 无                                         | `$doc->find(':in-range')`                                         | 值在min-max间                                                                                                                            |
-| `:out-of-range`                   | 超出范围        | 无                                         | `$doc->find(':out-of-range')`                                     | 值超出范围                                                                                                                                 |
-| `:indeterminate`                  | 不确定         | 无                                         | `$doc->find(':indeterminate')`                                    | 状态不确定                                                                                                                                 |
-| `:placeholder-shown`              | 显示占位符       | 无                                         | `$doc->find(':placeholder-shown')`                                | 显示占位符                                                                                                                                 |
-| `:default`                        | 默认          | 无                                         | `$doc->find(':default')`                                          | 默认选项                                                                                                                                  |
-| `:valid`                          | 有效          | 无                                         | `$doc->find(':valid')`                                            | 验证通过                                                                                                                                  |
-| `:invalid`                        | 无效          | 无                                         | `$doc->find(':invalid')`                                          | 验证失败                                                                                                                                  |
-| `:user-invalid`                   | 用户验证失败      | 无                                         | `$doc->find(':user-invalid')`                                     | 用户验证失败                                                                                                                                |
-| `:user-valid`                     | 用户验证通过      | 无                                         | `$doc->find(':user-valid')`                                       | 用户验证通过                                                                                                                                |
-| `:autofill`                       | 自动填充        | 无                                         | `$doc->find(':autofill')`                                         | 浏览器自动填充                                                                                                                               |
+| `:in-range`                       | 在范围内          | 无                                         | `$doc->find(':in-range')`                                                                         | 值在min-max间                                                                                                                            |
+| `:out-of-range`                   | 超出范围          | 无                                         | `$doc->find(':out-of-range')`                                                                     | 值超出范围                                                                                                                                 |
+| `:indeterminate`                  | 不确定           | 无                                         | `$doc->find(':indeterminate')`                                                                    | 状态不确定                                                                                                                                 |
+| `:placeholder-shown`              | 显示占位符         | 无                                         | `$doc->find(':placeholder-shown')`                                                                | 显示占位符                                                                                                                                 |
+| `:default`                        | 默认            | 无                                         | `$doc->find(':default')`                                                                          | 默认选项                                                                                                                                  |
+| `:valid`                          | 有效            | 无                                         | `$doc->find(':valid')`                                                                            | 验证通过                                                                                                                                  |
+| `:invalid`                        | 无效            | 无                                         | `$doc->find(':invalid')`                                                                          | 验证失败                                                                                                                                  |
+| `:user-invalid`                   | 用户验证失败        | 无                                         | `$doc->find(':user-invalid')`                                                                     | 用户验证失败                                                                                                                                |
+| `:user-valid`                     | 用户验证通过        | 无                                         | `$doc->find(':user-valid')`                                                                       | 用户验证通过                                                                                                                                |
+| `:autofill`                       | 自动填充          | 无                                         | `$doc->find(':autofill')`                                                                         | 浏览器自动填充                                                                                                                               |
 | **伪元素**                           |
-| `::text`                          | 文本内容        | 无                                         | `$doc->text('div::text')`                                         | 获取文本                                                                                                                                  |
-| `::attr(name)`                    | 属性值         | name: 属性名                                 | `$doc->text('a::attr(href)')`                                     | 获取属性                                                                                                                                  |
+| `::text`                          | 文本内容          | 无                                         | `$doc->text('div::text')`                                                                         | 获取文本                                                                                                                                  |
+| `::attr(name)`                    | 属性值           | name: 属性名                                 | `$doc->text('a::attr(href)')`                                                                     | 获取属性                                                                                                                                  |
 
 
 ### 选择器分类说明
@@ -343,14 +344,14 @@ $doc->findWithFallback([
 
 ### 参数说明
 
-| 参数 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| selector | string | 是 | 选择器表达式 |
-| type | string | 否 | 选择器类型：'css'（默认）、'xpath'、'regex' |
-| attribute | string | 否 | 仅当 type='regex' 时使用，指定要匹配的属性名 |
-| extractMode | string | 否 | 仅当 type='regex' 时使用，提取模式：'elements'、'text'、'attr'、'match' |
-| group | int | 否 | 仅当 extractMode='match' 时使用，指定分组索引 |
-| location | array | 否 | 仅当 type='regex' 时使用，指定提取多个分组并返回关联数组 |
+| 参数          | 类型     | 必需 | 说明                                                        |
+|-------------|--------|----|-----------------------------------------------------------|
+| selector    | string | 是  | 选择器表达式                                                    |
+| type        | string | 否  | 选择器类型：'css'（默认）、'xpath'、'regex'                           |
+| attribute   | string | 否  | 仅当 type='regex' 时使用，指定要匹配的属性名                             |
+| extractMode | string | 否  | 仅当 type='regex' 时使用，提取模式：'elements'、'text'、'attr'、'match' |
+| group       | int    | 否  | 仅当 extractMode='match' 时使用，指定分组索引                         |
+| location    | array  | 否  | 仅当 type='regex' 时使用，指定提取多个分组并返回关联数组                       |
 
 
 1. **分组索引从0开始**: 正则表达式的分组索引从0开始，0表示完整匹配，1表示第一个捕获分组
@@ -3054,3 +3055,265 @@ $options = [
     'tableIndex' => null           // 指定表格索引，null表示返回所有
 ];
 ```
+
+---
+
+## 矩阵数据处理
+
+矩阵查询方法用于处理类似表格但不是使用 table 标签的矩阵型数据列表，按照行和列的形式返回到数组中。
+
+### 📊 矩阵结构示例
+
+```html
+<!-- 示例1：使用 div 的矩阵结构 -->
+<div class="matrix">
+    <div class="row">
+        <div class="cell">张三</div>
+        <div class="cell">男</div>
+        <div class="cell">中国</div>
+        <div class="cell">183xxx</div>
+    </div>
+    <div class="row">
+        <div class="cell">jick liu</div>
+        <div class="cell">男</div>
+        <div class="cell">英国</div>
+        <div class="cell">163xxx</div>
+    </div>
+</div>
+
+<!-- 示例2：使用 ul/li 的矩阵结构 -->
+<div class="data-grid">
+    <ul class="data-row">
+        <li class="data-cell">产品A</li>
+        <li class="data-cell">$100</li>
+        <li class="data-cell">库存: 50</li>
+    </ul>
+    <ul class="data-row">
+        <li class="data-cell">产品B</li>
+        <li class="data-cell">$200</li>
+        <li class="data-cell">库存: 30</li>
+    </ul>
+</div>
+```
+
+### 🔧 queryMatrix 方法
+
+#### Document 类方法
+
+```php
+public function queryMatrix(string|Element $container = 'div', array $options = []): array
+```
+
+| 参数           | 类型                | 说明               |
+|--------------|-------------------|------------------|
+| `$container` | `string\|Element` | 矩阵容器的选择器或元素对象    |
+| `$options`   | `array`           | 查询选项（可选）         |
+| **返回值**      | `array`           | 二维数组，第一维是行，第二维是列 |
+
+#### Element 类方法
+
+```php
+public function queryMatrix(?string $containerSelector = null, array $options = []): array
+```
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `$containerSelector` | `string\|null` | 矩阵容器的选择器，null表示使用当前元素 |
+| `$options` | `array` | 查询选项（可选） |
+| **返回值** | `array` | 二维数组，第一维是行，第二维是列 |
+
+### ⚙️ 矩阵查询选项
+
+```php
+$options = [
+    'rowSelector' => null,      // 行选择器，null表示使用直接子元素
+    'cellSelector' => null,     // 单元格选择器，null表示使用直接子元素
+    'trimText' => true,         // 是否修剪文本空白
+    'removeEmpty' => true,      // 是否移除空行和空单元格
+    'selectorType' => 'auto'    // 选择器类型：auto/css/xpath/regex
+];
+```
+
+### 💡 使用示例
+
+#### 示例 1：基本使用
+
+```php
+// HTML:
+// <div class="matrix">
+//   <div class="row">
+//     <div class="cell">张三</div>
+//     <div class="cell">男</div>
+//     <div class="cell">中国</div>
+//     <div class="cell">183xxx</div>
+//   </div>
+// </div>
+
+$matrix = $doc->queryMatrix('.matrix');
+// 返回:
+// [
+//   0 => ['张三', '男', '中国', '183xxx']
+// ]
+```
+
+#### 示例 2：自定义行列选择器
+
+```php
+// HTML:
+// <div class="data-grid">
+//   <div class="data-row">
+//     <span class="data-cell">产品A</span>
+//     <span class="data-cell">$100</span>
+//     <span class="data-cell">50</span>
+//   </div>
+//   <div class="data-row">
+//     <span class="data-cell">产品B</span>
+//     <span class="data-cell">$200</span>
+//     <span class="data-cell">30</span>
+//   </div>
+// </div>
+
+$matrix = $doc->queryMatrix('.data-grid', [
+    'rowSelector' => '.data-row',
+    'cellSelector' => '.data-cell',
+    'trimText' => true,
+    'removeEmpty' => true
+]);
+// 返回:
+// [
+//   0 => ['产品A', '$100', '50'],
+//   1 => ['产品B', '$200', '30']
+// ]
+```
+
+#### 示例 3：使用 ul/li 结构
+
+```php
+// HTML:
+// <div class="product-list">
+//   <ul class="product">
+//     <li>笔记本电脑</li>
+//     <li>¥8999</li>
+//     <li>库存: 100</li>
+//   </ul>
+//   <ul class="product">
+//     <li>手机</li>
+//     <li>¥3999</li>
+//     <li>库存: 200</li>
+//   </ul>
+// </div>
+
+$matrix = $doc->queryMatrix('.product-list', [
+    'rowSelector' => 'ul.product',
+    'cellSelector' => 'li'
+]);
+// 返回:
+// [
+//   0 => ['笔记本电脑', '¥8999', '库存: 100'],
+//   1 => ['手机', '¥3999', '库存: 200']
+// ]
+```
+
+#### 示例 4：Element 类使用
+
+```php
+// 获取矩阵容器元素
+$container = $doc->findFirst('.matrix-container');
+
+// 从该元素查询矩阵
+$matrix = $container->queryMatrix();
+// 或指定子容器
+$matrix = $container->queryMatrix('.sub-matrix');
+```
+
+#### 示例 5：处理 XML 数据
+
+```php
+// XML:
+// <matrix>
+//   <row>
+//     <cell>Data1</cell>
+//     <cell>Data2</cell>
+//   </row>
+//   <row>
+//     <cell>Data3</cell>
+//     <cell>Data4</cell>
+//   </row>
+// </matrix>
+
+$matrix = $doc->queryMatrix('matrix', [
+    'rowSelector' => 'row',
+    'cellSelector' => 'cell'
+]);
+// 返回:
+// [
+//   0 => ['Data1', 'Data2'],
+//   1 => ['Data3', 'Data4']
+// ]
+```
+
+#### 示例 6：不指定选择器（使用直接子元素）
+
+```php
+// HTML:
+// <div class="matrix">
+//   <div>
+//     <span>A1</span>
+//     <span>A2</span>
+//   </div>
+//   <div>
+//     <span>B1</span>
+//     <span>B2</span>
+//   </div>
+// </div>
+
+// 不指定 rowSelector 和 cellSelector，使用直接子元素
+$matrix = $doc->queryMatrix('.matrix');
+// 返回:
+// [
+//   0 => ['A1', 'A2'],
+//   1 => ['B1', 'B2']
+// ]
+```
+
+### 📈 返回格式
+
+```php
+// 成功查询
+[
+    0 => ['张三', '男', '中国', '183xxx'],
+    1 => ['jick liu', '男', '英国', '163xxx'],
+    2 => ['Tom', '男', '美国', '123xxx']
+]
+
+// 空结果
+[]
+
+// 查询失败
+[]
+```
+
+### ⚠️ 注意事项
+
+1. **行列对齐**: 所有行应该具有相同数量的单元格，否则返回的数组可能不是规则矩阵
+2. **空值处理**: 如果 `removeEmpty` 为 `true`，空单元格和空行将被移除
+3. **文本修剪**: 建议保持 `trimText` 为 `true` 以去除多余空白
+4. **选择器性能**: 对于大型矩阵，指定精确的行列选择器可以提高性能
+5. **结构假设**: 方法假设矩阵是行-列的层次结构，不支持不规则矩阵
+
+### 🔍 与表格提取的区别
+
+| 特性 | `extractTable` | `queryMatrix` |
+|------|----------------|---------------|
+| **标签** | 专门处理 `<table>` 标签 | 处理任意标签结构 |
+| **结构** | 支持 thead/tbody/tfoot | 简单的行列结构 |
+| **返回** | 支持多种格式（structured/indexed/associative） | 只返回二维数组 |
+| **选择器** | 自动识别表格结构 | 需要指定行列选择器 |
+| **适用场景** | 标准 HTML 表格 | 自定义矩阵布局 |
+
+---
+
+**总计支持**:  
+- **选择器**: 180+ 种  
+- **方法**: Document 100+ / Element 80+  
+- **矩阵查询**: ✅ 新增支持

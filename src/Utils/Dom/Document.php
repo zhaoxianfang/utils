@@ -4516,4 +4516,128 @@ class Document
 
         return $content;
     }
+
+    /**
+     * 查询矩阵结构的数据并返回二维数组
+     *
+     * 用于处理类似表格但不是使用 table 标签的矩阵型数据列表，
+     * 按照行和列的形式返回到数组中。
+     *
+     * @param  string|Element  $container  矩阵容器的选择器或元素对象
+     * @param  array<string, mixed>  $options  查询选项
+     * @return array<array<string>>  二维数组，第一维是行，第二维是列
+     *
+     * @example
+     * ```php
+     * // HTML 结构示例:
+     * // <div class="matrix">
+     * //   <div class="row">
+     * //     <div class="cell">张三</div>
+     * //     <div class="cell">男</div>
+     * //     <div class="cell">中国</div>
+     * //     <div class="cell">183xxx</div>
+     * //   </div>
+     * //   <div class="row">
+     * //     <div class="cell">jick liu</div>
+     * //     <div class="cell">男</div>
+     * //     <div class="cell">英国</div>
+     * //     <div class="cell">163xxx</div>
+     * //   </div>
+     * // </div>
+     *
+     * $matrix = $doc->queryMatrix('.matrix');
+     * // 返回:
+     * // [
+     * //   0 => ['张三', '男', '中国', '183xxx'],
+     * //   1 => ['jick liu', '男', '英国', '163xxx'],
+     * // ]
+     *
+     * // 自定义行列选择器
+     * $matrix = $doc->queryMatrix('.data-grid', [
+     *     'rowSelector' => '.data-row',
+     *     'cellSelector' => '.data-cell',
+     *     'trimText' => true,
+     *     'removeEmpty' => true
+     * ]);
+     * ```
+     */
+    public function queryMatrix(string|Element $container = 'div', array $options = []): array
+    {
+        // 合并默认选项
+        $defaultOptions = [
+            'rowSelector' => null,  // null 表示使用直接子元素
+            'cellSelector' => null, // null 表示使用直接子元素
+            'trimText' => true,     // 是否修剪文本空白
+            'removeEmpty' => true,  // 是否移除空行和空单元格
+            'selectorType' => 'auto' // 选择器类型: auto/css/xpath/regex
+        ];
+        $options = array_merge($defaultOptions, $options);
+
+        // 获取矩阵容器元素
+        if ($container instanceof Element) {
+            $containerElement = $container;
+        } else {
+            $containerElement = $this->findFirst($container, $options['selectorType'] ?? 'auto');
+            if ($containerElement === null) {
+                return [];
+            }
+        }
+
+        // 查找所有行
+        $rows = [];
+        if ($options['rowSelector'] !== null) {
+            // 使用指定的行选择器
+            $rows = $containerElement->find($options['rowSelector'], $options['selectorType'] ?? 'auto');
+        } else {
+            // 使用直接子元素作为行
+            $rows = $containerElement->children();
+        }
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        // 处理每一行
+        $matrix = [];
+        foreach ($rows as $rowIndex => $row) {
+            $cells = [];
+
+            if ($options['cellSelector'] !== null) {
+                // 使用指定的单元格选择器
+                $cellElements = $row->find($options['cellSelector'], $options['selectorType'] ?? 'auto');
+            } else {
+                // 使用直接子元素作为单元格
+                $cellElements = $row->children();
+            }
+
+            if (empty($cellElements)) {
+                continue; // 跳过空行
+            }
+
+            // 提取每个单元格的文本
+            foreach ($cellElements as $cell) {
+                $text = $cell->text();
+
+                if ($options['trimText']) {
+                    $text = trim($text);
+                }
+
+                // 如果启用了 removeEmpty 且单元格为空，则跳过
+                if ($options['removeEmpty'] && $text === '') {
+                    continue;
+                }
+
+                $cells[] = $text;
+            }
+
+            // 如果启用了 removeEmpty 且整行为空，则跳过
+            if ($options['removeEmpty'] && empty($cells)) {
+                continue;
+            }
+
+            $matrix[] = $cells;
+        }
+
+        return $matrix;
+    }
 }
