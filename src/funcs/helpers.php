@@ -2062,3 +2062,53 @@ if (! function_exists('url_conversion_to_prefix_path')) {
         return $url;
     }
 }
+
+if (! function_exists('get_trace_data')) {
+    /**
+     * 获取 Throwable 异常信息的关键数据，方便记录到库
+     *
+     * @param  Throwable  $exception  异常信息
+     * @param  bool  $includeArgs  是否包含参数
+     */
+    function get_trace_data(Throwable $exception, bool $includeArgs = true): array
+    {
+        $trace = $exception->getTrace();
+        $traceData = [];
+
+        foreach ($trace as $item) {
+            // 跳过 vendor 目录
+            if (isset($item['file']) && str_contains($item['file'], 'vendor')) {
+                continue;
+            }
+
+            // 处理参数
+            if (! $includeArgs) {
+                unset($item['args']);
+            }
+            if ($includeArgs && isset($item['args'])) {
+                foreach ($item['args'] as &$arg) {
+                    if (is_object($arg)) {
+                        $className = get_class($arg);
+                        // Laravel 模型
+                        if (method_exists($arg, 'getKey')) {
+                            $id = $arg->getKey();
+                            $arg = $className.':'.($id ?? 'null');
+                        } else {
+                            // 其他对象
+                            $arg = $className;
+                        }
+                    }
+                }
+            }
+            $traceData[] = $item;
+        }
+
+        return [
+            'message' => $exception->getMessage(),
+            'code' => $exception->getCode(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace' => $traceData,
+        ];
+    }
+}
