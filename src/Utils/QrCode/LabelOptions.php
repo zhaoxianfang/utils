@@ -18,7 +18,7 @@ class LabelOptions
     private ?string $fontPath = null;
 
     /** @var int 字体大小 */
-    private int $fontSize = 14;
+    private int $fontSize = 22;
 
     /** @var Color 文本颜色 */
     private Color $color;

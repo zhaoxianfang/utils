@@ -596,9 +596,11 @@ class QrCode
         }
 
         // 计算二维码绘制起始位置（居中在二维码区域）
-        // 优化：确保二维码在最终图像中完美居中
-        $qrX = (int)(($qrWidth - $qrTotalWidth) / 2);
-        $qrY = (int)(($qrHeight - $qrTotalWidth) / 2);
+        $qrX = (int)(($finalSize - $qrTotalWidth) / 2); // 水平居中
+        $qrY = (int)(($qrHeight - $qrTotalWidth) / 2);  // 垂直居中
+        // $qrX = (int)(($qrWidth - $qrTotalWidth) / 2); // 水平居中
+        // $qrY = (int)(($qrWidth - $qrTotalWidth) / 2);  // 垂直居中
+
 
         // 计算二维码内容区域的起始位置（排除margin）
         $contentX = $qrX + $moduleSize * $this->margin;
@@ -614,7 +616,7 @@ class QrCode
 
         // 添加标签
         if ($this->labelOptions !== null && $this->labelOptions->isEnabled()) {
-            $this->drawLabel($image, $qrX, $qrY, $qrWidth, $qrHeight);
+            $this->drawLabel($image, $qrX, $qrY, (int)$qrWidth, $qrHeight);
         }
 
         return $image;
@@ -1244,7 +1246,8 @@ class QrCode
         // $totalLabelHeight = $contentHeight + $marginTop + $this->labelOptions->getMarginBottom();
 
         // 检查标签是否超出图像底部
-        $labelY = $qrY + $qrHeight + $marginTop;
+        // $labelY = $qrY + $qrHeight + $marginTop;
+        $labelY = $qrHeight + $marginTop - $qrY * 2;
 
         if ($labelY + $contentHeight > $finalImageHeight) {
             // 如果会超出，缩小字号
@@ -1453,7 +1456,7 @@ class QrCode
     {
         $directory = dirname($filename);
         if (!is_dir($directory)) {
-            mkdir($directory, 0777, true);
+            mkdir($directory, 0775, true);
         }
 
         $image = $this->render();

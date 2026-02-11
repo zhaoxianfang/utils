@@ -164,7 +164,7 @@ class AdvancedFeatures
     public static function batchGenerate(array $dataList, string $outputDir, int $size = 300, string $prefix = 'qr_'): array
     {
         if (!is_dir($outputDir)) {
-            mkdir($outputDir, 0777, true);
+            mkdir($outputDir, 0775, true);
         }
 
         $results = [

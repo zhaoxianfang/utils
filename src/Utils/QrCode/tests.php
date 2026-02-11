@@ -25,7 +25,7 @@ echo "========================================\n\n";
 // 创建输出目录
 $outputDir = __DIR__ . '/../../../output_' . date('mdHi');
 if (!is_dir($outputDir)) {
-    mkdir($outputDir, 0777, true);
+    mkdir($outputDir, 0775, true);
 }
 
 // 设置默认字体路径
@@ -227,7 +227,7 @@ test('20. 圆点风格', function() use ($outputDir) {
     QrCode::make('圆点风格')
         ->size(300)
         ->rounded(true)
-        ->roundedRadius(0.8)
+        ->roundedRadius(1.0) // 圆点半径（0-1.0）
         ->save($outputDir . '/test_20_rounded.png');
 });
 
@@ -1111,7 +1111,7 @@ test("113. Logo透明度设置", function() use ($outputDir,$logoPath)  {
         ->save($outputDir . '/test_113_logo_opacity.png');
 });
 
-test("115. Logo旋转设置", function() use ($outputDir,$logoPath)  {
+test("114. Logo旋转设置", function() use ($outputDir,$logoPath)  {
     QrCode::make('test')
         ->logo($logoPath, 10)
         ->logoRotation(45)
@@ -1119,7 +1119,7 @@ test("115. Logo旋转设置", function() use ($outputDir,$logoPath)  {
 });
 
 // 测试圆点风格增强
-test("116. 圆点风格半径调整", function() use ($outputDir)  {
+test("115. 圆点风格半径调整", function() use ($outputDir)  {
     QrCode::make('test')
         ->size(200)
         ->rounded(true)
