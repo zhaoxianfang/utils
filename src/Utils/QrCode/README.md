@@ -229,7 +229,7 @@ QrCode::make('Data')
     ->size(300)
     ->labelOptions(
         LabelOptions::create('自定义标签')
-            ->fontPath(__DIR__ . '/src/fonts/xingkai.ttf')
+            ->fontPath(__DIR__ . '/src/fonts/xingkai.ttf') // 设置字体路径: 字体路径或者默认字体的名称，例如：lishu
             ->fontSize(18)
             ->color('#e74c3c')
             ->marginTop(20)
@@ -294,7 +294,7 @@ QrCode::make('https://www.example.com')
     ->foregroundColor('#2c3e50')
     ->labelOptions(
         LabelOptions::create('访问网站')
-            ->fontPath(__DIR__ . '/src/fonts/lishu.ttf')
+            ->fontPath(__DIR__ . '/src/fonts/lishu.ttf') // 设置字体路径: 字体路径或者默认字体的名称，例如：lishu
             ->fontSize(20)
             ->color('#3498db')
             ->marginTop(15)
@@ -441,8 +441,8 @@ LabelOptions::create('文本内容', '/path/to/font.ttf');
 
 ```php
 LabelOptions::create('文本')
-    ->text('新文本')                 // 设置文本
-    ->fontPath('/path/to/font.ttf')   // 设置字体路径
+    ->text('新文本')                  // 设置文本
+    ->fontPath('/path/to/font.ttf')  // 设置字体路径: 字体路径或者默认字体的名称，例如：lishu
     ->fontSize(16)                   // 设置字号
     ->color('#ff0000')               // 设置文本颜色
     ->backgroundColor('#f8f9fa')     // 设置背景色
@@ -680,7 +680,7 @@ QrCode::make('https://www.example.com/product/12345')
     ->logo('logo.png')
     ->labelOptions(
         LabelOptions::create('产品二维码')
-            ->fontPath(__DIR__ . '/src/fonts/lishu.ttf')
+            ->fontPath(__DIR__ . '/src/fonts/lishu.ttf') // 设置字体路径: 字体路径或者默认字体的名称，例如：lishu
             ->fontSize(16)
             ->color('#333333')
             ->marginTop(15)

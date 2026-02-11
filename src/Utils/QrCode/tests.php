@@ -639,7 +639,7 @@ test('61. 应用商店二维码', function() use ($outputDir) {
 });
 
 test('62. 社交媒体二维码', function() use ($outputDir) {
-    $platforms = ['facebook', 'twitter', 'instagram', 'linkedin'];
+    $platforms = ['wechat', 'facebook', 'twitter', 'instagram', 'linkedin'];
     foreach ($platforms as $platform) {
         QrCode::social($platform, 'exampleuser')
             ->size(300)
