@@ -96,6 +96,10 @@ class Query
      * 正则表达式选择器类型
      */
     public const TYPE_REGEX = 'regex';
+    /**
+     * JSON 选择器类型[采集对象是json数组或者字符串]
+     */
+    public const TYPE_JSON = 'json';
 
     /**
      * 常用正则表达式模式（优化性能，避免重复编译）

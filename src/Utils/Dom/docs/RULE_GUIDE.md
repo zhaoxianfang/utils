@@ -2682,18 +2682,19 @@ $dates = $doc->findWithFallback([
 
 #### 6. 数据提取方法
 
-| 方法名 | 类型 | 参数 | 返回值 | 示例 |
-|--------|------|------|--------|------|
-| `text` | 提取文本 | `$expression`, `$type` | string\|null | `$doc->text('.item::text')` |
-| `html` | 提取HTML | `$expression`, `$type` | string\|null | `$doc->html('.item')` |
-| `xml` | 获取XML | 无 | string\|false | `$doc->xml()` |
-| `texts` | 提取多个文本 | `$expression`, `$type` | array | `$doc->texts('.item')` |
-| `allTexts` | 提取所有文本 | `$selector`, `$type`, `$trim`, `$unique` | array | `$doc->allTexts('.item', true, true, true)` |
-| `allTextNodes` | 提取所有文本节点 | `$selector`, `$type`, `$trim` | array | `$doc->allTextNodes('.content')` |
-| `directText` | 提取直接文本 | `$selector`, `$type` | array | `$doc->directText('.content')` |
-| `attrs` | 提取属性 | `$expression`, `$attrName`, `$type` | array | `$doc->attrs('.item', 'href')` |
-| `extractAttributes` | 批量提取属性 | `$selector`, `$attribute`, `$type` | array | `$doc->extractAttributes('a', 'href')` |
-| `extractTexts` | 批量提取文本 | `$selector`, `$type`, `$trim` | array | `$doc->extractTexts('div.item')` |
+| 方法名                 | 类型                                         | 参数                                       | 返回值           | 示例                                          |
+|---------------------|--------------------------------------------|------------------------------------------|---------------|---------------------------------------------|
+| `text`              | 提取文本                                       | `$expression`, `$type`                   | string\|null  | `$doc->text('.item::text')`                 |
+| `html`              | 提取HTML                                     | `$expression`, `$type`                   | string\|null  | `$doc->html('.item')`                       |
+| `json`              | 提取json数据[仅针对url或者文件返回内容是json字符串、json数组时有效] | `$type`                                  | array\|false  | `$doc->json()`                              |
+| `xml`               | 获取XML                                      | 无                                        | string\|false | `$doc->xml()`                               |
+| `texts`             | 提取多个文本                                     | `$expression`, `$type`                   | array         | `$doc->texts('.item')`                      |
+| `allTexts`          | 提取所有文本                                     | `$selector`, `$type`, `$trim`, `$unique` | array         | `$doc->allTexts('.item', true, true, true)` |
+| `allTextNodes`      | 提取所有文本节点                                   | `$selector`, `$type`, `$trim`            | array         | `$doc->allTextNodes('.content')`            |
+| `directText`        | 提取直接文本                                     | `$selector`, `$type`                     | array         | `$doc->directText('.content')`              |
+| `attrs`             | 提取属性                                       | `$expression`, `$attrName`, `$type`      | array         | `$doc->attrs('.item', 'href')`              |
+| `extractAttributes` | 批量提取属性                                     | `$selector`, `$attribute`, `$type`       | array         | `$doc->extractAttributes('a', 'href')`      |
+| `extractTexts`      | 批量提取文本                                     | `$selector`, `$type`, `$trim`            | array         | `$doc->extractTexts('div.item')`            |
 
 #### 7. 文本查找方法
 

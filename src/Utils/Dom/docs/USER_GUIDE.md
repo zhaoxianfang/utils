@@ -105,6 +105,25 @@ $url = $doc->text('a::attr(href)');
 echo $url; // 输出: https://example.com
 ```
 
+### JSON 数据处理
+```php
+$document = new Document('https://www.xxx.com/your/path/file.json', true);
+// 直接返回 json 数组
+/** var $json array|false */
+$json = $document->json();
+
+// 使用 queryWithFallback
+/** var $json array|false */
+$json = $document->queryWithFallback([
+    [
+        'type' => 'json', // 只需要指定 一个 type 为 json 即可
+    ],
+    [
+        ...
+    ],
+]);
+dd($json);
+```
 ### XML 文档处理
 
 ```php

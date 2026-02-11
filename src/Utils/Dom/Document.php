@@ -63,6 +63,11 @@ class Document
     protected string $type = self::TYPE_HTML;
 
     /**
+     * 采集到的原始内容
+     */
+    protected mixed $originalContent = '';
+
+    /**
      * 文档实例映射（用于从 DOMDocument 获取 Document）
      *
      * @var array<int, self>
@@ -1273,6 +1278,16 @@ class Document
     }
 
     /**
+     * 获取 JSON 数据
+     *
+     * @return array|false JSON 数据
+     */
+    public function json(mixed $content = null):array|false
+    {
+        return $this->handleJsonData($content);
+    }
+
+    /**
      * 获取匹配元素的属性值
      * @param  string  $expression  选择器表达式
      * @param  string  $type  选择器类型
@@ -2087,17 +2102,22 @@ class Document
                 $group = $selectorConfig['group'] ?? null;
                 $location = $selectorConfig['location'] ?? null;
 
-                if (empty($selector)) {
-                    continue;
-                }
+                if (strcasecmp($type, Query::TYPE_JSON) === 0) {
+                    // json 数组或者字符串
+                    $result = $this->handleJsonData($this->originalContent);
+                }else{
+                    if (empty($selector)) {
+                        continue;
+                    }
 
-                // 根据类型执行查询
-                if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
-                    // 正则表达式选择器
-                    $result = $this->handleRegexSelector($selector, $contextNode, $attribute, $extractMode, $group, $location);
-                } else {
-                    // CSS 或 XPath 选择器
-                    $result = $this->find($selector, $type, $contextNode);
+                    // 根据类型执行查询
+                    if (strcasecmp($type, Query::TYPE_REGEX) === 0) {
+                        // 正则表达式选择器
+                        $result = $this->handleRegexSelector($selector, $contextNode, $attribute, $extractMode, $group, $location);
+                    } else {
+                        // CSS 或 XPath 选择器
+                        $result = $this->find($selector, $type, $contextNode);
+                    }
                 }
 
                 // 如果找到结果，立即返回
@@ -2116,6 +2136,36 @@ class Document
         }
 
         return $data;
+    }
+
+    // 解析JSON字符串/JSON对象和数组数据，其他的返回false
+    private function handleJsonData(mixed $data): array | bool
+    {
+        $data = empty($data)? $this->originalContent : $data;
+        // 空
+        if(empty($data)){
+            return false;
+        }
+        if(is_array($data)){
+            return $data;
+        }
+        // 处理字符串
+        if (is_string($data)) {
+            $data = trim($data);
+            // 空字符串或非JSON格式开头
+            if ($data === '' || !in_array($data[0] ?? '', ['{', '['], true)) {
+                return false;
+            }
+
+            // 尝试解析JSON
+            $decoded = json_decode($data, true);
+
+            // 验证解析成功且结果是数组（不是null、数字、字符串等）
+            if (is_array($decoded) && json_last_error() === JSON_ERROR_NONE) {
+                return $decoded;
+            }
+        }
+        return false;
     }
 
     /**
@@ -4513,6 +4563,8 @@ class Document
         if ($httpCode < 200 || $httpCode >= 300) {
             throw new RuntimeException(sprintf('HTTP 请求失败，状态码: %d', $httpCode));
         }
+        // 记录原始返回内容
+        $this->originalContent = $content;
 
         return $content;
     }
