@@ -2139,33 +2139,9 @@ class Document
     }
 
     // 解析JSON字符串/JSON对象和数组数据，其他的返回false
-    private function handleJsonData(mixed $data): array | bool
+    private function handleJsonData(mixed $data): array|false
     {
-        $data = empty($data)? $this->originalContent : $data;
-        // 空
-        if(empty($data)){
-            return false;
-        }
-        if(is_array($data)){
-            return $data;
-        }
-        // 处理字符串
-        if (is_string($data)) {
-            $data = trim($data);
-            // 空字符串或非JSON格式开头
-            if ($data === '' || !in_array($data[0] ?? '', ['{', '['], true)) {
-                return false;
-            }
-
-            // 尝试解析JSON
-            $decoded = json_decode($data, true);
-
-            // 验证解析成功且结果是数组（不是null、数字、字符串等）
-            if (is_array($decoded) && json_last_error() === JSON_ERROR_NONE) {
-                return $decoded;
-            }
-        }
-        return false;
+        return !empty($res = parse_json($data)) ? $res : false;
     }
 
     /**

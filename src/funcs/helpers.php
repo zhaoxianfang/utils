@@ -705,6 +705,7 @@ if (! function_exists('is_json')) {
         return false;
     }
 }
+
 if (! function_exists('is_xml')) {
     // 检查是否是有效的 XML 字符串
     function is_xml(string $string): bool
@@ -725,6 +726,68 @@ if (! function_exists('is_xml')) {
         } catch (Exception $e) {
         }
 
+        return false;
+    }
+}
+
+if (! function_exists('parse_json')) {
+    /**
+     * 解析json字符串、json 数组和数组 返回数据，其他的返回false
+     */
+    function parse_json(mixed $data): array|false
+    {
+        // [性能] 数组直接返回 - O(1)
+        if (is_array($data)) {
+            return $data;
+        }
+        
+        // [性能] 非字符串直接失败 - 避免不必要的处理
+        if (!is_string($data)) {
+            return false;
+        }
+        
+        // [性能] 单次trim，无多余操作
+        $json = trim($data);
+        
+        // [性能] 空字符串快速失败
+        if ($json === '') {
+            return false;
+        }
+        
+        // [性能] 快速检查首字符 - 单字符操作，最快判断
+        $firstChar = $json[0];
+        
+        // [性能] 标准JSON路径 - 覆盖95%场景
+        if ($firstChar === '{' || $firstChar === '[') {
+            $decoded = json_decode($json, true);
+            
+            // [性能] 单次错误检查
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                return $decoded;
+            }
+            
+            // [性能] 只需要处理单引号这一个最常见变体
+            if ($firstChar === '{' && str_contains($json, "'")) {
+                $decoded = json_decode(str_replace("'", '"', $json), true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+            
+            return false;
+        }
+        
+        // [性能] Base64快速检测 - 正则匹配最快方式
+        if (strlen($json) % 4 === 0 && preg_match('/^[A-Za-z0-9+\/]+=*$/', $json)) {
+            $decoded = base64_decode($json, true);
+            if ($decoded !== false) {
+                $decoded = json_decode(trim($decoded), true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+        
         return false;
     }
 }
@@ -1005,9 +1068,6 @@ if (! function_exists('json_decode_plus')) {
             try {
                 return json_decode($cleaned, $assoc, $depth, $flags);
             } catch (Exception $e) {
-                // 记录错误日志
-                error_log("JSON解码失败: " . $e->getMessage() . " | 原始数据: " . substr($jsonString, 0, 200));
-
                 if ($flags & JSON_THROW_ON_ERROR) {
                     throw $e;
                 }
