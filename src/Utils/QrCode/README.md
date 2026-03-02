@@ -22,6 +22,9 @@
 - ✅ 链式调用，简洁易用
 - ✅ 完善的中文注释和文档
 - ✅ 支持长文本自动优化（自动选择最佳纠错级别和尺寸）
+- ✅ **透明背景**：支持生成透明背景的二维码（仅PNG格式），白色方块变为透明（v2.3新增）
+- ✅ **外边距支持**：支持设置二维码外边距（padding），优化布局效果（v2.3新增）
+- ✅ **自定义边距组合**：支持同时设置模块内边距和图片外边距（v2.3新增）
 - ✅ 提供30+种场景化二维码生成方法（WiFi、电话、邮件、短信、名片、日历、地理位置、社交媒体、支付、快递、发票、餐厅、停车、问卷等）
 
 ## 安装
@@ -278,6 +281,72 @@ QrCode::make('Data')
     ->save('qr_label_right.png');
 ```
 
+### 透明背景二维码
+
+**注意**：透明背景功能仅适用于PNG格式，生成的二维码中白色方块将变为透明，只显示黑色数据块。
+
+```php
+// 基础透明背景
+QrCode::make('https://example.com')
+    ->size(300)
+    ->transparentBackground(true)
+    ->save('qr_transparent.png');
+
+// 透明背景 + 自定义前景色
+QrCode::make('https://example.com')
+    ->size(300)
+    ->transparentBackground(true)
+    ->foregroundColor('#0066FF')
+    ->save('qr_transparent_blue.png');
+
+// 透明背景 + Logo
+QrCode::make('https://example.com')
+    ->size(400)
+    ->errorCorrectionLevel(ErrorCorrectionLevel::H())
+    ->transparentBackground(true)
+    ->logo('path/to/logo.png', 15)
+    ->save('qr_transparent_logo.png');
+
+// 透明背景 + 圆点风格
+QrCode::make('https://example.com')
+    ->size(300)
+    ->transparentBackground(true)
+    ->rounded(true)
+    ->roundedRadius(0.6)
+    ->save('qr_transparent_rounded.png');
+
+// 透明背景 + 标签
+QrCode::make('https://example.com')
+    ->size(300)
+    ->transparentBackground(true)
+    ->label('访问网站')
+    ->save('qr_transparent_label.png');
+```
+
+### 外边距和布局优化
+
+```php
+// 设置外边距（padding）
+QrCode::make('https://example.com')
+    ->size(300)
+    ->padding(20)
+    ->save('qr_padding.png');
+
+// 同时设置内边距和外边距
+QrCode::make('https://example.com')
+    ->size(400)
+    ->margin(6)
+    ->padding(15)
+    ->save('qr_custom_margins.png');
+
+// 透明背景 + 外边距
+QrCode::make('https://example.com')
+    ->size(400)
+    ->transparentBackground(true)
+    ->padding(30)
+    ->save('qr_transparent_with_padding.png');
+```
+
 ### 完整链式调用示例
 
 ```php
@@ -341,6 +410,9 @@ $qr = QrCode::make('data content');
 | `format(string $format)` | 格式（png/jpeg/gif） | 设置输出格式 |
 | `quality(int $quality)` | 质量（0-100） | 设置图片质量 |
 | `encoding(string $encoding)` | 编码格式 | 设置字符编码 |
+| `transparentBackground(bool $transparent)` | 是否透明 | 设置透明背景（仅PNG） |
+| `padding(int $padding)` | 外边距（像素） | 设置二维码外边距 |
+| `setMargins(int $margin, int $padding)` | 内边距, 外边距 | 同时设置模块内边距和图片外边距 |
 
 #### 输出方法
 

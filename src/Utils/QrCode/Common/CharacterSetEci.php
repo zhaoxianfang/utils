@@ -110,7 +110,7 @@ final class CharacterSetEci extends AbstractEnum
     public static function getCharacterSetEciByValue(int $value) : ?self
     {
         if ($value < 0 || $value >= 900) {
-            throw new InvalidArgumentException('Value must be between 0 and 900');
+            throw new InvalidArgumentException('ECI值必须在0到899之间，当前值为: ' . $value);
         }
 
         $valueToEci = self::valueToEci();

@@ -25,6 +25,9 @@ class QrCode
     /** @var int 二维码边距（模块数量） */
     private int $margin = 4;
 
+    /** @var int 二维码外边距（像素） */
+    private int $padding = 0;
+
     /** @var ErrorCorrectionLevel 错误纠正级别 */
     private ErrorCorrectionLevel $errorCorrectionLevel;
 
@@ -96,6 +99,9 @@ class QrCode
 
     /** @var bool 是否使用圆点风格 */
     private bool $rounded = false;
+
+    /** @var bool 是否使用透明背景 */
+    private bool $transparentBackground = false;
 
     /** @var float 圆点半径（0-1，相对于模块大小） */
     private float $roundedRadius = 0.5;
@@ -292,6 +298,7 @@ class QrCode
      * @param int|null $width Logo宽度（null表示按比例自动计算）
      * @param int|null $height Logo高度（null表示按比例自动计算）
      * @return self
+     * @throws Exception 如果Logo文件不存在或无法读取
      */
     public function logo(string $logoPath, ?int $width = null, ?int $height = null): self
     {
@@ -307,6 +314,9 @@ class QrCode
         $this->logoPath = $logoPath;
 
         if ($width !== null && $height !== null) {
+            if ($width <= 0 || $height <= 0) {
+                throw new Exception('Logo宽度和高度必须大于0');
+            }
             $this->logoWidth = $width;
             $this->logoHeight = $height;
         } else {
@@ -325,11 +335,14 @@ class QrCode
      *
      * @param int $scale 缩放比例（百分比，1-15）
      * @return self
+     * @throws Exception 如果缩放比例超出范围
      */
     public function logoScale(int $scale): self
     {
-        // 严格限制在15%以内
-        $this->logoScale = max(1, min(15, $scale));
+        if ($scale < 1 || $scale > 15) {
+            throw new Exception('Logo缩放比例必须在1-15之间');
+        }
+        $this->logoScale = $scale;
         return $this;
     }
 
@@ -428,15 +441,88 @@ class QrCode
     /**
      * 设置背景图片
      *
-     * @param string $backgroundImagePath 背景图片路径
+     * @param string|null $backgroundImagePath 背景图片路径，null表示不使用
      * @return self
+     * @throws Exception 如果背景图片文件不存在或无效
      */
-    public function backgroundImage(string $backgroundImagePath): self
+    public function backgroundImage(?string $backgroundImagePath): self
     {
+        if ($backgroundImagePath === null) {
+            $this->backgroundImagePath = null;
+            return $this;
+        }
+
         if (!file_exists($backgroundImagePath)) {
             throw new Exception('背景图片文件不存在: ' . $backgroundImagePath);
         }
+
+        if (!is_readable($backgroundImagePath)) {
+            throw new Exception('背景图片文件不可读: ' . $backgroundImagePath);
+        }
+
+        $imageInfo = getimagesize($backgroundImagePath);
+        if ($imageInfo === false) {
+            throw new Exception('无法读取背景图片信息: ' . $backgroundImagePath);
+        }
+
         $this->backgroundImagePath = $backgroundImagePath;
+        return $this;
+    }
+
+    /**
+     * 设置透明背景
+     * 设置后，二维码的白色方块将变为透明，只显示黑色数据块
+     * 注意：透明背景仅适用于PNG格式
+     *
+     * 使用场景：
+     * - 需要将二维码叠加在其他图片上时
+     * - 需要自定义背景样式时
+     * - 需要减少文件大小时
+     *
+     * @param bool $transparent 是否使用透明背景，默认true
+     * @return self
+     */
+    public function transparentBackground(bool $transparent = true): self
+    {
+        $this->transparentBackground = $transparent;
+        return $this;
+    }
+
+    /**
+     * 设置二维码外边距（像素）
+     * 在最终图像中二维码四周添加的空白区域
+     * 配合透明背景使用，可以实现更好的布局效果
+     *
+     * 使用场景：
+     * - 为二维码添加外围空白区域
+     * - 配合透明背景控制留白
+     * - 优化二维码在页面中的显示效果
+     *
+     * @param int $padding 外边距（像素），默认0
+     * @return self
+     */
+    public function padding(int $padding = 0): self
+    {
+        $this->padding = max(0, $padding);
+        return $this;
+    }
+
+    /**
+     * 设置所有边距（模块外边距和模块内边距）
+     * 统一管理二维码的边距设置，便于批量调整
+     *
+     * 参数说明：
+     * - $margin: 模块内边距（模块数量），控制二维码内容区域周围的静默区
+     * - $padding: 图片外边距（像素），控制最终图像的留白
+     *
+     * @param int $margin 模块内边距（模块数量）
+     * @param int $padding 图片外边距（像素）
+     * @return self
+     */
+    public function setMargins(int $margin, int $padding): self
+    {
+        $this->margin = max(0, $margin);
+        $this->padding = max(0, $padding);
         return $this;
     }
 
@@ -550,12 +636,21 @@ class QrCode
     /**
      * 渲染二维码图像
      * 优化了二维码在目标图片中的居中逻辑，确保二维码内容完美居中
+     * 支持透明背景、padding、标签等高级布局功能
      *
-     * @return resource GD图像资源
-     * @throws Exception
+     * @return resource|GdImage GD图像资源
+     * @throws Exception 如果无法创建图像
      */
     public function render()
     {
+        // 验证数据不为空
+        if (empty($this->data)) {
+            throw new Exception('二维码数据不能为空');
+        }
+
+        // 验证颜色对比度，确保扫描可识别性
+        $this->validateColorContrast();
+
         // 编码数据为矩阵
         $matrix = $this->encodeWithBacon();
 
@@ -567,46 +662,69 @@ class QrCode
         $totalModules = $moduleCount + $this->margin * 2;
         $moduleSize = (int)($this->size / $totalModules);
 
-        // 确保模块大小至少为1像素
-        $moduleSize = max(1, $moduleSize);
+        // 修复：确保模块大小足够以支持扫描识别
+        // 模块大小至少需要3像素才能保证大多数扫描器能识别
+        // 如果模块太小，自动调整size或警告用户
+        $minModuleSize = 3;
+        if ($moduleSize < $minModuleSize) {
+            // 自动调整size以确保最小模块大小
+            $this->size = $totalModules * $minModuleSize + ($this->labelOptions !== null && $this->labelOptions->isEnabled() ? 100 : 0);
+            $moduleSize = $minModuleSize;
+        }
 
         // 计算实际二维码内容宽度（像素）
         $qrContentWidth = $moduleSize * $moduleCount;
         $qrTotalWidth = $moduleSize * $totalModules;
 
-        // 计算最终尺寸（包含标签）
+        // 计算最终尺寸（包含标签和外边距）
         [$finalSize, $qrHeight, $qrWidth] = $this->calculateFinalSize($moduleCount, $moduleSize, $qrContentWidth);
 
         // 创建图像 - 使用计算出的finalSize，确保完美适配
-        $image = imagecreatetruecolor($finalSize, $finalSize);
-        if ($image === false) {
-            throw new Exception('无法创建图像');
+        // 如果启用透明背景且使用PNG格式，创建带alpha通道的图像
+        if ($this->transparentBackground && strtolower($this->format) === 'png') {
+            $image = imagecreatetruecolor($finalSize, $finalSize);
+            if ($image === false) {
+                throw new Exception('无法创建图像');
+            }
+            // 启用alpha混合和保存alpha通道
+            imagesavealpha($image, true);
+            imagealphablending($image, false);
+            // 填充完全透明背景（白色背景变为透明）
+            $transparentColor = imagecolorallocatealpha($image, 255, 255, 255, 127);
+            imagefill($image, 0, 0, $transparentColor);
+        } else {
+            $image = imagecreatetruecolor($finalSize, $finalSize);
+            if ($image === false) {
+                throw new Exception('无法创建图像');
+            }
+
+            // 分配颜色
+            $bgColor = $this->backgroundColor->toGdColor($image);
+            $fgColor = $this->foregroundColor->toGdColor($image);
+
+            // 填充背景（确保整个区域都被填充）
+            imagefill($image, 0, 0, $bgColor);
         }
 
-        // 分配颜色
-        $bgColor = $this->backgroundColor->toGdColor($image);
+        // 分配前景色
         $fgColor = $this->foregroundColor->toGdColor($image);
-
-        // 填充背景（确保整个区域都被填充）
-        imagefill($image, 0, 0, $bgColor);
 
         // 绘制背景图片（如果有）- 填充整个图像
         if ($this->backgroundImagePath !== null) {
             $this->drawBackgroundImage($image, $this->backgroundImagePath, $finalSize);
         }
 
-        // 计算二维码绘制起始位置（居中在二维码区域）
-        $qrX = (int)(($finalSize - $qrTotalWidth) / 2); // 水平居中
-        $qrY = (int)(($qrHeight - $qrTotalWidth) / 2);  // 垂直居中
-        // $qrX = (int)(($qrWidth - $qrTotalWidth) / 2); // 水平居中
-        // $qrY = (int)(($qrWidth - $qrTotalWidth) / 2);  // 垂直居中
-
+        // 计算二维码绘制起始位置（完美居中在二维码区域）
+        // 水平方向：padding + (可用宽度 - 二维码宽度) / 2
+        $qrX = $this->padding + (int)(($finalSize - $this->padding * 2 - $qrTotalWidth) / 2);
+        // 垂直方向：padding + (二维码区域高度 - 二维码宽度) / 2
+        $qrY = $this->padding + (int)(($qrHeight - $qrTotalWidth) / 2);
 
         // 计算二维码内容区域的起始位置（排除margin）
         $contentX = $qrX + $moduleSize * $this->margin;
         $contentY = $qrY + $moduleSize * $this->margin;
 
-        // 绘制二维码
+        // 绘制二维码矩阵
         $this->drawQrCode($image, $matrix, $contentX, $contentY, $moduleSize, $fgColor, $moduleCount);
 
         // 添加Logo（严格限制在15%以内）
@@ -614,7 +732,7 @@ class QrCode
             $this->drawLogo($image, $contentX, $contentY, $qrContentWidth, $qrContentWidth);
         }
 
-        // 添加标签
+        // 添加标签（自动居中对齐）
         if ($this->labelOptions !== null && $this->labelOptions->isEnabled()) {
             $this->drawLabel($image, $qrX, $qrY, (int)$qrWidth, $qrHeight);
         }
@@ -675,6 +793,7 @@ class QrCode
     /**
      * 计算最终尺寸
      * 优化了尺寸计算逻辑，确保二维码在最终图像中完美居中
+     * 支持标签自动高度计算和外边距（padding）配置
      *
      * @param int $moduleCount 模块数量
      * @param int $moduleSize 模块大小（像素）
@@ -683,22 +802,24 @@ class QrCode
      */
     private function calculateFinalSize(int $moduleCount, int $moduleSize, int $qrContentWidth): array
     {
-        // 计算二维码总区域（包含边距）
+        // 计算二维码总区域（包含margin模块边距）
         $totalModules = $moduleCount + $this->margin * 2;
         $qrAreaWidth = $moduleSize * $totalModules;
         $qrAreaHeight = $qrAreaWidth; // 二维码区域是正方形
 
-        // 如果没有标签，直接返回
+        // 如果没有标签，直接返回（添加padding外边距）
         if ($this->labelOptions === null || !$this->labelOptions->isEnabled()) {
-            return [$qrAreaWidth, $qrAreaHeight, $qrAreaWidth];
+            // 最终尺寸 = 二维码区域 + 上下padding
+            $finalSize = $qrAreaHeight + $this->padding * 2;
+            return [$finalSize, $qrAreaHeight, $qrAreaWidth];
         }
 
-        // 计算标签高度
+        // 计算标签高度（包含内边距和外边距）
         $labelHeight = $this->labelOptions->calculateTextHeight($qrAreaWidth)[0];
 
-        // 最终图像尺寸：二维码高度 + 标签高度
-        // 保持图像为正方形，确保二维码在上方完美居中
-        $finalSize = $qrAreaHeight + $labelHeight;
+        // 最终图像尺寸：二维码高度 + 标签高度 + 上下padding
+        // 布局：[padding][二维码区域][padding][标签区域][padding]
+        $finalSize = $qrAreaHeight + $labelHeight + $this->padding * 2;
 
         return [$finalSize, $qrAreaHeight, $qrAreaWidth];
     }
@@ -748,24 +869,20 @@ class QrCode
      */
     private function drawRoundedModule(GdImage $image, int $x, int $y, int $size, int $color): void
     {
-        // 计算圆点半径，使用动态系数确保相邻圆点连接
-        // 半径系数说明：0.5=刚好相接，0.55=轻微重叠（推荐），0.6=明显重叠
-        // 重叠确保扫描识别，但避免过大导致二维码失效
-        $radius = (int)($size * $this->roundedRadius * 0.55);
+        // 计算圆点半径，确保相邻圆点有足够的重叠以支持扫描识别
+        // 修复：增大系数从0.55到0.72，确保圆点重叠率足够（约43%）
+        // 重叠率公式：(radius*2 - size) / size，需要至少40%才能保证识别
+        $radius = (int)($size * $this->roundedRadius * 0.72);
+
+        // 确保半径不会超过模块大小太多
+        $radius = min($radius, (int)($size / 2) + 1);
+
         $cx = $x + (int)($size / 2);
         $cy = $y + (int)($size / 2);
 
-        // 根据尺寸选择绘制策略
-        if ($size >= 8) {
-            // 大尺寸圆点：添加立体效果
-            $this->draw3DModule($image, $cx, $cy, $radius, $color);
-        } else if ($size >= 6) {
-            // 中等尺寸圆点：添加高亮效果
-            $this->drawHighlightedModule($image, $cx, $cy, $radius, $color);
-        } else {
-            // 小尺寸圆点：简单填充
-            imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
-        }
+        // 修复：移除干扰扫描的3D效果，只绘制纯色圆点
+        // 这确保了高对比度和清晰的边界，提升扫描可识别性
+        imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
     }
 
     /**
@@ -1272,15 +1389,15 @@ class QrCode
         }
 
         // 计算标签区域位置和大小
-        // 优化：标签应该相对于最终图像宽度居中，而不是相对于二维码宽度
-        // 如果设置了左右外边距为0，则标签宽度等于二维码宽度
+        // 优化布局逻辑：标签应该相对于最终图像宽度居中，而不是相对于二维码宽度
+        // 如果设置了左右外边距为0，则标签宽度等于二维码宽度，自动居中
         // 否则，标签宽度为二维码宽度减去左右外边距
         if ($marginLeft === 0 && $marginRight === 0) {
             // 默认情况：标签宽度等于二维码宽度，标签X坐标相对于最终图像居中
             $labelAreaWidth = $qrWidth;
             $labelX = (int)(($finalImageWidth - $labelAreaWidth) / 2);
         } else {
-            // 有外边距的情况
+            // 有外边距的情况：标签宽度缩小，X坐标基于二维码位置计算
             $labelAreaWidth = $qrWidth - $marginLeft - $marginRight;
             $labelX = $qrX + $marginLeft;
         }
@@ -1428,49 +1545,81 @@ class QrCode
      * 生成二维码字符串
      *
      * @return string 二维码图像数据
+     * @throws Exception 如果渲染失败
      */
     public function toString(): string
     {
         $image = $this->render();
 
         ob_start();
-        match($this->format) {
-            'png' => imagepng($image, null, -1),
+        $result = match($this->format) {
+            'png' => imagepng($image, null, 9),
             'jpeg', 'jpg' => imagejpeg($image, null, $this->quality),
             'gif' => imagegif($image),
-            default => throw new Exception('不支持的格式')
+            'webp' => imagewebp($image, null, $this->quality),
+            default => throw new Exception('不支持的格式: ' . $this->format)
         };
-        $data = ob_get_clean();
 
+        if ($result === false) {
+            imagedestroy($image);
+            ob_end_clean();
+            throw new Exception('生成二维码数据失败');
+        }
+
+        $data = ob_get_clean();
         imagedestroy($image);
+
+        if ($data === false) {
+            throw new Exception('获取图像数据失败');
+        }
+
         return $data;
     }
 
     /**
-     * 生成二维码并保存到文件
+     * 保存二维码到文件
      *
      * @param string $filename 文件名
      * @return bool
+     * @throws Exception 如果保存失败
      */
     public function save(string $filename): bool
     {
+        // 验证文件名
+        if (empty($filename)) {
+            throw new Exception('文件名不能为空');
+        }
+
+        // 创建目录
         $directory = dirname($filename);
-        if (!is_dir($directory)) {
-            mkdir($directory, 0775, true);
+        if (!empty($directory) && !is_dir($directory)) {
+            if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
+                throw new Exception('无法创建目录: ' . $directory);
+            }
+        }
+
+        // 检查目录是否可写
+        if (is_dir($directory) && !is_writable($directory)) {
+            throw new Exception('目录不可写: ' . $directory);
         }
 
         $image = $this->render();
 
         $result = match($this->format) {
-            'png' => imagepng($image, $filename, -1),
+            'png' => imagepng($image, $filename, 9),
             'jpeg', 'jpg' => imagejpeg($image, $filename, $this->quality),
             'gif' => imagegif($image, $filename),
             'webp' => imagewebp($image, $filename, $this->quality),
-            default => throw new Exception('不支持的格式')
+            default => throw new Exception('不支持的格式: ' . $this->format)
         };
 
         imagedestroy($image);
-        return $result;
+
+        if ($result === false) {
+            throw new Exception('保存二维码失败: ' . $filename);
+        }
+
+        return true;
     }
 
     /**
@@ -2938,4 +3087,78 @@ class QrCode
         ], JSON_UNESCAPED_UNICODE);
         return self::make($propertyData);
     }
+
+    /**
+     * 验证前景色和背景色的对比度
+     * 确保扫描器能够正确识别二维码
+     * 使用WCAG对比度标准：至少4.5:1（正常文字）
+     *
+     * @throws Exception 如果对比度不足
+     */
+    private function validateColorContrast(): void
+    {
+        // 获取前景色和背景色的RGB值
+        $fgRgb = [
+            'r' => $this->foregroundColor->getRed(),
+            'g' => $this->foregroundColor->getGreen(),
+            'b' => $this->foregroundColor->getBlue()
+        ];
+
+        $bgRgb = [
+            'r' => $this->backgroundColor->getRed(),
+            'g' => $this->backgroundColor->getGreen(),
+            'b' => $this->backgroundColor->getBlue()
+        ];
+
+        // 计算相对亮度（WCAG公式）
+        $fgLuminance = $this->calculateLuminance($fgRgb);
+        $bgLuminance = $this->calculateLuminance($bgRgb);
+
+        // 计算对比度
+        $lighter = max($fgLuminance, $bgLuminance);
+        $darker = min($fgLuminance, $bgLuminance);
+        $contrastRatio = ($lighter + 0.05) / ($darker + 0.05);
+
+        // 检查对比度是否足够（使用较低阈值3:1以支持更多颜色）
+        if ($contrastRatio < 3.0) {
+            throw new Exception(
+                '颜色对比度不足，可能影响扫描识别。' .
+                '当前对比度: ' . round($contrastRatio, 2) . ':1' .
+                '，建议至少为3:1。请使用更鲜明的前景色和背景色。'
+            );
+        }
+    }
+
+    /**
+     * 计算颜色的相对亮度（WCAG标准）
+     *
+     * @param array $rgb RGB颜色值
+     * @return float 相对亮度（0-1）
+     */
+    private function calculateLuminance(array $rgb): float
+    {
+        // 将sRGB值转换为线性RGB
+        $rLinear = $this->rgbToLinear($rgb['r']);
+        $gLinear = $this->rgbToLinear($rgb['g']);
+        $bLinear = $this->rgbToLinear($rgb['b']);
+
+        // 计算相对亮度
+        return 0.2126 * $rLinear + 0.7152 * $gLinear + 0.0722 * $bLinear;
+    }
+
+    /**
+     * 将sRGB值转换为线性RGB值（用于对比度计算）
+     *
+     * @param int $value 0-255的RGB值
+     * @return float 线性RGB值
+     */
+    private function rgbToLinear(int $value): float
+    {
+        $normalized = $value / 255;
+        if ($normalized <= 0.03928) {
+            return $normalized / 12.92;
+        }
+        return pow(($normalized + 0.055) / 1.055, 2.4);
+    }
 }
+

@@ -30,15 +30,20 @@ class QrEncoder
      *
      * @param string $data 要编码的数据
      * @param ErrorCorrectionLevel $ecLevel 错误纠正级别
-     * @param int $version 二维码版本（0表示自动选择）
+     * @param int $version 二维码版本（0表示自动选择，范围1-40）
      * @param string $encoding 字符编码
      * @return array 二维码矩阵
-     * @throws Exception
+     * @throws Exception 如果数据为空或编码失败
      */
     public function encode(string $data, ErrorCorrectionLevel $ecLevel, int $version = 0, string $encoding = 'UTF-8'): array
     {
         if (empty($data)) {
-            throw new Exception('数据不能为空');
+            throw new Exception('数据不能为空，请提供有效的编码内容');
+        }
+
+        // 验证版本范围
+        if ($version < 0 || $version > 40) {
+            throw new Exception('无效的二维码版本: ' . $version . '。版本必须在0（自动选择）到40之间');
         }
 
         // 将自定义ErrorCorrectionLevel转换为内部的BaconErrorCorrectionLevel
@@ -51,8 +56,12 @@ class QrEncoder
         }
 
         // 使用内部编码器进行编码
-        $qrCode = $this->encoder->encode($data, $internalEcLevel, $encoding, $forcedVersion);
-        $matrix = $qrCode->getMatrix();
+        try {
+            $qrCode = $this->encoder->encode($data, $internalEcLevel, $encoding, $forcedVersion);
+            $matrix = $qrCode->getMatrix();
+        } catch (\Exception $e) {
+            throw new Exception('二维码编码失败: ' . $e->getMessage(), 0, $e);
+        }
 
         // 转换为数组格式
         $result = [];
@@ -69,14 +78,14 @@ class QrEncoder
     /**
      * 获取二维码尺寸（模块数量）
      *
-     * @param int $version 二维码版本
+     * @param int $version 二维码版本（1-40）
      * @return int 模块数量
-     * @throws Exception
+     * @throws Exception 如果版本无效
      */
     public function getDimension(int $version): int
     {
         if ($version < 1 || $version > 40) {
-            throw new Exception('无效的二维码版本: ' . $version);
+            throw new Exception('无效的二维码版本: ' . $version . '。版本必须在1到40之间');
         }
         return 17 + 4 * $version;
     }

@@ -164,7 +164,13 @@ class AdvancedFeatures
     public static function batchGenerate(array $dataList, string $outputDir, int $size = 300, string $prefix = 'qr_'): array
     {
         if (!is_dir($outputDir)) {
-            mkdir($outputDir, 0775, true);
+            if (!mkdir($outputDir, 0775, true) && !is_dir($outputDir)) {
+                throw new Exception('无法创建输出目录: ' . $outputDir);
+            }
+        }
+
+        if (empty($dataList)) {
+            throw new Exception('数据列表不能为空');
         }
 
         $results = [
@@ -176,6 +182,10 @@ class AdvancedFeatures
 
         foreach ($dataList as $index => $data) {
             try {
+                if (empty($data)) {
+                    throw new Exception('数据内容不能为空');
+                }
+
                 $filename = $outputDir . '/' . $prefix . $index . '.png';
                 QrCode::make($data)
                     ->size($size)
@@ -201,6 +211,7 @@ class AdvancedFeatures
      * @param array $qrPosition 二维码位置 [x, y, width, height]
      * @param array $options 二维码选项
      * @return bool 是否成功
+     * @throws Exception 如果模板文件不存在或无法处理
      */
     public static function generateFromTemplate(
         string $templatePath,
@@ -209,52 +220,65 @@ class AdvancedFeatures
         array $qrPosition,
         array $options = []
     ): bool {
+        // 验证模板文件
+        if (!file_exists($templatePath)) {
+            throw new Exception('模板文件不存在: ' . $templatePath);
+        }
+
         $template = self::loadImage($templatePath);
         if ($template === false) {
-            return false;
+            throw new Exception('无法加载模板图片: ' . $templatePath);
+        }
+
+        // 验证二维码位置参数
+        if (count($qrPosition) !== 4) {
+            imagedestroy($template);
+            throw new Exception('二维码位置参数必须包含4个元素: [x, y, width, height]');
         }
 
         // 生成二维码
-        $qrCode = QrCode::make($data)
-            ->size($qrPosition[2]);
+        try {
+            $qrCode = QrCode::make($data)
+                ->size($qrPosition[2]);
 
-        foreach ($options as $key => $value) {
-            $qrCode = $qrCode->$key($value);
+            foreach ($options as $key => $value) {
+                $qrCode = $qrCode->$key($value);
+            }
+
+            $qrImage = $qrCode->render();
+
+            // 合并到模板
+            $result = imagecopyresampled(
+                $template,
+                $qrImage,
+                $qrPosition[0],
+                $qrPosition[1],
+                0,
+                0,
+                $qrPosition[2],
+                $qrPosition[3],
+                imagesx($qrImage),
+                imagesy($qrImage)
+            );
+
+            // 保存结果
+            $extension = strtolower(pathinfo($outputPath, PATHINFO_EXTENSION));
+            $saveResult = match($extension) {
+                'jpeg', 'jpg' => imagejpeg($template, $outputPath, 90),
+                'png' => imagepng($template, $outputPath, 9),
+                'gif' => imagegif($template, $outputPath),
+                'webp' => imagewebp($template, $outputPath, 90),
+                default => throw new Exception('不支持的输出格式: ' . $extension)
+            };
+
+            imagedestroy($template);
+            imagedestroy($qrImage);
+
+            return $result !== false && $saveResult !== false;
+        } catch (Exception $e) {
+            imagedestroy($template);
+            throw new Exception('生成二维码失败: ' . $e->getMessage(), 0, $e);
         }
-
-        $qrImage = $qrCode->render();
-
-        // 合并到模板
-        imagecopyresampled(
-            $template,
-            $qrImage,
-            $qrPosition[0],
-            $qrPosition[1],
-            0,
-            0,
-            $qrPosition[2],
-            $qrPosition[3],
-            imagesx($qrImage),
-            imagesy($qrImage)
-        );
-
-        // 保存结果
-        $extension = strtolower(pathinfo($outputPath, PATHINFO_EXTENSION));
-        switch ($extension) {
-            case 'jpeg':
-            case 'jpg':
-                imagejpeg($template, $outputPath, 90);
-                break;
-            case 'png':
-            default:
-                imagepng($template, $outputPath);
-                break;
-        }
-
-        imagedestroy($template);
-        imagedestroy($qrImage);
-
-        return true;
     }
 
     /**

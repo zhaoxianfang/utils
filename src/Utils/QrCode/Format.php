@@ -43,9 +43,9 @@ final class Format
     /**
      * 获取格式的MIME类型
      *
-     * @param string $format 格式
-     * @return string
-     * @throws Exception
+     * @param string $format 格式名称
+     * @return string MIME类型
+     * @throws Exception 如果格式不受支持
      */
     public static function getMimeType(string $format): string
     {
@@ -53,7 +53,7 @@ final class Format
             self::PNG => 'image/png',
             self::JPEG, self::JPG => 'image/jpeg',
             self::GIF => 'image/gif',
-            default => throw new Exception('不支持的格式: ' . $format)
+            default => throw new Exception('不支持的图像格式: ' . $format . '。支持的格式有: png, jpeg, jpg, gif')
         };
     }
 }

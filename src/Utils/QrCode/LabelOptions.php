@@ -108,17 +108,25 @@ class LabelOptions
     /**
      * 设置默认字体路径
      *
-     * @param string $fontPath 字体文件路径 或者内置字体的名称，例如：/your/path/aaa.ttf、 'lishu'
+     * @param string $fontPath 字体文件路径或者内置字体的名称，例如：/your/path/aaa.ttf、 'lishu'
+     * @throws InvalidArgumentException 如果字体文件不存在
      */
     public static function setDefaultFontPath(string $fontPath): void
     {
-        if(is_file($fontPath)){
+        // 首先尝试直接作为完整路径使用
+        if (is_file($fontPath)) {
             self::$defaultFontPath = $fontPath;
-        }else{
-            if(is_file($fontPath = dirname(__FILE__, 2).'/resource/font/'.$fontPath.'.ttf')){
-                self::$defaultFontPath = $fontPath;
-            }
+            return;
         }
+
+        // 尝试作为字体名称查找
+        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        if (is_file($fontByName)) {
+            self::$defaultFontPath = $fontByName;
+            return;
+        }
+
+        throw new InvalidArgumentException('默认字体文件不存在: ' . $fontPath);
     }
 
     /**
@@ -148,26 +156,36 @@ class LabelOptions
     /**
      * 设置字体路径
      *
-     * @param string $fontPath 字体文件路径
+     * @param string|null $fontPath 字体文件路径或者内置字体的名称（如：lishu）
      * @return self
+     * @throws InvalidArgumentException 如果字体文件不存在
      */
     public function fontPath(?string $fontPath): self
     {
-        if(empty($fontPath)){
-            $this->fontPath = dirname(__FILE__, 2).'/resource/font/xingkai.ttf';
-        }else{
-            if(is_file($fontPath)){
-                $this->fontPath = $fontPath;
-            }else{
-                if(is_file($fontPath = dirname(__FILE__, 2).'/resource/font/'.$fontPath.'.ttf')){
-                    $this->fontPath = $fontPath;
-                }
+        if (empty($fontPath)) {
+            // 使用默认字体
+            $defaultFont = dirname(__FILE__, 2) . '/resource/font/xingkai.ttf';
+            if (is_file($defaultFont)) {
+                $this->fontPath = $defaultFont;
+                return $this;
             }
+            throw new InvalidArgumentException('默认字体文件不存在');
         }
-        if(empty($this->fontPath)){
-            throw new InvalidArgumentException('字体文件不存在:'.$fontPath);
+
+        // 首先尝试直接作为完整路径使用
+        if (is_file($fontPath)) {
+            $this->fontPath = $fontPath;
+            return $this;
         }
-        return $this;
+
+        // 尝试作为字体名称查找
+        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        if (is_file($fontByName)) {
+            $this->fontPath = $fontByName;
+            return $this;
+        }
+
+        throw new InvalidArgumentException('字体文件不存在: ' . $fontPath);
     }
 
     /**

@@ -85,8 +85,9 @@ final class ErrorCorrectionLevel extends AbstractEnum
     /**
      * 从值获取纠错级别（兼容旧版本）
      *
-     * @param int $value 纠错级别值
+     * @param int $value 纠错级别值 (0=L, 1=M, 2=Q, 3=H)
      * @return self
+     * @throws InvalidArgumentException 如果值无效
      */
     public static function fromValue(int $value): self
     {
@@ -95,7 +96,7 @@ final class ErrorCorrectionLevel extends AbstractEnum
             1 => self::M(),
             2 => self::Q(),
             3 => self::H(),
-            default => throw new InvalidArgumentException('无效的错误纠正级别值: ' . $value)
+            default => throw new InvalidArgumentException('无效的错误纠正级别值: ' . $value . '。有效值为: 0(L), 1(M), 2(Q), 3(H)')
         };
     }
 

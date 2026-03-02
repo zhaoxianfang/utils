@@ -119,44 +119,46 @@ class Color
             throw new Exception('无效的十六进制颜色值: ' . $hex);
         }
 
-        if (strlen($hex) === 3) {
+        $length = strlen($hex);
+
+        if ($length === 3) {
             # RGB格式，每个字符重复一次
-            $r = @hexdec(str_repeat($hex[0], 2));
-            $g = @hexdec(str_repeat($hex[1], 2));
-            $b = @hexdec(str_repeat($hex[2], 2));
+            $r = hexdec(str_repeat($hex[0], 2));
+            $g = hexdec(str_repeat($hex[1], 2));
+            $b = hexdec(str_repeat($hex[2], 2));
             return new self($r, $g, $b);
         }
 
-        if (strlen($hex) === 4) {
+        if ($length === 4) {
             # RGBA格式
-            $r = @hexdec(str_repeat($hex[0], 2));
-            $g = @hexdec(str_repeat($hex[1], 2));
-            $b = @hexdec(str_repeat($hex[2], 2));
-            $a = @hexdec(str_repeat($hex[3], 2));
+            $r = hexdec(str_repeat($hex[0], 2));
+            $g = hexdec(str_repeat($hex[1], 2));
+            $b = hexdec(str_repeat($hex[2], 2));
+            $a = hexdec(str_repeat($hex[3], 2));
             # 转换为0-127范围
             $alpha = 127 - (int)($a * 127 / 255);
             return new self($r, $g, $b, $alpha);
         }
 
-        if (strlen($hex) === 6) {
+        if ($length === 6) {
             # RRGGBB格式
-            $r = @hexdec(substr($hex, 0, 2));
-            $g = @hexdec(substr($hex, 2, 2));
-            $b = @hexdec(substr($hex, 4, 2));
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
             return new self($r, $g, $b);
         }
 
-        if (strlen($hex) === 8) {
+        if ($length === 8) {
             # RRGGBBAA格式
-            $r = @hexdec(substr($hex, 0, 2));
-            $g = @hexdec(substr($hex, 2, 2));
-            $b = @hexdec(substr($hex, 4, 2));
-            $a = @hexdec(substr($hex, 6, 2));
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
+            $a = hexdec(substr($hex, 6, 2));
             $alpha = 127 - (int)($a * 127 / 255);
             return new self($r, $g, $b, $alpha);
         }
 
-        throw new Exception('无效的十六进制颜色值: ' . $hex);
+        throw new Exception('无效的十六进制颜色值: ' . $hex . '，支持的格式: #RGB, #RGBA, #RRGGBB, #RRGGBBAA');
     }
 
     /**
@@ -202,7 +204,7 @@ class Color
     /**
      * 转换为GD库颜色索引
      *
-     * @param resource $image GD图像资源
+     * @param GdImage|resource $image GD图像资源
      * @return int
      */
     public function toGdColor($image): int
@@ -243,8 +245,21 @@ class Color
      *
      * @return self
      */
-    public function clone(): self
+    public function cloneColor(): self
     {
         return new self($this->red, $this->green, $this->blue, $this->alpha);
+    }
+
+    /**
+     * 魔术方法：克隆颜色对象
+     * PHP的__clone魔术方法必须返回void
+     */
+    public function __clone(): void
+    {
+        // 克隆时复制所有属性值
+        $this->red = $this->red;
+        $this->green = $this->green;
+        $this->blue = $this->blue;
+        $this->alpha = $this->alpha;
     }
 }

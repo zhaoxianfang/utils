@@ -77,10 +77,13 @@ final class QrCode
 
     /**
      * Validates whether a mask pattern is valid.
+     *
+     * @param int $maskPattern 要验证的掩码模式 (0-7)
+     * @return bool
      */
     public static function isValidMaskPattern(int $maskPattern) : bool
     {
-        return $maskPattern > 0 && $maskPattern < self::NUM_MASK_PATTERNS;
+        return $maskPattern >= 0 && $maskPattern < self::NUM_MASK_PATTERNS;
     }
 
     /**
