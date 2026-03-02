@@ -120,11 +120,25 @@ class Query
     protected static array $compiled = [];
 
     /**
+     * 选择器类型检测结果缓存
+     *
+     * @var array<string, string>
+     */
+    protected static array $typeCache = [];
+
+    /**
      * 是否已初始化
-     * 
+     *
      * @var bool
      */
     protected static bool $initialized = false;
+
+    /**
+     * 缓存统计信息
+     *
+     * @var array{hits: int, misses: int}
+     */
+    protected static array $cacheStats = ['hits' => 0, 'misses' => 0];
 
     /**
      * 初始化 Query 类
@@ -203,7 +217,9 @@ class Query
      */
     public static function compile(string $expression, string $type = self::TYPE_CSS): string
     {
-        if (! in_array(strtolower($type), [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX], true)) {
+        $type = strtolower($type);
+
+        if (! in_array($type, [self::TYPE_CSS, self::TYPE_XPATH, self::TYPE_REGEX], true)) {
             throw new RuntimeException(sprintf('不支持的表达式类型 "%s"。', $type));
         }
 
@@ -214,7 +230,7 @@ class Query
         }
 
         // 正则表达式类型：原样返回（在 Document 层处理）
-        if (strcasecmp($type, self::TYPE_REGEX) === 0) {
+        if ($type === self::TYPE_REGEX) {
             // 验证正则表达式语法
             @preg_match($expression, '');
             if (preg_last_error() !== PREG_NO_ERROR) {
@@ -224,7 +240,7 @@ class Query
         }
 
         // 直接使用 XPath，需要验证 XPath 语法
-        if (strcasecmp($type, self::TYPE_XPATH) === 0) {
+        if ($type === self::TYPE_XPATH) {
             // 验证 XPath 表达式基本语法
             if (self::isInvalidXPath($expression)) {
                 throw new InvalidSelectorException(sprintf('无效的 XPath 表达式: "%s"。', $expression));
@@ -235,8 +251,11 @@ class Query
         // 检查缓存
         $cacheKey = md5($expression);
         if (isset(self::$compiled[$cacheKey])) {
+            self::$cacheStats['hits']++;
             return self::$compiled[$cacheKey];
         }
+
+        self::$cacheStats['misses']++;
 
         // CSS 转换为 XPath
         $compiled = static::cssToXpath($expression);
@@ -303,6 +322,23 @@ class Query
     public static function clearCompiled(): void
     {
         static::$compiled = [];
+        static::$typeCache = [];
+        static::$cacheStats = ['hits' => 0, 'misses' => 0];
+    }
+
+    /**
+     * 获取缓存统计信息
+     *
+     * @return array{hits: int, misses: int, hitRate: float} 缓存统计
+     */
+    public static function getCacheStats(): array
+    {
+        $total = self::$cacheStats['hits'] + self::$cacheStats['misses'];
+        return [
+            'hits' => self::$cacheStats['hits'],
+            'misses' => self::$cacheStats['misses'],
+            'hitRate' => $total > 0 ? round((self::$cacheStats['hits'] / $total) * 100, 2) : 0
+        ];
     }
 
     /**
@@ -345,6 +381,7 @@ class Query
      * 智能检测选择器类型
      *
      * 自动检测选择器是 CSS、XPath 还是正则表达式。
+     * 结果会被缓存以提高性能。
      *
      * @param  string  $selector  选择器表达式
      * @return string 选择器类型（'css'、'xpath' 或 'regex'）
@@ -357,22 +394,32 @@ class Query
      */
     public static function detectSelectorType(string $selector): string
     {
+        // 检查缓存
+        $cacheKey = md5($selector);
+        if (isset(self::$typeCache[$cacheKey])) {
+            return self::$typeCache[$cacheKey];
+        }
+
         // 检测正则表达式（以 / 开头并以 / 结尾）
         if (preg_match('/^\/.*\/[imsxuADUX]*$/', $selector)) {
+            self::$typeCache[$cacheKey] = self::TYPE_REGEX;
             return self::TYPE_REGEX;
         }
 
         // 检测 XPath 绝对路径
         if (self::isXPathAbsolute($selector)) {
+            self::$typeCache[$cacheKey] = self::TYPE_XPATH;
             return self::TYPE_XPATH;
         }
 
         // 检测 XPath 相对路径
         if (self::isXPathRelative($selector)) {
+            self::$typeCache[$cacheKey] = self::TYPE_XPATH;
             return self::TYPE_XPATH;
         }
 
         // 默认为 CSS 选择器
+        self::$typeCache[$cacheKey] = self::TYPE_CSS;
         return self::TYPE_CSS;
     }
 

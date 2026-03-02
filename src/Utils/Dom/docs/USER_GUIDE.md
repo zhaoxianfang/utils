@@ -926,6 +926,24 @@ $isRelative = Query::isXPathRelative('//div[@class="item"]');   // true
 
 选择器数组回退查找是一项强大的功能，允许您传入多个选择器，按顺序尝试，找到第一个非空结果即返回。这为处理不同结构的网页提供了极大的灵活性。
 
+### 重要：返回数据结构
+
+**findWithFallback** 方法有两种返回模式：
+
+1. **默认模式 (`$getFirst = true`)**：返回第一个匹配的选择器结果（一维数组）
+2. **查询模式 (`$getFirst = false`)**：返回所有选择器的结果（二维数组）
+
+```php
+// 默认模式 - 返回第一个非空结果（一维数组）
+$result = $doc->findWithFallback($rules);
+// 返回: [Element1, Element2, ...] 或 ['text1', 'text2', ...]
+
+// 查询模式 - 返回所有选择器结果（二维数组）
+$result = $doc->findWithFallback($rules, null, false);
+// 返回: [[结果1], [结果2], [结果3], ...]
+// 其中结果1、结果2、结果3 分别对应每个选择器的查询结果
+```
+
 ### 基本用法
 
 ```php
@@ -966,6 +984,25 @@ $dates = $doc->findWithFallback([
     ['selector' => '.date'],
     ['selector' => '/\d{4}-\d{2}-\d{2}/', 'type' => 'regex']
 ]);
+```
+
+### 获取所有选择器结果
+
+```php
+// 获取所有选择器的结果（即使有的返回空）
+$allResults = $doc->findWithFallback([
+    ['selector' => '.primary-title'],
+    ['selector' => '.secondary-title'],
+    ['selector' => '//h1[@class="title"]', 'type' => 'xpath']
+], null, false);  // 注意第三个参数为 false
+
+// 遍历结果
+foreach ($allResults as $index => $result) {
+    echo "选择器 $index 找到 " . count($result) . " 个结果\n";
+    foreach ($result as $item) {
+        echo "  - " . (is_object($item) ? $item->text() : $item) . "\n";
+    }
+}
 ```
 
 ---

@@ -2128,9 +2128,9 @@ class Document
                         $data[] = $result;
                     }
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 // 记录错误但继续尝试下一个选择器
-                // 可以选择记录日志
+                error_log("findWithFallback error: " . $e->getMessage());
                 continue;
             }
         }
@@ -2221,53 +2221,37 @@ class Document
             return $this->findByRegex($pattern, $contextNode, $attribute);
         }
 
-        // 提取文本内容
-        if (strcasecmp($extractMode, 'text') === 0) {
+        // 提取文本内容、属性值或所有匹配项
+        if (strcasecmp($extractMode, 'text') === 0 || 
+            strcasecmp($extractMode, 'attr') === 0 || 
+            strcasecmp($extractMode, 'match') === 0) {
             $matches = $this->regexMatch($pattern, $contextNode, $attribute);
             // 如果指定了分组索引，只返回该分组的值
             if ($group !== null) {
-                return array_map(function($match) use ($group) {
-                    if (is_array($match) && isset($match[$group])) {
-                        return $match[$group];
-                    }
-                    return $match;
-                }, $matches);
-            }
-            return $matches;
-        }
-
-        // 提取属性值
-        if (strcasecmp($extractMode, 'attr') === 0 && $attribute !== null) {
-            $matches = $this->regexMatch($pattern, $contextNode, $attribute);
-            // 如果指定了分组索引，只返回该分组的值
-            if ($group !== null) {
-                return array_map(function($match) use ($group) {
-                    if (is_array($match) && isset($match[$group])) {
-                        return $match[$group];
-                    }
-                    return $match;
-                }, $matches);
-            }
-            return $matches;
-        }
-
-        // 使用 regexMatch 提取所有匹配项
-        if (strcasecmp($extractMode, 'match') === 0) {
-            $matches = $this->regexMatch($pattern, $contextNode, $attribute);
-            // 如果指定了分组索引，只返回该分组的值
-            if ($group !== null) {
-                return array_map(function($match) use ($group) {
-                    if (is_array($match) && isset($match[$group])) {
-                        return $match[$group];
-                    }
-                    return $match;
-                }, $matches);
+                return $this->extractMatchGroup($matches, $group);
             }
             return $matches;
         }
 
         // 默认返回匹配的元素
         return $this->findByRegex($pattern, $contextNode, $attribute);
+    }
+
+    /**
+     * 从匹配结果中提取指定分组
+     *
+     * @param  array<int, mixed>  $matches  匹配结果数组
+     * @param  int  $group  分组索引
+     * @return array<int, string> 提取后的结果
+     */
+    protected function extractMatchGroup(array $matches, int $group): array
+    {
+        return array_map(function($match) use ($group) {
+            if (is_array($match) && isset($match[$group])) {
+                return $match[$group];
+            }
+            return $match;
+        }, $matches);
     }
 
     /**
@@ -2372,13 +2356,14 @@ class Document
         array $selectors,
         ?DOMElement $contextNode = null
     ): ?Element {
-        $results = $this->findWithFallback($selectors, $contextNode);
+        $results = $this->findWithFallback($selectors, $contextNode, true);
 
         if (empty($results)) {
             return null;
         }
 
-        // 返回第一个结果（排除字符串类型的结果，如 ::text 或 ::attr）
+        // findWithFallback 返回的是结果数组，返回第一个元素
+        // 结果可能是 Element 对象或字符串（text/attr提取模式）
         foreach ($results as $result) {
             if ($result instanceof Element) {
                 return $result;
