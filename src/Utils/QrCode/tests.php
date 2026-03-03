@@ -180,6 +180,7 @@ test('15. 自定义颜色（颜色对象）', function() use ($outputDir) {
         ->size(300)
         ->backgroundColor(new \zxf\Utils\QrCode\Color\Color(243, 156, 18))
         ->foregroundColor(new \zxf\Utils\QrCode\Color\Color(255, 255, 255))
+        ->skipContrastValidation() // 低对比度测试，跳过验证
         ->save($outputDir . '/test_15_color_obj.png');
 });
 
@@ -764,6 +765,7 @@ test('72. 动态背景二维码', function() use ($outputDir) {
         ->backgroundImage($bgPath)
         ->foregroundColor('#ffffff')
         ->labelText('动态背景')
+        ->skipContrastValidation() // 动态背景可能低对比度
         ->save($outputDir . '/test_74_dynamic_bg.png');
 });
 
@@ -772,6 +774,7 @@ test('73. 渐变色二维码', function() use ($outputDir) {
         ->size(300)
         ->backgroundColor('#3498db')
         ->foregroundColor('#f1c40f')
+        ->skipContrastValidation() // 低对比度测试
         ->save($outputDir . '/test_75_gradient.png');
 });
 
@@ -897,6 +900,7 @@ test('84. 低对比度颜色', function() use ($outputDir) {
         ->size(300)
         ->backgroundColor('#e0e0e0')
         ->foregroundColor('#404040')
+        ->skipContrastValidation() // 低对比度测试
         ->save($outputDir . '/test_86_contrast_low.png');
 });
 
@@ -913,6 +917,7 @@ test('85. 彩色二维码', function() use ($outputDir) {
             ->size(250)
             ->backgroundColor($colorsPair[1])
             ->foregroundColor($colorsPair[0])
+            ->skipContrastValidation() // 彩色测试，跳过对比度验证
             ->save($outputDir . "/test_87_color_{$i}.png");
     }
 });
@@ -1125,6 +1130,43 @@ test("115. 圆点风格半径调整", function() use ($outputDir)  {
         ->rounded(true)
         ->roundedRadius(0.75)
         ->save($outputDir . '/test_116_rounded.png');
+});
+
+echo "\n=== 第九部分：已存在商业场景测试 ===\n\n";
+
+test("116. 优惠券二维码（已存在）", function() use ($outputDir) {
+    QrCode::coupon('SAVE20', 20, '2024-12-31', '限时8折优惠')
+        ->size(250)
+        ->labelText('优惠券')
+        ->save($outputDir . '/test_117_coupon.png');
+});
+
+test("117. 餐厅点餐二维码（已存在）", function() use ($outputDir) {
+    QrCode::restaurantMenu('rest001', 8)
+        ->size(250)
+        ->labelText('扫码点餐')
+        ->save($outputDir . '/test_124_restaurant.png');
+});
+
+test("118. 快递单号二维码（已存在）", function() use ($outputDir) {
+    QrCode::express('SF1234567890', 'sf', '1234')
+        ->size(200)
+        ->labelText('物流追踪')
+        ->save($outputDir . '/test_125_logistics.png');
+});
+
+test("119. 停车缴费二维码（已存在）", function() use ($outputDir) {
+    QrCode::parking('PARK001', '京A12345', '2024-03-02 10:00:00')
+        ->size(250)
+        ->labelText('停车缴费')
+        ->save($outputDir . '/test_126_parking.png');
+});
+
+test("120. 问卷调查二维码（已存在）", function() use ($outputDir) {
+    QrCode::survey('survey001', 'user123')
+        ->size(250)
+        ->labelText('参与调查')
+        ->save($outputDir . '/test_127_survey.png');
 });
 
 echo "\n========================================\n";

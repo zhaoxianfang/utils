@@ -88,9 +88,6 @@ class QrCode
     /** @var int 图片质量 */
     private int $quality = 90;
 
-    /** @var QrEncoder 编码器（已弃用，使用内部编码器） */
-    private QrEncoder $encoder;
-
     /** @var string|null 字符编码 */
     private ?string $encoding = 'UTF-8';
 
@@ -103,6 +100,9 @@ class QrCode
     /** @var bool 是否使用透明背景 */
     private bool $transparentBackground = false;
 
+    /** @var bool 是否启用颜色对比度验证（默认启用以保证扫描可识别性） */
+    private bool $validateContrast = true;
+
     /** @var float 圆点半径（0-1，相对于模块大小） */
     private float $roundedRadius = 0.5;
 
@@ -114,7 +114,6 @@ class QrCode
         $this->errorCorrectionLevel = ErrorCorrectionLevel::medium();
         $this->foregroundColor = Color::black();
         $this->backgroundColor = Color::white();
-        $this->encoder = new QrEncoder();
     }
 
     /**
@@ -527,6 +526,19 @@ class QrCode
     }
 
     /**
+     * 禁用颜色对比度验证
+     * 允许使用低对比度颜色（用于特殊设计需求）
+     * 注意：低对比度可能导致扫描困难
+     *
+     * @return self
+     */
+    public function skipContrastValidation(): self
+    {
+        $this->validateContrast = false;
+        return $this;
+    }
+
+    /**
      * 设置圆点风格
      *
      * @param bool $rounded 是否使用圆点
@@ -648,8 +660,10 @@ class QrCode
             throw new Exception('二维码数据不能为空');
         }
 
-        // 验证颜色对比度，确保扫描可识别性
-        $this->validateColorContrast();
+        // 验证颜色对比度，确保扫描可识别性（仅当启用验证时）
+        if ($this->validateContrast) {
+            $this->validateColorContrast();
+        }
 
         // 编码数据为矩阵
         $matrix = $this->encodeWithBacon();
@@ -3161,4 +3175,5 @@ class QrCode
         return pow(($normalized + 0.055) / 1.055, 2.4);
     }
 }
+
 
