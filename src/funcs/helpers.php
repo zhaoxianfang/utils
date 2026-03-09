@@ -158,7 +158,7 @@ if (! function_exists('is_crawler')) {
         static $cache = [];
 
         $userAgent = is_laravel() ?
-            (request()->userAgent() ?? '') :
+            (\request()->userAgent() ?? '') :
             ($_SERVER['HTTP_USER_AGENT'] ?? '');
 
         if (empty($userAgent)) {
@@ -1319,7 +1319,7 @@ if (! function_exists('before_calling_methods')) {
                 // 如果参数是类名，则尝试解析依赖注入
                 if (is_string($parameter) && class_exists($parameter)) {
                     // 如果是 Laravel 则使用 app 函数实例化，否则直接 new 一个类
-                    return (function_exists('is_laravel') && is_laravel()) ? app($parameter) : new $parameter;
+                    return (function_exists('is_laravel') && is_laravel()) ? \app($parameter) : new $parameter;
                 }
 
                 return $parameter;
@@ -1398,24 +1398,23 @@ if (!function_exists('stream_output')) {
      *                      $next('空值:', null);
      *                      $next('数组:', [1, 2, 3]);
      *
+     * @param bool $checkOnly 仅用于检查是否实例化过
      * @throws Exception|Throwable
      */
-    function stream_output(Closure $callback): void
+    function stream_output(Closure $callback, bool $checkOnly = false): null|bool
     {
         static $initialized = false; // 静态标记是否已初始化
         $isCli = PHP_SAPI === 'cli'; // 检测运行环境
+        if ($checkOnly) {
+            // 专门用于检查状态
+            return $initialized;
+        }
 
         if (!$initialized) { // 首次调用初始化
             $initialized = true;
 
             if ($isCli) { // CLI环境信号处理
-                if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
-                    pcntl_async_signals(true); // 启用异步信号
-                    pcntl_signal(SIGTERM, function () { // 注册终止信号处理
-                        echo "进程被终止。\n";
-                        exit;
-                    });
-                }
+                stream_cli_check();
             } else { // Web环境设置
                 ini_set('max_execution_time', '0'); // 无执行时间限制
                 set_time_limit(0); // 无时间限制
@@ -1440,7 +1439,56 @@ if (!function_exists('stream_output')) {
         }
 
         // 创建输出处理器
-        $next = new class($isCli)
+        $next = stream_print();
+
+        try {
+            $callback($next); // 执行用户回调
+            $next->flush(); // 最终刷新
+        } catch (Throwable $e) { // 异常处理
+            $message = $next::formatData($e->getMessage()); // 使用静态方法格式化错误信息
+            if ($isCli) { // CLI错误输出
+                echo "错误: " . $message . PHP_EOL;
+            } else { // 浏览器错误输出
+                echo '<span style="color: #FF3300; font-weight: bold;">错误: ' .
+                    htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') . '</span><br>';
+            }
+            $next->flush(); // 刷新输出
+            throw $e; // 重新抛出
+        }
+        return true;
+    }
+
+    // CLI环境信号处理
+    function stream_cli_check(): void
+    {
+        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
+        if ($isCli) { // CLI环境信号处理
+            if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+                pcntl_async_signals(true); // 启用异步信号
+                pcntl_signal(SIGTERM, function () { // 注册终止信号处理
+                    echo "进程被终止。\n";
+                    exit;
+                });
+            }
+        }
+    }
+
+    // stream_output 的 $next 信息打印操作对象类
+    function stream_print(): callable|bool
+    {
+        // 判断 stream_output() 函数的 $initialized 是否已经初始化
+        try {
+            $checkFun = stream_output(function () {}, true);
+            if(is_bool($checkFun) && !$checkFun){
+                return false; // 没有初始化不调用打印输出操作
+            }
+        } catch (Throwable $e) {}
+
+        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
+        stream_cli_check();
+
+        // 创建输出处理器
+        return new class($isCli)
         {
             private bool $isCli; // 环境标识
             private bool $supportsColors; // 颜色支持
@@ -1544,21 +1592,6 @@ if (!function_exists('stream_output')) {
                         (stripos($term, 'color') !== false || stripos($term, 'xterm') !== false || stripos($term, 'vt100') !== false));
             }
         };
-
-        try {
-            $callback($next); // 执行用户回调
-            $next->flush(); // 最终刷新
-        } catch (Throwable $e) { // 异常处理
-            $message = $next::formatData($e->getMessage()); // 使用静态方法格式化错误信息
-            if ($isCli) { // CLI错误输出
-                echo "错误: " . $message . PHP_EOL;
-            } else { // 浏览器错误输出
-                echo '<span style="color: #FF3300; font-weight: bold;">错误: ' .
-                    htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') . '</span><br>';
-            }
-            $next->flush(); // 刷新输出
-            throw $e; // 重新抛出
-        }
     }
 }
 
