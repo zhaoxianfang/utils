@@ -1368,230 +1368,434 @@ if (! function_exists('relative_path')) {
 if (!function_exists('stream_output')) {
 
     /**
-     * 数据流方式操作数据，不用等待操作结束才打印数据
+     * 流式输出数据，不用等待操作结束才打印数据，支持 CLI 和 Web 环境实时显示
      *
-     * @param Closure $callback ($next)
-     *                  示例：
-     *                      $next() 执行下一个回调函数
-     *                  1. 简单字符串输出
-     *                      $next('string')输出普通文本
-     *                  2. 带类型的消息输出
-     *                      $next->info('信息消息') 等输出带样式的文本
-     *                      $next->error('错误消息'); // 错误级别输出
-     *                      $next->warning('警告消息'); // 警告级别输出
-     *                      $next->success('成功消息'); // 成功级别输出
-     *                  3. 多参数输出
-     *                      $next('消息1', '消息2', '消息3');
-     *                      $next->info('信息1', '信息2', '信息3');
-     *                  4. 数组输出
-     *                      $data=['name' => '张三','hobbies' => ['篮球', '音乐', '阅读']];
-     *                      $next->info('用户数据:', $data);
-     *                  5. 对象输出
-     *                      $user = new stdClass();
-     *                      $user->id = 1;
-     *                      $user->username = 'admin';
-     *                      $next->warning('用户对象:', $user);
-     *                  6. 混合输出
-     *                      $next('字符串:', 'Hello');
-     *                      $next('数字:', 123.45);
-     *                      $next('布尔值:', true);
-     *                      $next('空值:', null);
-     *                      $next('数组:', [1, 2, 3]);
+     * 本函数通过闭包回调提供流式输出能力，自动适配 CLI 和 Web 环境，
+     * 支持普通文本、带样式的信息（info/error/warning/success）、多参数混合输出、数组/对象自动格式化。
      *
-     * @param bool $checkOnly 仅用于检查是否实例化过
-     * @throws Exception|Throwable
+     * 使用示例：
+     *
+     * 1. 基本字符串输出
+     * ```php
+     * stream_output(function ($next) {
+     *     $next('输出普通文本');
+     *     sleep(1); // 延时等待
+     *     $next('处理完成');
+     * });
+     * ```
+     *
+     * 2. 带类型的消息输出
+     * ```php
+     * stream_output(function ($next) {
+     *     $next->info('这是一条信息'); // 提示级别输出
+     *     $next->error('出错了'); // 错误级别输出
+     *     $next->warning('警告'); // 警告级别输出
+     *     $next->success('成功'); // 成功级别输出
+     * });
+     * ```
+     *
+     * 3. 多参数输出
+     * ```php
+     * stream_output(function ($next) {
+     *     $next('用户名:', 'admin', 'ID:', 1001);
+     *     $next->info('详细数据:', ['role' => 'admin', 'status' => 'active']);
+     * });
+     * ```
+     *
+     * 4. 数组和对象输出
+     * ```php
+     * stream_output(function ($next) {
+     *     $user = new stdClass();
+     *     $user->name = '张三';
+     *     $user->hobbies = ['篮球', '音乐'];
+     *     $next('用户对象:', $user);
+     *
+     *     $config = ['db' => ['host' => 'localhost', 'port' => 3306]];
+     *     $next->info('配置数组:', $config);
+     * });
+     * ```
+     *
+     * 5. 在循环中逐步输出（实时进度）
+     * ```php
+     * stream_output(function ($next) {
+     *     for ($i = 1; $i <= 5; $i++) {
+     *         $next("步骤 $i 进行中...");
+     *         usleep(500000); // 模拟耗时
+     *         $next->success("步骤 $i 完成");
+     *     }
+     * });
+     * ```
+     *
+     * 6. 混合输出不同类型
+     * ```php
+     * stream_output(function ($next) {
+     *     $next('字符串:', 'Hello');
+     *     $next('数字:', 123.45);
+     *     $next('布尔:', true);
+     *     $next('空值:', null);
+     *     $next('数组:', [1, 2, 3]);
+     * });
+     * ```
+     *
+     * 7. 手动刷新缓冲区
+     * ```php
+     * stream_output(function ($next) {
+     *     $next('部分输出');
+     *     $next->flush(); // 强制立即输出
+     *     // 继续其他操作...
+     * });
+     * ```
+     *
+     * 8. 异常处理（异常会被捕获并输出，然后重新抛出）
+     * ```php
+     * try {
+     *     stream_output(function ($next) {
+     *         $next('开始');
+     *         throw new RuntimeException('模拟错误');
+     *     });
+     * } catch (Throwable $e) {
+     *     // 额外处理
+     * }
+     * ```
+     *
+     * 9. 仅检查初始化状态
+     * ```php
+     * if (stream_output(function(){}, true)) {
+     *     // 已经初始化过
+     * }
+     * ```
+     *
+     * 10. 在未初始化时安全调用（使用 nullsafe 操作符）
+     * ```php
+     * class Test {
+     *     public function demo() {
+     *         // stream_print() 是 stream_output 闭包函数的 $next 实现；
+     *         // 未初始化时返回 null，?-> 安全跳过；初始化后正常输出
+     *         stream_print()?->info('Run Test demo');
+     *     }
+     * }
+     *
+     * $test = new Test();
+     * $test->demo(); // 未初始化，无输出且无错误
+     *
+     * stream_output(function ($next) {
+     *     $t = new Test();
+     *     $t->demo(); // 已初始化，输出 'Run Test demo'
+     * });
+     * ```
+     *
+     * @param Closure $callback 回调函数，接收一个 $next 对象（由 stream_print() 返回）。
+     *                           该对象可像函数一样调用（直接输出），也提供 info/error/warning/success 等带颜色/样式的方法。
+     * @param bool $checkOnly 仅检查是否已初始化，为 true 时忽略 $callback，直接返回初始化状态。
+     * @return bool 正常执行返回 true；$checkOnly 时返回静态初始化标记（未初始化返回 false）。
+     * @throws Throwable 回调中抛出的异常会被捕获输出后重新抛出。
      */
-    function stream_output(Closure $callback, bool $checkOnly = false): null|bool
+    function stream_output(Closure $callback, bool $checkOnly = false): bool
     {
-        static $initialized = false; // 静态标记是否已初始化
-        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
+        static $initialized = false;          // 标记环境是否已初始化
+        $isCli = PHP_SAPI === 'cli';           // 判断运行环境
+
+        // 仅用于检查状态，不执行任何初始化或回调
         if ($checkOnly) {
-            // 专门用于检查状态
             return $initialized;
         }
 
-        if (!$initialized) { // 首次调用初始化
+        // 首次调用时进行环境初始化
+        if (!$initialized) {
             $initialized = true;
 
-            if ($isCli) { // CLI环境信号处理
+            if ($isCli) {
+                // CLI 环境：注册信号处理（只执行一次）
                 stream_cli_check();
-            } else { // Web环境设置
-                ini_set('max_execution_time', '0'); // 无执行时间限制
-                set_time_limit(0); // 无时间限制
-                ignore_user_abort(true); // 忽略用户中断
+            } else {
+                // Web 环境：取消执行时间限制，忽略用户中断
+                ini_set('max_execution_time', '0');
+                set_time_limit(0);
+                ignore_user_abort(true);
 
-                if (!headers_sent()) { // 如果头信息未发送
-                    header('Content-Type: text/html; charset=UTF-8'); // 设置内容类型
-                    header('Cache-Control: no-cache, no-store, must-revalidate'); // 禁用缓存
-                    header('Pragma: no-cache'); // 兼容旧浏览器
-                    header('Expires: 0'); // 立即过期
-                    header('Connection: keep-alive'); // 保持连接
-                    header('X-Accel-Buffering: no'); // 禁用Nginx缓冲
+                // 如果 HTTP 头尚未发送，则设置适当的响应头和禁用缓冲
+                if (!headers_sent()) {
+                    header('Content-Type: text/html; charset=UTF-8');
+                    header('Cache-Control: no-cache, no-store, must-revalidate');
+                    header('Pragma: no-cache');
+                    header('Expires: 0');
+                    header('Connection: keep-alive');
+                    header('X-Accel-Buffering: no');   // 禁用 Nginx 缓冲
 
                     if (function_exists('apache_setenv')) {
-                        @apache_setenv('no-gzip', '1'); // 禁用Apache压缩
+                        @apache_setenv('no-gzip', '1'); // 禁用 Apache 压缩
                     }
                 }
             }
 
-            if (ob_get_level() > 0) ob_end_flush(); // 清除当前缓冲区
-            ob_implicit_flush(true); // 启用隐式刷新
+            // 清理所有输出缓冲区，启用隐式刷新
+            while (ob_get_level() > 0) {
+                ob_end_flush();
+            }
+            ob_implicit_flush(true);
         }
 
-        // 创建输出处理器
+        // 获取打印处理器对象（必须在此之后调用，因为此时 $initialized 为 true）
         $next = stream_print();
 
+        // 正常情况下不会为 null，但为严谨做防御判断
+        if ($next === null) {
+            // throw new RuntimeException('stream_print 返回 null，可能未正确初始化');
+            return false;
+        }
+
         try {
-            $callback($next); // 执行用户回调
-            $next->flush(); // 最终刷新
-        } catch (Throwable $e) { // 异常处理
-            $message = $next::formatData($e->getMessage()); // 使用静态方法格式化错误信息
-            if ($isCli) { // CLI错误输出
+            // 执行用户自定义的回调
+            $callback($next);
+            // 最终刷新，确保所有数据输出
+            $next->flush();
+        } catch (Throwable $e) {
+            // 异常处理：格式化错误消息并根据环境输出
+            $message = $next::formatData($e->getMessage());
+            if ($isCli) {
                 echo "错误: " . $message . PHP_EOL;
-            } else { // 浏览器错误输出
+            } else {
                 echo '<span style="color: #FF3300; font-weight: bold;">错误: ' .
                     htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') . '</span><br>';
             }
-            $next->flush(); // 刷新输出
-            throw $e; // 重新抛出
+            $next->flush();
+            // 判断 report 函数是否存在
+            if (function_exists('report')) {
+                report($e);
+            } else {
+                throw $e;   // 重新抛出异常，让上层处理
+            }
         }
         return true;
     }
 
-    // CLI环境信号处理
-    function stream_cli_check(): void
+    /**
+     * 获取流式打印处理器对象：stream_print() 是 stream_output 闭包函数的 $next 实现；
+     *
+     * 该函数必须在 stream_output() 初始化后调用，否则返回 null。
+     * 返回的对象同时实现了 __invoke 和 __call，可灵活输出带颜色/样式的信息。
+     * 结合 nullsafe 操作符 (?->) 可在未初始化时安全调用而不报错。
+     *
+     * stream_print('into');
+     * stream_print()?->info('Run Test demo');
+     *
+     * @return callable|null 返回一个匿名类实例（实现了 __invoke），若未初始化则返回 null。
+     */
+    function stream_print(): callable|null
     {
-        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
-        if ($isCli) { // CLI环境信号处理
-            if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
-                pcntl_async_signals(true); // 启用异步信号
-                pcntl_signal(SIGTERM, function () { // 注册终止信号处理
-                    echo "进程被终止。\n";
-                    exit;
-                });
-            }
-        }
-    }
-
-    // stream_output 的 $next 信息打印操作对象类
-    function stream_print(): callable|bool
-    {
-        // 判断 stream_output() 函数的 $initialized 是否已经初始化
+        // 检查 stream_output 是否已初始化（通过 $checkOnly 模式）
         try {
-            $checkFun = stream_output(function () {}, true);
-            if(is_bool($checkFun) && !$checkFun){
-                return false; // 没有初始化不调用打印输出操作
+            $checkFun = stream_output(static function (): void {}, true);
+            if (is_bool($checkFun) && !$checkFun) {
+                // 未初始化，返回 null 允许 nullsafe 操作符安全跳过
+                return null;
             }
-        } catch (Throwable $e) {}
+        } catch (Throwable $e) {
+            // 极少数异常情况，返回 null 保证调用者安全
+            // 可根据需要记录错误日志
+            // error_log('stream_print check failed: ' . $e->getMessage());
+            return null;
+        }
 
-        $isCli = PHP_SAPI === 'cli'; // 检测运行环境
+        $isCli = PHP_SAPI === 'cli';
+        // 再次调用信号检查（内部有静态标记，只会实际注册一次）
         stream_cli_check();
 
-        // 创建输出处理器
+        // 返回匿名类实例，封装所有输出逻辑
         return new class($isCli)
         {
-            private bool $isCli; // 环境标识
-            private bool $supportsColors; // 颜色支持
-            private string $lineBreak; // 换行符
+            private bool $isCli;               // 运行环境标识
+            private bool $supportsColors;       // 当前终端是否支持颜色
+            private string $lineBreak;          // 换行符（CLI: PHP_EOL; Web: <br>）
 
-            // 颜色映射配置
+            // 预定义颜色映射，每种类型在 CLI 和 Web 下分别定义样式
             private const COLOR_MAP = [
-                'info'    => ['cli' => "\033[36m", 'browser' => '#0099CC'], // 信息颜色
-                'error'   => ['cli' => "\033[31m", 'browser' => '#FF3300'], // 错误颜色
-                'warning' => ['cli' => "\033[33m", 'browser' => '#FF9900'], // 警告颜色
-                'success' => ['cli' => "\033[32m", 'browser' => '#009900'], // 成功颜色
-                'default' => ['cli' => "\033[37m", 'browser' => '#666666']  // 默认颜色
+                'info'    => ['cli' => "\033[36m", 'browser' => '#0099CC'], // 信息（青色）
+                'error'   => ['cli' => "\033[31m", 'browser' => '#FF3300'], // 错误（红色）
+                'warning' => ['cli' => "\033[33m", 'browser' => '#FF9900'], // 警告（橙色）
+                'success' => ['cli' => "\033[32m", 'browser' => '#009900'], // 成功（绿色）
+                'default' => ['cli' => "\033[37m", 'browser' => '#666666']  // 默认（灰色）
             ];
 
             public function __construct(bool $isCli)
             {
-                $this->isCli = $isCli; // 设置环境
-                $this->lineBreak = $isCli ? PHP_EOL : '<br>'; // 设置换行符
-                $this->supportsColors = $this->checkColorSupport(); // 检测颜色支持
-            }
-
-            public function __invoke(...$data): void // 支持任意参数
-            {
-                $this->output($data); // 调用输出方法
-            }
-
-            public function __call(string $name, array $args): void
-            {
-                $this->output($args, $name); // 调用带类型的输出
+                $this->isCli = $isCli;
+                $this->lineBreak = $isCli ? PHP_EOL : '<br>';
+                $this->supportsColors = $this->checkColorSupport();
             }
 
             /**
-             * 刷新输出缓冲区（公开方法）
+             * 直接调用对象时输出数据（无样式或默认样式）
+             *
+             * @param mixed ...$data 任意数量的输出项（字符串、数组、对象等）
+             */
+            public function __invoke(...$data): void
+            {
+                $this->output($data);
+            }
+
+            /**
+             * 通过方法名指定输出类型（info/error/warning/success）
+             *
+             * @param string $name 方法名（对应类型）
+             * @param array $args  输出项列表
+             */
+            public function __call(string $name, array $args): void
+            {
+                $this->output($args, $name);
+            }
+
+            /**
+             * 强制刷新所有输出缓冲区
+             *
+             * 循环刷新直到所有缓冲区清空，确保数据立即发送。
+             * CLI 环境下加入微延迟以降低 CPU 占用。
              */
             public function flush(): void
             {
-                if (ob_get_level() > 0) ob_flush(); // 刷新输出缓冲区
-                flush(); // 刷新系统缓冲区
-                if (function_exists('usleep') && $this->isCli) usleep(1000); // CLI环境微延迟
+                // 刷新所有 PHP 输出缓冲区
+                while (ob_get_level() > 0) {
+                    ob_flush();
+                }
+                flush();
+
+                if ($this->isCli && function_exists('usleep')) {
+                    usleep(1000); // 1ms 延迟，平衡输出与 CPU
+                }
             }
 
             /**
-             * 统一输出处理
+             * 统一输出处理核心方法
+             *
+             * @param array $items 要输出的数据项列表
+             * @param string|null $type 输出类型（用于颜色映射），null 表示默认样式
              */
             private function output(array $items, ?string $type = null): void
             {
-                if (empty($items)) { // 空数据只刷新
+                if (empty($items)) {
                     $this->flush();
                     return;
                 }
 
-                $colorMap = self::COLOR_MAP[$type] ?? self::COLOR_MAP['default']; // 获取颜色配置
+                $color = self::COLOR_MAP[$type] ?? self::COLOR_MAP['default'];
 
-                foreach ($items as $item) { // 遍历所有数据项
-                    $formatted = self::formatData($item); // 格式化数据
-                    if ($this->isCli) { // CLI环境输出
-                        echo $this->supportsColors ? $colorMap['cli'] . $formatted . "\033[0m" : $formatted; // 带颜色输出
-                        echo $this->lineBreak; // 换行
-                    } else { // 浏览器环境输出
-                        echo '<span style="color: ' . $colorMap['browser'] . '; font-weight: bold; white-space: pre-wrap;">' .
-                            htmlspecialchars($formatted, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8') .
-                            '</span>' . $this->lineBreak; // HTML格式输出
+                foreach ($items as $item) {
+                    $formatted = self::formatData($item);
+
+                    if ($this->isCli) {
+                        // CLI 输出：支持颜色则添加 ANSI 转义码
+                        $output = $this->supportsColors ? $color['cli'] . $formatted . "\033[0m" : $formatted;
+                        echo $output . $this->lineBreak;
+                    } else {
+                        // Web 输出：使用 span 标签和内联样式，保留空格和换行
+                        $safe = htmlspecialchars($formatted, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
+                        echo '<span style="color: ' . $color['browser'] . '; font-weight: bold; white-space: pre-wrap;">'
+                            . $safe . '</span>' . $this->lineBreak;
                     }
                 }
 
-                $this->flush(); // 刷新缓冲区
+                $this->flush();
             }
 
             /**
-             * 格式化数据为可读字符串（静态方法）
+             * 将任意数据格式化为可读字符串（静态方法，可在外部调用）
+             *
+             * 增强功能：当 json_encode 失败时（例如对象包含循环引用），自动降级为 print_r 输出。
+             *
+             * @param mixed $data 要格式化的数据
+             * @return string 格式化后的字符串
              */
-            public static function formatData($data): string
+            public static function formatData(mixed $data): string
             {
-                if (is_string($data)) return $data; // 字符串直接返回
-                if (is_scalar($data) || is_null($data)) return var_export($data, true); // 标量数据转换
+                return match (true) {
+                    is_string($data) => $data,
+                    is_scalar($data) || is_null($data) => var_export($data, true),
+                    is_array($data) || is_object($data) => self::formatComplexData($data),
+                    default => '不支持的数据类型: ' . gettype($data),
+                };
+            }
 
-                if (is_array($data) || is_object($data)) { // 数组或对象
-                    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE); // JSON格式化
-                    return $json !== false ? $json : '无法编码的数据'; // 返回JSON或错误信息
+            /**
+             * 格式化数组或对象，优先使用 JSON，失败时使用 print_r
+             *
+             * @param array|object $data
+             * @return string
+             */
+            private static function formatComplexData(array|object $data): string
+            {
+                $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+                if ($json !== false) {
+                    return $json;
                 }
 
-                return '不支持的数据类型: ' . gettype($data); // 其他类型提示
+                // JSON 编码失败（如循环引用），使用 print_r 并转换为字符串
+                $result = print_r($data, true);
+                // 在 CLI 环境下直接返回，在 Web 下后续会经过 htmlspecialchars，安全
+                return $result;
             }
 
             /**
-             * 检测终端颜色支持
+             * 检测当前 CLI 终端是否支持 ANSI 颜色
+             *
+             * 同时检查输出是否被重定向（非终端），若重定向则禁用颜色。
+             *
+             * @return bool true 支持颜色，false 不支持
              */
             private function checkColorSupport(): bool
             {
-                if (!$this->isCli) return false; // 非CLI环境不支持
-
-                if (DIRECTORY_SEPARATOR === '\\') { // Windows系统
-                    return getenv('ANSICON') !== false ||  // ANSICON支持
-                        getenv('ConEmuANSI') === 'ON' || // ConEmu支持
-                        getenv('TERM') === 'xterm' || // xterm支持
-                        (function_exists('sapi_windows_vt100_support') && @sapi_windows_vt100_support(STDOUT)); // VT100支持
+                if (!$this->isCli) {
+                    return false;
                 }
 
-                return (function_exists('posix_isatty') && @posix_isatty(STDOUT)) || // Unix TTY检测
-                    (($term = getenv('TERM')) !== false && // 环境变量检测
-                        (stripos($term, 'color') !== false || stripos($term, 'xterm') !== false || stripos($term, 'vt100') !== false));
+                // 检查输出是否被重定向到非终端（文件、管道等）
+                if (function_exists('posix_isatty') && !@posix_isatty(STDOUT)) {
+                    return false;
+                }
+
+                // Windows 环境下的特殊检测
+                if (DIRECTORY_SEPARATOR === '\\') {
+                    return getenv('ANSICON') !== false
+                        || getenv('ConEmuANSI') === 'ON'
+                        || getenv('TERM') === 'xterm'
+                        || (function_exists('sapi_windows_vt100_support') && @sapi_windows_vt100_support(STDOUT));
+                }
+
+                // Unix/Linux 环境：终端名称包含颜色关键词
+                $term = getenv('TERM');
+                return $term !== false
+                    && (stripos($term, 'color') !== false
+                        || stripos($term, 'xterm') !== false
+                        || stripos($term, 'vt100') !== false);
             }
         };
+    }
+    /**
+     * CLI 环境信号处理（仅注册一次）
+     *
+     * 启用异步信号并注册 SIGTERM 和 SIGINT 处理函数，保证进程被终止时输出提示信息。
+     */
+    function stream_cli_check(): void
+    {
+        static $registered = false;   // 标记是否已注册过
+        if ($registered) {
+            return;
+        }
+        $registered = true;
+
+        if (PHP_SAPI !== 'cli') {
+            return;
+        }
+
+        if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
+            pcntl_async_signals(true);
+            // 处理终止信号（kill 或 Ctrl+C）
+            $handler = static function (): void {
+                echo "\n进程被终止。\n";
+                exit;
+            };
+            pcntl_signal(SIGTERM, $handler);
+            pcntl_signal(SIGINT, $handler);
+        }
     }
 }
 
@@ -2153,6 +2357,38 @@ if (! function_exists('url_conversion_to_prefix_path')) {
         }
 
         return $url;
+    }
+}
+
+if (! function_exists('array_keys_search')) {
+    /**
+     * 从二维数组中搜索指定的键名，返回键名对应的值
+     *
+     * @param  array  $array  二维数组
+     * @param  array  $keys  键名数组
+     * @param  bool  $onlyExists  是否只返回存在的键名对应的值
+     */
+    function array_keys_search(array $array = [], array $keys = [], bool $onlyExists = false): mixed
+    {
+        $result = [];
+        if (empty($array) || empty($keys)) {
+            return $result;
+        }
+        if ($onlyExists) {
+            // 方式一：只返回存在的键名对应的值
+            foreach ($array as $key => $value) {
+                if (in_array($key, $keys)) {
+                    $result[$key] = $value;
+                }
+            }
+        } else {
+            // 方式二：返回所有指定键名对应的值，不存在的键名返回null
+            foreach ($keys as $key) {
+                $result[$key] = $array[$key] ?? null;
+            }
+        }
+
+        return $result;
     }
 }
 
