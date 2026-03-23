@@ -60,7 +60,8 @@ use InvalidArgumentException;
  *      // 获取字段值集合
  *      $ages = $tree->pluck('age');  // 获取所有age值
  *      // 将树形结构扁平化
- *      $treeData = $tree->toTree();
+ *      $treeData = $tree->toTree(); // 带children 的 tree 树形数组数据
+ *      $arrayData = $tree->toArray(); // 转换为Tree 树形结构，再展开为二维码数组结构
  *      $flattened = $tree->flatten($treeData);
  *  条件查询：
  *      // 基础形式
@@ -109,6 +110,8 @@ class Tree
 
     private string $pid = 'pid'; // 父节点ID字段名，默认为'pid'
 
+    private string $title = 'title'; // 父节点名称/标题字段名，默认为'title'
+
     private string $weight = 'weight'; // 根据权重排序字段，如果结构中存在此字段则降序排序，不不存在则跳过，默认为'weight'
 
     private string $sortType = 'desc'; // 如果存在 $weight 的前提下 根据权重排序的方式，desc 降序 asc 升序，默认为'desc'
@@ -116,6 +119,11 @@ class Tree
     private string $childlist = 'children'; // 子节点列表字段名，默认为'children'
 
     private int $rootId = 0; // 根节点ID，默认为0
+
+    /**
+     * 生成树型结构所需修饰符号，可以换成图片
+     */
+    protected array $iconStyle = [' │', ' ├', ' └'];
 
     /**
      * 构造函数，接受原始数据数组
@@ -172,6 +180,19 @@ class Tree
     public function setPid(string $pid = 'pid')
     {
         $this->pid = $pid;
+
+        return $this;
+    }
+
+    /**
+     * 设置节点名称/标题 字段名
+     *
+     *
+     * @return Tree
+     */
+    public function setTitle(string $title = 'title')
+    {
+        $this->title = $title;
 
         return $this;
     }
@@ -1049,6 +1070,73 @@ class Tree
             }
         }
 
+        return $result;
+    }
+
+    /**
+     * 转换为Tree 树形结构，再展开为二维码数组结构
+     * @param bool $withPrefix 是否携带前缀
+     * @return array
+     */
+    public function toArray(bool $withPrefix = false): array
+    {
+        $tree = $this->toTree();
+        
+        if ($withPrefix) {
+            $processedTree = $this->processTreeWithPrefix($tree);
+            return $this->flatten($processedTree);
+        }
+        
+        return $this->flatten($tree);
+    }
+
+    /**
+     * 处理树形数据，为节点添加前缀
+     *
+     * @param array $tree 树形数据
+     * @param array $prefixes 前缀路径（内部使用）
+     * @return array 处理后的树形数据
+     */
+    private function processTreeWithPrefix(array $tree, array $prefixes = []): array
+    {
+        $result = [];
+        $total = count($tree);
+        
+        foreach ($tree as $index => $node) {
+            $isLast = ($index === $total - 1);
+            $isRoot = empty($prefixes);
+            $hasChildren = !empty($node[$this->childlist]);
+            
+            // 构建当前节点的前缀
+            $currentPrefix = '';
+            if (!$isRoot) {
+                // 非根节点，根据层级构建前缀
+                foreach ($prefixes as $i => $isParentLast) {
+                    if ($i === count($prefixes) - 1) {
+                        // 当前层级的父节点
+                        $currentPrefix .= $isParentLast ? $this->iconStyle[2] : $this->iconStyle[1];
+                    } else {
+                        // 更高层级的父节点
+                        $currentPrefix .= $isParentLast ? '  ' : $this->iconStyle[0];
+                    }
+                }
+            }
+            
+            // 修改title字段，添加前缀
+            if (isset($node[$this->title])) {
+                $node[$this->title] = $currentPrefix . $node[$this->title];
+            }
+            
+            // 处理子节点
+            if ($hasChildren) {
+                // 递归处理子节点，传递当前节点是否最后一个的信息
+                $newPrefixes = array_merge($prefixes, [$isLast]);
+                $node[$this->childlist] = $this->processTreeWithPrefix($node[$this->childlist], $newPrefixes);
+            }
+            
+            $result[] = $node;
+        }
+        
         return $result;
     }
 

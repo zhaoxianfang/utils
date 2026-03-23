@@ -730,6 +730,97 @@ if (! function_exists('is_xml')) {
     }
 }
 
+if (! function_exists('is_mobile')) {
+    /**
+     * 判断当前浏览器是否为移动端
+     * ------------------------------------------------------------
+     * 特性：
+     *  - 智能识别 120+ 移动设备关键词
+     *  - 自动过滤平板与桌面端 UA
+     *  - 支持 HarmonyOS / 鸿蒙 NEXT / Fuchsia / KaiOS
+     *  - 高性能静态缓存与分层检测机制
+     * ------------------------------------------------------------
+     * @param string|null $userAgent
+     * @param array|null $serverHeaders
+     * @return bool
+     */
+    function is_mobile(?string $userAgent = null, ?array $serverHeaders = null): bool
+    {
+        static $cache = null;
+
+        // 静态缓存优化（同一请求周期内命中）
+        if ($cache !== null && $userAgent === null && $serverHeaders === null) {
+            return $cache;
+        }
+
+        $headers = $serverHeaders ?? $_SERVER;
+        $ua = strtolower($userAgent ?? ($headers['HTTP_USER_AGENT'] ?? ''));
+
+        // 第一层：Header 快速检测
+        if (isset($headers['HTTP_X_WAP_PROFILE']) || isset($headers['HTTP_PROFILE'])) {
+            return $cache = true;
+        }
+        if (isset($headers['HTTP_ACCEPT']) && preg_match('/wap|vnd\.wap\.wml|vnd\.wap\.xhtml/i', $headers['HTTP_ACCEPT'])) {
+            return $cache = true;
+        }
+
+        // UA 为空视为非移动端
+        if ($ua === '') {
+            return $cache = false;
+        }
+
+        // 第二层：桌面端快速排除（早退机制）
+        static $DESKTOP_KEYWORDS = ['windows nt', 'macintosh', 'mac os x', 'x11', 'cros','linux x86_64', 'wow64', 'ubuntu', 'debian', 'fedora', 'gentoo'];
+        foreach ($DESKTOP_KEYWORDS as $kw) {
+            if (str_contains($ua, $kw)) {
+                return $cache = false;
+            }
+        }
+
+        // 第三层：平板端排除（避免 iPad、Galaxy Tab 误判）
+        static $TABLET_KEYWORDS = ['ipad', 'tablet', 'playbook', 'kindle', 'silk', 'nexus 7', 'nexus 9', 'nexus 10','xoom', 'transformer', 'surface', 'mediapad', 'galaxy tab', 'lenovo tab', 'mi pad','redmi pad', 'huawei pad', 'honor pad', 'teclast', 'pocketbook'];
+        foreach ($TABLET_KEYWORDS as $kw) {
+            if (str_contains($ua, $kw)) {
+                return $cache = false;
+            }
+        }
+
+        // 第四层：移动端关键词匹配（涵盖操作系统 / 品牌 / 浏览器）
+        static $MOBILE_KEYWORDS = [
+            // 操作系统 / 平台
+            'android', 'iphone', 'ipod', 'blackberry', 'bb10', 'symbian', 'meego', 'maemo','mobile', 'harmonyos', 'fuchsia', 'kaios', 'bada', 'tizen', 'palm os', 'webos', 'windows phone',
+            // 品牌（含国产全覆盖）
+            'huawei', 'honor', 'xiaomi', 'redmi', 'meizu', 'oppo', 'vivo', 'oneplus','lenovo', 'zte', 'nubia', 'coolpad', 'realme', 'tecno', 'itel', 'infinix','samsung', 'sony', 'sharp', 'htc', 'motorola', 'asus', 'nokia', 'google pixel',
+            // 浏览器特征（含国内主流）
+            'ucbrowser', 'qqbrowser', 'baiduboxapp', 'baidubrowser', 'sogoumobilebrowser','2345browser', 'quark', 'maxthon', 'miuibrowser', 'vivo browser', 'oppobrowser','alohabrowser', 'puffin', 'duckduckgo', 'firefox mobile', 'opera mini','opera mobi', 'mobile safari', 'crios', 'fxios', 'yandexmobile', 'micromessenger',
+            // 网络层关键词
+            'wap', 'wireless', 'midp', 'pda', 'nexus', 'touch', 'mobi', 'phone'
+        ];
+        foreach ($MOBILE_KEYWORDS as $kw) {
+            if (str_contains($ua, $kw)) {
+                return $cache = true;
+            }
+        }
+
+        // 第五层：智能正则匹配（复杂 UA 模糊识别）
+        static $REGEX_MOBILE = '/(android(?!.*(pad|tablet))|iphone|ipod|phone|mobi|wap|wireless|midp|pda)/i';
+        if (preg_match($REGEX_MOBILE, $ua)) {
+            return $cache = true;
+        }
+
+        // 第六层：智能修正（处理安卓浏览器伪装成桌面 UA）
+        if (str_contains($ua, 'linux') && (str_contains($ua, 'android') || str_contains($ua, 'harmonyos')) && !str_contains($ua, 'x11') ) {
+            return $cache = true;
+        }
+
+        // 第七层：额外补充（低端机或代理标识）
+        if (isset($headers['HTTP_UA_CPU']) && str_contains(strtolower($headers['HTTP_UA_CPU']), 'arm')) {
+            return $cache = true;
+        }
+        return $cache = false;
+    }
+}
+
 if (! function_exists('parse_json')) {
     /**
      * 解析json字符串、json 数组和数组 返回数据，其他的返回false
@@ -1219,6 +1310,21 @@ if (! function_exists('is_alipay_browser')) {
     }
 }
 
+if (! function_exists('is_string_value_array')) {
+    /**
+     * 检查是否为['字符串键名'=>'不是数组也不是对象格式类型的值']格式的数组
+     *      eg:['name'=>'foo']:true
+     *         ['name'=>['foo']]:false
+     *         [['name','foo']]:false
+     *         ['name'=>new stdClass()]:false
+     */
+    function is_string_value_array(array $array): bool
+    {
+        return ! array_is_list($array) && array_reduce($array, fn ($carry, $value) => $carry && is_scalar($value), true);
+    }
+}
+
+
 if (! function_exists('json_string_to_array')) {
     // 判断一个字符串是否为json格式,并返回json数组
     function json_string_to_array($string)
@@ -1226,6 +1332,7 @@ if (! function_exists('json_string_to_array')) {
         if (is_array($string)) {
             return $string;
         }
+        $string = (empty($string) || !is_string($string))?'':$string;
         $data = json_decode($string, true);
         if (json_last_error() == JSON_ERROR_NONE) {
             return $data;
