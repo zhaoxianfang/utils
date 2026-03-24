@@ -2548,3 +2548,162 @@ if (! function_exists('get_trace_data')) {
         ];
     }
 }
+
+if (! function_exists('to_full_text_search_str')) {
+    /**
+     * 将用户输入的搜索字符串转换为 MySQL 全文索引的布尔模式搜索字符串
+     *
+     * 本函数解析用户输入，并生成符合 MySQL 全文索引布尔模式语法的搜索字符串。
+     * 支持所有标准布尔操作符、分组、短语、邻近搜索以及通配符。
+     *
+     * MySQL 布尔模式操作符说明：
+     *   +     必须包含该词
+     *   -     必须排除该词
+     *   ~     负相关性（包含该词会降低文档权重）
+     *   >     提高该词的相关性
+     *   <     降低该词的相关性
+     *   *     后缀通配符（仅限词尾，例如 "Larav*" 匹配 Laravel、Larav 等）
+     *   "..." 精确短语匹配（引号内单词作为一个整体）
+     *
+     *   @N    邻近搜索：指定 "..." 内单词之间的最大距离（例如 "word1 word2"@5）
+     *   ( )   分组条件，用于组合逻辑
+     *   空格  逻辑 OR（可选包含）
+     *
+     * 用法示例：
+     *   1. 必须包含 Laravel，排除 Vue：         "+Laravel -Vue"
+     *   2. 提高 PHP 权重，降低 Java 权重：       ">PHP <Java"
+     *   3. 必须包含 PHP，排除短语 "end of life"："+PHP -\"end of life\""
+     *   4. 必须包含 MySQL 且 (Laravel 或 PHP)：   "+MySQL +(Laravel PHP)"
+     *   5. 短语 "Laravel PHP" 邻近搜索（相距≤5）："\"Laravel PHP\"@5"
+     *   6. 前缀通配符：                          "Larav* +framework"
+     *   7. 包含 MySQL 或 PostgreSQL，排除 Oracle：  "+(MySQL PostgreSQL) -Oracle"
+     *   8. 包含 PHP，但包含 legacy 会降低排名：   "+PHP ~legacy"
+     *   9. 复杂分组：                           "+((React Vue) (Laravel Django)) +\"最佳实践\""
+     *
+     * @param  string  $string  原始搜索字符串
+     * @param  bool  $autoWildcard  是否为普通词自动添加后缀通配符 *（false-即精确匹配）
+     * @return string 可直接用于 MySQL boolean mode 的搜索字符串，若无效则返回空字符串
+     *
+     * // 自然语言模式
+     * // return self::query()->whereFullText('title', $string)->orWhereFullText('content', $string)->get();
+     * // 布尔模式
+     * // return self::query()->whereFullText(['title', 'content'], '+测试 -公司', ['mode' => 'boolean'])->count();
+     * // 自然扩展模式
+     * // return self::query()->whereFullText('content', '测试', ['expanded' => true])->paginate(10);
+     * // 模型使用
+     * // return self::query()->whereFullText('content', '测试')->get();
+     */
+    function to_full_text_search_str(string $string, bool $autoWildcard = true): string
+    {
+        // 1. 基本清理：合并空白符，压缩连续的操作符，并去除首尾空格
+        $cleaned = preg_replace(['/\s+/', '/\++/', '/\-+/', '/\~+/', '/\*+/'], [' ', '+', '-', '~', '*'], trim($string));
+        if ($cleaned === '') {
+            return '';
+        }
+
+        // 2. 使用正则分词，按 token 解析
+        // 匹配模式：操作符、括号、短语（含可能的后缀距离）、普通词（含通配符）、转义字符等
+        $pattern = '/(?:
+            [+\-~><]                         # 操作符
+            | \([^()]*\)                     # 简单括号组（为简化，不处理嵌套，但通常够用）
+            | \\([+\-~><"*()]               # 转义的特殊字符，搜索字面量
+            | "[^"\\\\]*(?:\\\\.[^"\\\\]*)*"  # 双引号短语（支持内部转义）
+            | \S+                            # 其他非空白字符（词、通配符）
+        )/ux';
+
+        preg_match_all($pattern, $cleaned, $matches);
+        $tokens = $matches[0];
+
+        $result = [];
+        $i = 0;
+        $len = count($tokens);
+
+        while ($i < $len) {
+            $token = $tokens[$i];
+
+            // 处理转义字符：如果以反斜杠开头，去掉反斜杠保留原字符
+            if (str_starts_with($token, '\\') && strlen($token) === 2) {
+                $result[] = substr($token, 1);
+                $i++;
+
+                continue;
+            }
+
+            // 处理操作符（单独占一个 token）
+            if (in_array($token, ['+', '-', '~', '>', '<'])) {
+                // 如果下一个 token 是括号，则操作符作用于整个括号组
+                if ($i + 1 < $len && $tokens[$i + 1][0] === '(') {
+                    // 将操作符与括号组组合，避免重复添加
+                    $result[] = $token.$tokens[$i + 1];
+                    $i += 2;
+                } else {
+                    // 否则先记录操作符，稍后与下一个词组合
+                    $operator = $token;
+                    $i++;
+                    // 跳过可能跟随的操作符（用户可能输入多个，但已压缩）
+                    while ($i < $len && in_array($tokens[$i], ['+', '-', '~', '>', '<'])) {
+                        $operator = $tokens[$i]; // 取最后一个操作符
+                        $i++;
+                    }
+                    // 如果后面是括号，将操作符和括号合并
+                    if ($i < $len && $tokens[$i][0] === '(') {
+                        $result[] = $operator.$tokens[$i];
+                        $i++;
+                    } elseif ($i < $len) {
+                        // 否则与下一个普通词组合
+                        $next = $tokens[$i];
+                        $result[] = $operator.$next.($autoWildcard && ! IsPhraseOrWildcard($next) ? '*' : '');
+                        $i++;
+                    }
+                }
+
+                continue;
+            }
+
+            // 处理括号组（可能已包含操作符）
+            if ($token[0] === '(') {
+                // 如果括号前没有操作符，直接添加
+                $result[] = $token;
+                $i++;
+
+                continue;
+            }
+
+            // 处理双引号短语（可能带 @distance）
+            if ($token[0] === '"') {
+                // 提取短语内容
+                $phrase = $token;
+                // 检查后面是否有 @数字
+                if ($i + 1 < $len && preg_match('/^@\d+$/', $tokens[$i + 1])) {
+                    $distance = $tokens[$i + 1];
+                    $result[] = $phrase.$distance;
+                    $i += 2;
+                } else {
+                    $result[] = $phrase;
+                    $i++;
+                }
+
+                continue;
+            }
+
+            // 普通词（可能包含 * 通配符）
+            if ($autoWildcard && ! str_contains($token, '*') && ! in_array($token, ['+', '-', '~', '>', '<', '(', ')'])) {
+                // 自动添加后缀通配符（但如果是短语、括号等就不加）
+                $result[] = $token.'*';
+            } else {
+                $result[] = $token;
+            }
+            $i++;
+        }
+
+        return implode(' ', $result);
+    }
+
+    /**
+     * 辅助函数：判断 token 是否已经是短语或包含通配符，避免重复添加 *
+     */
+    function isPhraseOrWildcard(string $token): bool
+    {
+        return $token[0] === '"' || str_contains($token, '*');
+    }
+}
