@@ -78,66 +78,6 @@ if (! function_exists('uuid')) {
     }
 }
 
-
-if (! function_exists('truncate')) {
-    /**
-     * 文章去除标签截取文字
-     *
-     * 优化内容：
-     * 1. 改进多字节处理
-     * 2. 添加更多编码支持
-     * 3. 改进截取算法
-     *
-     * @param string $string 被截取字符串
-     * @param int $start 起始位置
-     * @param int $length 长度
-     * @param bool $append 是否加省略号
-     * @param string $encoding 编码格式
-     * @return string
-     */
-    function truncate(
-        string $string,
-        int $start = 0,
-        int $length = 150,
-        bool $append = true,
-        string $encoding = 'UTF-8'
-    ): string {
-        if (empty($string)) {
-            return $string;
-        }
-
-        $string = detach_html($string);
-        $strLen = mb_strlen($string, $encoding);
-
-        if ($length === 0 || $length >= $strLen - $start) {
-            return $string;
-        }
-
-        if ($length < 0) {
-            $length = $strLen + $length - $start;
-            if ($length < 0) {
-                $length = 0;
-            }
-        }
-
-        // 确保起始位置有效
-        if ($start < 0) {
-            $start = max(0, $strLen + $start);
-        }
-
-        if ($start >= $strLen) {
-            return '';
-        }
-
-        $newStr = mb_substr($string, $start, $length, $encoding);
-
-        // 检查是否需要添加省略号
-        $shouldAppend = $append && ($start + $length < $strLen);
-
-        return $newStr . ($shouldAppend ? '...' : '');
-    }
-}
-
 if (! function_exists('is_crawler')) {
     /**
      * 检测爬虫 - 增强版
@@ -541,44 +481,52 @@ if (! function_exists('tree_to_array')) {
      * @param callable|null $callback 回调函数
      * @return array
      */
-    function tree_to_array(
-        array $array,
-        string $childField = 'children',
-        int $rootId = 0,
-        string $keyField = 'id',
-        string $pidField = 'pid',
-        ?callable $callback = null
-    ): array {
+    function tree_to_array(array $array, string $childField = 'children', int $rootId = 0, string $keyField = 'id', string $pidField = 'pid', ?callable $callback = null): array {
         $result = [];
 
-        $flatten = function($node, $parentId) use (&$flatten, &$result, $childField, $keyField, $pidField, $callback) {
+        $flatten = function($node, $parentId, $level = 1, $hasPrev=false, $hasNext=false) use (&$flatten, &$result, $childField, $keyField, $pidField, $callback) {
             // 处理当前节点
             $currentNode = $node;
             $currentNode[$pidField] = $parentId;
+            $currentNode['_level'] = $level;
+            $currentNode['_has_prev'] = $hasPrev;
+            $currentNode['_has_next'] = $hasNext;
 
             // 确保有主键
             if (!isset($currentNode[$keyField])) {
                 $currentNode[$keyField] = uniqid('node_', true);
             }
 
+            // 保存当前ID用于递归
+            $currentId = $currentNode[$keyField];
+
             // 回调处理
             if ($callback) {
+                // 回调：遍历的当前数据、是否有前一个数据、是否有后一个数据
                 $currentNode = $callback($currentNode);
             }
 
             $children = $currentNode[$childField] ?? [];
             unset($currentNode[$childField]);
+            unset($currentNode['_level']);
+            unset($currentNode['_has_prev']);
+            unset($currentNode['_has_next']);
 
             $result[] = $currentNode;
 
+            $countChi = count($children);
             // 处理子节点
-            foreach ($children as $child) {
-                $flatten($child, $currentNode[$keyField]);
+            foreach ($children as $cIndex => $child) {
+                $hasPrev = $cIndex > 0; // 是否有前一个数据
+                $hasNext = $cIndex < $countChi - 1; // 是否有后一个数据
+                $flatten($child, $currentId, $level + 1,$hasPrev,$hasNext);
             }
         };
-
-        foreach ($array as $node) {
-            $flatten($node, $rootId);
+        $countArr = count($array);
+        foreach ($array as $aIndex => $node) {
+            $hasPrev = $aIndex > 0; // 是否有前一个数据
+            $hasNext = $aIndex < $countArr - 1; // 是否有后一个数据
+            $flatten($node, $rootId,1,$hasPrev,$hasNext);
         }
 
         return $result;
@@ -620,6 +568,66 @@ if (! function_exists('string_to_gbk')) {
     function string_to_gbk(string $str = ''): array|bool|string|null
     {
         return mb_convert_encoding($str, 'GBK', 'auto');
+    }
+}
+
+
+if (! function_exists('truncate')) {
+    /**
+     * 文章去除标签截取文字
+     *
+     * 优化内容：
+     * 1. 改进多字节处理
+     * 2. 添加更多编码支持
+     * 3. 改进截取算法
+     *
+     * @param string $string 被截取字符串
+     * @param int $start 起始位置
+     * @param int $length 长度
+     * @param bool $append 是否加省略号
+     * @param string $encoding 编码格式
+     * @return string
+     */
+    function truncate(
+        string $string,
+        int $start = 0,
+        int $length = 150,
+        bool $append = true,
+        string $encoding = 'UTF-8'
+    ): string {
+        if (empty($string)) {
+            return $string;
+        }
+
+        $string = detach_html($string);
+        $strLen = mb_strlen($string, $encoding);
+
+        if ($length === 0 || $length >= $strLen - $start) {
+            return $string;
+        }
+
+        if ($length < 0) {
+            $length = $strLen + $length - $start;
+            if ($length < 0) {
+                $length = 0;
+            }
+        }
+
+        // 确保起始位置有效
+        if ($start < 0) {
+            $start = max(0, $strLen + $start);
+        }
+
+        if ($start >= $strLen) {
+            return '';
+        }
+
+        $newStr = mb_substr($string, $start, $length, $encoding);
+
+        // 检查是否需要添加省略号
+        $shouldAppend = $append && ($start + $length < $strLen);
+
+        return $newStr . ($shouldAppend ? '...' : '');
     }
 }
 
@@ -2278,6 +2286,18 @@ if (! function_exists('base64_to_image')) {
     }
 }
 
+if (! function_exists('show_img')) {
+    /*
+     * 页面直接输出图片
+     */
+    #[NoReturn]
+    function show_img($imgFile = ''): void
+    {
+        header('Content-type:image/png');
+        exit(file_get_contents($imgFile));
+    }
+}
+
 if (! function_exists('parse_files')) {
     // 解析文件上传数据
     function parse_files(array $files): array
@@ -2320,34 +2340,6 @@ if (! function_exists('is_laravel')) {
         return defined('LARAVEL_START') ||
             class_exists(\Illuminate\Foundation\Application::class) ||
             function_exists('app') && app() instanceof \Illuminate\Contracts\Foundation\Application;
-    }
-}
-
-if (! function_exists('create_dir_or_filepath')) {
-    /**
-     * 创建文件夹或文件
-     *
-     * @param  string  $path  文件夹或者文件路径
-     */
-    function create_dir_or_filepath(string $path = '', int $permissions = 0755): bool
-    {
-        // 如果路径不存在，则尝试创建它
-        if (! file_exists($path)) {
-            // 创建目录（如果不存在）
-            $dir = dirname($path);
-            if (! is_dir($dir) && ! mkdir($dir, $permissions, true) && ! is_dir($dir)) {
-                // 创建文件夹失败
-                return false;
-            }
-            // 如果不是现有目录，则尝试创建文件
-            if (! is_dir($path) && ! touch($path)) {
-                // 创建文件失败
-                return false;
-            }
-        }
-
-        // 路径已存在或成功创建
-        return true;
     }
 }
 
@@ -2705,5 +2697,482 @@ if (! function_exists('to_full_text_search_str')) {
     function isPhraseOrWildcard(string $token): bool
     {
         return $token[0] === '"' || str_contains($token, '*');
+    }
+}
+
+
+if (! function_exists('base_convert_any')) {
+    /**
+     * 将任意进制的数值转换为另一个进制的数值,
+     *      支持 2 到 62 进制之间的转换
+     *      支持负数
+     *
+     * @param  string  $number  待转换数值，可以是整数或浮点数，支持负数，例如："123", "-456.789"
+     * @param  int  $fromBase  源进制
+     * @param  int  $toBase  目标进制
+     * @return string|int 转换成功返回目标进制下的数值
+     *
+     * @throws Exception
+     */
+    function base_convert_any(string $number, int $fromBase = 10, int $toBase = 62): string|int
+    {
+        // 常量字符集
+        static $digits = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+        // 校验进制合法性
+        if ($fromBase < 2 || $fromBase > 62 || $toBase < 2 || $toBase > 62) {
+            throw new \InvalidArgumentException('Bases must be in range 2–62.');
+        }
+
+        // 快速路径（相同进制）
+        if ($fromBase === $toBase) {
+            return $number;
+        }
+
+        // 处理负数
+        $isNegative = $number[0] === '-';
+        if ($isNegative) {
+            $number = substr($number, 1);
+        }
+
+        // 去除前导 0
+        $number = ltrim($number, '0');
+        if ($number === '') {
+            return '0';
+        }
+
+        // 尝试使用 GMP（如可用）
+        if (extension_loaded('gmp')) {
+            // GMP 内部使用高效 C 实现，速度远超 BCMath
+            $decimal = gmp_init($number, $fromBase);
+            $converted = gmp_strval($decimal, $toBase);
+
+            return $isNegative ? '-'.$converted : $converted;
+        }
+
+        // fallback to BCMath：构造字符映射表
+        static $charMap = null;
+        if ($charMap === null) {
+            $charMap = [];
+            for ($i = 0; $i < 62; $i++) {
+                $charMap[$digits[$i]] = $i;
+            }
+        }
+
+        // === Step 1: 任意进制转 10 进制（字符串）
+        $decimal = '0';
+        $baseStr = (string) $fromBase;
+        $len = strlen($number);
+
+        for ($i = 0; $i < $len; $i++) {
+            $char = $number[$i];
+            $value = $charMap[$char] ?? null;
+            if ($value === null || $value >= $fromBase) {
+                throw new \InvalidArgumentException("Invalid character '$char' for base $fromBase.");
+            }
+            $decimal = bcadd(bcmul($decimal, $baseStr), (string) $value, 0);
+        }
+
+        // === Step 2: 十进制转目标进制
+        if ($toBase === 10) {
+            $result = $decimal;
+        } else {
+            $result = '';
+            $toBaseStr = (string) $toBase;
+            while (bccomp($decimal, '0') > 0) {
+                $mod = bcmod($decimal, $toBaseStr);
+                $result = $digits[(int) $mod].$result;
+                $decimal = bcdiv($decimal, $toBaseStr, 0);
+            }
+        }
+
+        return $isNegative ? '-'.$result : $result;
+    }
+}
+
+if (! function_exists('from60to10')) {
+    /**
+     * 60进制转10进制
+     */
+    function from60to10($str): string
+    {
+        // (去掉oO)
+        $dict = '0123456789abcdefghijklmnpqrstuvwxyzABCDEFGHIJKLMNPQRSTUVWXYZ';
+        $len = strlen($str);
+        $dec = 0;
+        for ($i = 0; $i < $len; $i++) {
+            // 找到对应字典的下标
+            $pos = strpos($dict, $str[$i]);
+            $dec += $pos * pow(60, $len - $i - 1);
+        }
+
+        return number_format($dec, 0, '', '');
+    }
+}
+
+if (! function_exists('from10to60')) {
+    /**
+     * 10进制转60进制
+     */
+    function from10to60($dec): string
+    {
+        // (去掉oO,因为和0很像)
+        $dict = '0123456789abcdefghijklmnpqrstuvwxyzABCDEFGHIJKLMNPQRSTUVWXYZ';
+        $result = '';
+        do {
+            $result = $dict[$dec % 60].$result;
+            $dec = intval($dec / 60);
+        } while ($dec != 0);
+
+        return $result;
+    }
+}
+
+if (! function_exists('dict_convert_ten')) {
+    /**
+     * 把其他进制的字符串转换为10进制（注：针对使用自定义字典的字符串转换，普通的进制转换可以使用 base_convert_any 函数）
+     *
+     * @param  string  $string  根据自定义字典 $dict 生成的字符串
+     * @param  int  $fromBase  源进制
+     *
+     * @throws Exception
+     */
+    function dict_convert_ten(string $string = '', int $fromBase = 16): int|string
+    {
+        return base_convert_any($string, $fromBase, 10);
+    }
+}
+
+if (! function_exists('remove_str_emoji')) {
+    // 移除字符串中的 emoji 表情
+    function remove_str_emoji($str): string
+    {
+        $mbLen = mb_strlen($str);
+        $strArr = [];
+        for ($i = 0; $i < $mbLen; $i++) {
+            $mbSubstr = mb_substr($str, $i, 1, 'utf-8');
+            if (strlen($mbSubstr) >= 4) {
+                continue;
+            }
+            $strArr[] = $mbSubstr;
+        }
+
+        return implode('', $strArr);
+    }
+}
+
+if (! function_exists('check_str_exists_emoji')) {
+    // 判断字符串中是否含有 emoji 表情
+    function check_str_exists_emoji($str): bool
+    {
+        $mbLen = mb_strlen($str);
+        $strArr = [];
+        for ($i = 0; $i < $mbLen; $i++) {
+            $strArr[] = mb_substr($str, $i, 1, 'utf-8');
+            if (strlen($strArr[$i]) >= 4) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (! function_exists('del_dir')) {
+    /**
+     * 删除文件夹
+     *
+     * @param  string  $dirname  目录
+     * @param  bool  $delSelf  是否删除自身
+     */
+    function del_dir(string $dirname, bool $delSelf = true): bool
+    {
+        if (! is_dir($dirname)) {
+            return false;
+        }
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dirname, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($files as $item) {
+            $todo = ($item->isDir() ? 'rmdir' : 'unlink');
+            $todo($item->getRealPath());
+        }
+        if ($delSelf) {
+            rmdir($dirname);
+        }
+
+        return true;
+    }
+}
+
+if (! function_exists('dir_is_empty')) {
+    /**
+     * 判断文件夹是否为空
+     */
+    function dir_is_empty(string $dir): bool
+    {
+        $res = false;
+        if ($handle = opendir($dir)) {
+            while (! $res && ($item = readdir($handle))) {
+                if ($item != '.' && $item != '..') {
+                    $res = true;
+                }
+            }
+        }
+        closedir($handle);
+
+        return $res;
+    }
+}
+
+if (! function_exists('create_dir')) {
+    /**
+     * 递归创建目录
+     *
+     * @param  string  $dir  目录
+     * @param  int  $permissions  权限
+     */
+    function create_dir(string $dir, int $permissions = 0755): bool
+    {
+        return is_dir($dir) or (create_dir(dirname($dir), $permissions) and mkdir($dir, $permissions, true));
+    }
+}
+
+if (! function_exists('create_dir_or_filepath')) {
+    /**
+     * 创建文件夹或文件
+     *
+     * @param  string  $path  文件夹或者文件路径
+     */
+    function create_dir_or_filepath(string $path = '', int $permissions = 0755): bool
+    {
+        // 如果路径不存在，则尝试创建它
+        if (! file_exists($path)) {
+            // 创建目录（如果不存在）
+            $dir = dirname($path);
+            if (! is_dir($dir) && ! mkdir($dir, $permissions, true) && ! is_dir($dir)) {
+                // 创建文件夹失败
+                return false;
+            }
+            // 如果不是现有目录，则尝试创建文件
+            if (! is_dir($path) && ! touch($path)) {
+                // 创建文件失败
+                return false;
+            }
+        }
+
+        // 路径已存在或成功创建
+        return true;
+    }
+}
+
+
+if (! function_exists('num_to_cn')) {
+    /**
+     * 数字转换为中文
+     *      支持金额转换和小数转换
+     *
+     * @param  float|int|string  $number  需要转换的数字
+     * @param  bool  $mode  模式[true:金额（默认）,false:普通数字表示]
+     * @param  bool  $sim  使用小写（默认）
+     *
+     * @throws Exception
+     */
+    function num_to_cn(float|int|string $number, bool $mode = true, bool $sim = true): string
+    {
+        if (! is_numeric($number)) {
+            throw new \Exception('传入参数不是一个数字！');
+        }
+        // 数字大小写
+        $char = $sim ? ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'] : ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'];
+        // 每一个数级的 四个位置
+        $twoUnit = $sim ? ['', '十', '百', '千'] : ['', '拾', '佰', '仟'];
+        // 每一个数级的 单位; 1古戈尔 = 10¹⁰⁰， 古戈尔也称为 不可说
+        // 1恒河沙 = 10⁵²（佛教用语）
+        // 1不可思议 = 10⁶⁴
+        // 1腾 = 10¹²⁸
+        $twoChat = [
+            '', '万', '亿', '兆', '京', '垓', '秭', '穰', '沟', '涧', '正', '载', '极', '恒河沙', '阿僧祇', '那由他', '不可思议',
+            '无量', '大数', '无量大数', '不可称', '不可量', '不可数', '不可思', '不可议', '古戈尔',
+            '不可说数', '无边数', '无等数', '无等无等数', '无限数', '无限无边数', '腾',
+        ];
+        $moneyUnit = ['角', '分', '厘', '毫', '丝', '忽', '微', '纤', '沙'];
+
+        // 将整数部分和小数部分分开
+        [$num, $dec] = (str_contains($number, '.')) ? [substr($number, 0, strpos($number, '.')), substr($number, strpos($number, '.') + 1)] : [$number, ''];
+
+        // 小数部分
+        $decNumStr = '';
+        // 整数部分
+        $roundNum = [];
+
+        // 将小数部分转换为中文
+        for ($j = 0; $j < strlen($dec); $j++) {
+            $decNum[$j] = $char[$dec[$j]];
+            if ($mode) {
+                if ($j < count($moneyUnit)) {
+                    $decNumStr .= $decNum[$j].$moneyUnit[$j];
+                }
+            } else {
+                $decNumStr .= $decNum[$j];
+            }
+        }
+
+        // 反转字符串 处理整数部分
+        $str = $mode ? strrev((string) ($num)) : strrev($num);
+
+        $hasZero = false; // 数级上是否有零
+        for ($i = 0, $c = strlen($str); $i < $c; $i++) {
+            // $str[$i] 小写数字 eg: 2
+            $roundNum[$i] = $char[$str[$i]]; // 单个大写数字 eg : 贰
+
+            // 每四位一组，处理中文单位
+            if ($i % 4 == 0) {
+                $hasZero = false;
+                $hasValue = false; // 数级上是否有值
+                // 判断数级上是否有值
+                for ($k = 0; $k < 4; $k++) {
+                    if (! empty($str[$i + $k])) {
+                        $hasValue = true;
+                        break;
+                    }
+                }
+                if (! $hasValue) {
+                    $roundNum[$i] = '';
+                } else {
+                    // 一个数级的单位，处理每一级的个位
+                    if (empty($str[$i])) { // 零万 零亿 等 处理成 万 亿
+                        $roundNum[$i] = $twoChat[floor($i / 4)]; // xx万 xx亿
+                    } else {
+                        $roundNum[$i] .= $twoChat[floor($i / 4)]; // xx万 xx亿
+                    }
+                }
+            } else {
+                if (! empty($str[$i])) {
+                    $roundNum[$i] .= $twoUnit[$i % 4]; // 加单位 十百千
+                    if ($str[$i] == 1 && $i % 4 == 1 && empty($str[$i + 1])) { // 一十 处理成 十
+                        $roundNum[$i] = $twoUnit[$i % 4];
+                    }
+                } else {
+                    if ($hasZero) {
+                        $roundNum[$i] = '';
+                    }
+                    // 判断低一位数
+                    if (isset($str[$i - 1])) {
+                        $hasZero = true;
+                        $roundNum[$i] = ! empty($str[$i - 1]) ? '零' : '';
+                    }
+                }
+            }
+        }
+        // 拼接整数部分和小数部分
+        $roundNumStr = implode('', array_reverse($roundNum)); // 整数
+
+        return $roundNumStr.($mode ? '元' : '').((! empty($decNumStr) && ! $mode) ? '点' : '').$decNumStr;
+    }
+}
+
+if (! function_exists('num_to_word')) {
+    /**
+     * 数字转换为英文
+     *
+     * @param  float|int|string  $number  需要转换的数字
+     *
+     * @throws Exception
+     */
+    function num_to_word(float|int|string $number): string
+    {
+        $formatter = new \NumberFormatter('en', \NumberFormatter::SPELLOUT);
+
+        // 数字转换
+        return $formatter->format($number);
+    }
+}
+
+if (! function_exists('num_to_zhCN')) {
+    /**
+     * 数字转换为英文
+     *
+     * @param  float|int|string  $number  需要转换的数字
+     *
+     * @throws Exception
+     */
+    function num_to_zhCN(float|int|string $number): string
+    {
+        $formatter = new \NumberFormatter('zh_cn', \NumberFormatter::SPELLOUT);
+        // 数字转换
+        $str = $formatter->format($number);
+
+        // 把〇替换成零
+        return str_replace('〇', '零', $str);
+    }
+}
+
+if (! function_exists('str_rand')) {
+    /**
+     * 生成随机字符串
+     *
+     *
+     * @DateTime 2017-06-28
+     *
+     * @param  int  $length  字符串长度
+     * @param  string  $tack  附加值
+     * @return string 字符串
+     */
+    function str_rand(int $length = 6, string $tack = ''): string
+    {
+        $chars = 'abcdefghijkmnpqrstuvwxyzACDEFGHIJKLMNOPQRSTUVWXYZ12345679'.$tack;
+        $str = '';
+        for ($i = 0; $i < $length; $i++) {
+            $str .= $chars[mt_rand(0, strlen($chars) - 1)];
+        }
+
+        return $str;
+    }
+}
+
+
+if (! function_exists('download_url_file')) {
+    /**
+     * 下载url文件
+     */
+    #[NoReturn]
+    function download_url_file($url = ''): void
+    {
+        $filename = ! empty($url) ? $url : (! empty($_GPC['url']) ? $_GPC['url'] : '');
+        $title = substr($filename, strrpos($filename, '/') + 1);
+        $file = fopen($filename, 'rb');
+        header('Content-type:application/octet-stream');
+        header('Accept-Ranges:bytes');
+        header("Content-Disposition:attachment;filename=$title");
+        while (! feof($file)) {
+            echo fread($file, 8192);
+            ob_flush();
+            flush();
+        }
+        fclose($file);
+        exit;
+    }
+}
+
+if (! function_exists('escape')) {
+    /**
+     * 把字符串转义成 带u格式的 ASCII 字符
+     *
+     * @param  string  $str  需要转换的字符串，eg:威舍,
+     * @return string eg:%u5A01%u820D%2C
+     */
+    function escape(string $str): string
+    {
+        return implode('', array_map(function ($char) {
+            $ascii = ord($char);
+            if ($ascii <= 0x7F) {
+                return rawurlencode($char);
+            } else {
+                $utf16 = mb_convert_encoding($char, 'UTF-16BE', 'UTF-8');
+
+                return '%u'.strtoupper(bin2hex($utf16));
+            }
+        }, preg_split('//u', $str, -1, PREG_SPLIT_NO_EMPTY)));
     }
 }

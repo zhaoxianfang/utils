@@ -123,7 +123,7 @@ class Tree
     /**
      * 生成树型结构所需修饰符号，可以换成图片
      */
-    protected array $iconStyle = [' │', ' ├', ' └'];
+    protected array $iconStyle = [' ︱', ' ├', ' └'];
 
     /**
      * 构造函数，接受原始数据数组
