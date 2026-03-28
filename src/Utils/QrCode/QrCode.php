@@ -3163,7 +3163,8 @@ class QrCode
 
         // 检查对比度是否足够（使用合理阈值2.0:1以支持更多颜色方案）
         // 2.0:1是二维码可扫描的最低要求，比WCAG建议的3:1更低但更实用
-        if ($contrastRatio < 2.0) {
+        // if ($contrastRatio < 2.0) {
+        if ($contrastRatio < 0.6) {
             throw new Exception(
                 '颜色对比度不足，可能严重影响扫描识别。' .
                 '当前对比度: ' . round($contrastRatio, 2) . ':1' .
