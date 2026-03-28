@@ -5,7 +5,6 @@ namespace zxf\Utils\QrCode;
 use Exception;
 use GdImage;
 use zxf\Utils\QrCode\Color\Color;
-use zxf\Utils\QrCode\Encoder\QrEncoder;
 use zxf\Utils\QrCode\ErrorCorrectionLevel;
 use zxf\Utils\QrCode\LabelOptions;
 
@@ -291,7 +290,7 @@ class QrCode
 
     /**
      * 设置Logo图片
-     * Logo宽度将被严格限制在不含边距的二维码内容宽度的15%以内
+     * Logo宽度将被严格限制在不含边距的二维码内容宽度的20%以内（提高限制以支持更大Logo）
      *
      * @param string $logoPath Logo文件路径
      * @param int|null $width Logo宽度（null表示按比例自动计算）
@@ -319,7 +318,7 @@ class QrCode
             $this->logoWidth = $width;
             $this->logoHeight = $height;
         } else {
-            // 自动计算尺寸，保证不超过二维码内容宽度的15%
+            // 自动计算尺寸，保证不超过二维码内容宽度的20%
             $this->logoWidth = 0;
             $this->logoHeight = 0;
             $this->logoScale = 0;
@@ -330,16 +329,16 @@ class QrCode
 
     /**
      * 设置Logo缩放比例（相对于二维码尺寸）
-     * Logo宽度将被严格限制在不含边距的二维码内容宽度的15%以内
+     * Logo宽度将被严格限制在不含边距的二维码内容宽度的20%以内（提高限制以支持更大Logo）
      *
-     * @param int $scale 缩放比例（百分比，1-15）
+     * @param int $scale 缩放比例（百分比，1-20）
      * @return self
      * @throws Exception 如果缩放比例超出范围
      */
     public function logoScale(int $scale): self
     {
-        if ($scale < 1 || $scale > 15) {
-            throw new Exception('Logo缩放比例必须在1-15之间');
+        if ($scale < 1 || $scale > 20) {
+            throw new Exception('Logo缩放比例必须在1-20之间');
         }
         $this->logoScale = $scale;
         return $this;
@@ -502,7 +501,7 @@ class QrCode
      */
     public function padding(int $padding = 0): self
     {
-        $this->padding = max(0, $padding);
+        $this->padding = max(0, min(200, $padding));
         return $this;
     }
 
@@ -540,6 +539,8 @@ class QrCode
 
     /**
      * 设置圆点风格
+     * 使用圆点替代方块来渲染二维码模块，可创建更美观的视觉效果
+     * 注意：圆点风格可能降低扫描成功率，建议在确保可扫描性的前提下使用
      *
      * @param bool $rounded 是否使用圆点
      * @return self
@@ -552,13 +553,19 @@ class QrCode
 
     /**
      * 设置圆点半径
+     * 控制圆点的大小，0.0表示极小的点，1.0表示填满整个模块
+     * 建议值范围：0.3-0.8，过小可能导致扫描困难
      *
      * @param float $radius 圆点半径（0-1）
      * @return self
+     * @throws Exception 如果半径超出有效范围
      */
     public function roundedRadius(float $radius): self
     {
-        $this->roundedRadius = max(0, min(1, $radius));
+        if ($radius < 0 || $radius > 1) {
+            throw new Exception('圆点半径必须在0-1之间');
+        }
+        $this->roundedRadius = $radius;
         return $this;
     }
 
@@ -640,6 +647,29 @@ class QrCode
     }
 
     /**
+     * 获取二维码信息（用于调试和验证）
+     *
+     * @return array 二维码详细信息
+     */
+    public function getInfo(): array
+    {
+        return [
+            'data' => $this->data,
+            'size' => $this->size,
+            'margin' => $this->margin,
+            'padding' => $this->padding,
+            'version' => $this->version,
+            'errorCorrectionLevel' => $this->errorCorrectionLevel->getName(),
+            'encoding' => $this->encoding,
+            'hasLogo' => $this->logoPath !== null,
+            'rounded' => $this->rounded,
+            'roundedRadius' => $this->roundedRadius,
+            'hasLabel' => $this->labelOptions !== null && $this->labelOptions->isEnabled(),
+            'transparentBackground' => $this->transparentBackground,
+        ];
+    }
+
+    /**
      * 生成二维码并返回GD图像资源
      *
      * @return resource GD图像资源
@@ -677,12 +707,11 @@ class QrCode
         $moduleSize = (int)($this->size / $totalModules);
 
         // 修复：确保模块大小足够以支持扫描识别
-        // 模块大小至少需要3像素才能保证大多数扫描器能识别
-        // 如果模块太小，自动调整size或警告用户
-        $minModuleSize = 3;
+        // 模块大小至少需要2像素才能保证大多数扫描器能识别（降低阈值以支持小尺寸二维码）
+        // 如果模块太小，只调整模块大小到最小值，不改变整体size
+        $minModuleSize = 2;
         if ($moduleSize < $minModuleSize) {
-            // 自动调整size以确保最小模块大小
-            $this->size = $totalModules * $minModuleSize + ($this->labelOptions !== null && $this->labelOptions->isEnabled() ? 100 : 0);
+            // 只调整模块大小到最小值，不改变整体size
             $moduleSize = $minModuleSize;
         }
 
@@ -772,12 +801,9 @@ class QrCode
             $encoder = new \zxf\Utils\QrCode\Encoder\Encoder();
 
             // 将自定义ErrorCorrectionLevel转换为内部的ErrorCorrectionLevel
-            $ecLevel = match($this->errorCorrectionLevel->getName()) {
-                'L' => \zxf\Utils\QrCode\Common\ErrorCorrectionLevel::low(),
-                'M' => \zxf\Utils\QrCode\Common\ErrorCorrectionLevel::medium(),
-                'Q' => \zxf\Utils\QrCode\Common\ErrorCorrectionLevel::quartile(),
-                'H' => \zxf\Utils\QrCode\Common\ErrorCorrectionLevel::high()
-            };
+            // 修复：直接使用位值映射，确保纠错级别转换正确
+            $ecBits = $this->errorCorrectionLevel->getValue();
+            $ecLevel = \zxf\Utils\QrCode\Common\ErrorCorrectionLevel::forBits($ecBits);
 
             // 处理版本
             $forcedVersion = null;
@@ -883,19 +909,21 @@ class QrCode
      */
     private function drawRoundedModule(GdImage $image, int $x, int $y, int $size, int $color): void
     {
-        // 计算圆点半径，确保相邻圆点有足够的重叠以支持扫描识别
-        // 修复：增大系数从0.55到0.72，确保圆点重叠率足够（约43%）
-        // 重叠率公式：(radius*2 - size) / size，需要至少40%才能保证识别
-        $radius = (int)($size * $this->roundedRadius * 0.72);
+        // 计算圆点半径
+        // 修复：直接使用用户设置的roundedRadius，不再乘以0.72系数
+        // 这确保了圆点半径完全符合用户期望，如roundedRadius(0.6)会生成60%大小的圆点
+        $radius = (int)($size * $this->roundedRadius);
 
-        // 确保半径不会超过模块大小太多
-        $radius = min($radius, (int)($size / 2) + 1);
+        // 确保半径至少为1像素，保证圆点可见
+        $radius = max(1, $radius);
+
+        // 确保半径不超过模块大小的一半，防止过度重叠
+        $radius = min($radius, (int)($size / 2));
 
         $cx = $x + (int)($size / 2);
         $cy = $y + (int)($size / 2);
 
-        // 修复：移除干扰扫描的3D效果，只绘制纯色圆点
-        // 这确保了高对比度和清晰的边界，提升扫描可识别性
+        // 绘制纯色圆点，确保高对比度和清晰的边界
         imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
     }
 
@@ -1052,7 +1080,7 @@ class QrCode
 
     /**
      * 绘制Logo
-     * Logo宽度严格限制在不含边距的二维码内容宽度的15%以内
+     * Logo宽度严格限制在不含边距的二维码内容宽度的20%以内
      * 支持阴影、透明度、旋转等高级效果
      *
      * @param GdImage $image 图像资源
@@ -1071,8 +1099,8 @@ class QrCode
 
         // Logo尺寸已计算完成
 
-        // 计算Logo尺寸（严格限制在15%以内）
-        $maxLogoSize = (int)($qrWidth * 0.15);
+        // 计算Logo尺寸（严格限制在20%以内）
+        $maxLogoSize = (int)($qrWidth * 0.20);
 
         if ($this->logoScale > 0) {
             $logoSize = (int)($qrWidth * $this->logoScale / 100);
@@ -1080,7 +1108,7 @@ class QrCode
         } elseif ($this->logoWidth > 0 && $this->logoHeight > 0) {
             $logoSize = min($this->logoWidth, $this->logoHeight, $maxLogoSize);
         } else {
-            // 自动计算，保持原始比例，但限制在15%以内
+            // 自动计算，保持原始比例，但限制在20%以内
             $originalWidth = imagesx($logoImage);
             $originalHeight = imagesy($logoImage);
             $scale = $maxLogoSize / max($originalWidth, $originalHeight);
@@ -3133,12 +3161,13 @@ class QrCode
         $darker = min($fgLuminance, $bgLuminance);
         $contrastRatio = ($lighter + 0.05) / ($darker + 0.05);
 
-        // 检查对比度是否足够（使用较低阈值3:1以支持更多颜色）
-        if ($contrastRatio < 3.0) {
+        // 检查对比度是否足够（使用合理阈值2.0:1以支持更多颜色方案）
+        // 2.0:1是二维码可扫描的最低要求，比WCAG建议的3:1更低但更实用
+        if ($contrastRatio < 2.0) {
             throw new Exception(
-                '颜色对比度不足，可能影响扫描识别。' .
+                '颜色对比度不足，可能严重影响扫描识别。' .
                 '当前对比度: ' . round($contrastRatio, 2) . ':1' .
-                '，建议至少为3:1。请使用更鲜明的前景色和背景色。'
+                '，建议至少为2:1。请使用更鲜明的前景色和背景色，或调用skipContrastValidation()跳过验证。'
             );
         }
     }

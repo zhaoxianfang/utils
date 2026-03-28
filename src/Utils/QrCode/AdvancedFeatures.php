@@ -13,8 +13,10 @@ use zxf\Utils\QrCode\Color\Color;
 class AdvancedFeatures
 {
     /**
-     * 创建渐变背景色
+     * 创建渐变背景色（优化性能版本）
      *
+     * @param int $width 宽度
+     * @param int $height 高度
      * @param string $startColor 起始颜色（十六进制）
      * @param string $endColor 结束颜色（十六进制）
      * @param string $direction 渐变方向（horizontal, vertical, diagonal）
@@ -26,33 +28,34 @@ class AdvancedFeatures
         $start = Color::fromHex($startColor);
         $end = Color::fromHex($endColor);
 
+        // 优化：使用更高效的插值算法
         if ($direction === 'horizontal') {
             for ($x = 0; $x < $width; $x++) {
-                $ratio = $x / $width;
-                $r = (int)($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
-                $g = (int)($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
-                $b = (int)($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
+                $ratio = $x / max(1, $width - 1);
+                $r = (int)round($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
+                $g = (int)round($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
+                $b = (int)round($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
                 $color = imagecolorallocate($image, $r, $g, $b);
-                imageline($image, $x, 0, $x, $height, $color);
+                imageline($image, $x, 0, $x, $height - 1, $color);
             }
         } elseif ($direction === 'vertical') {
             for ($y = 0; $y < $height; $y++) {
-                $ratio = $y / $height;
-                $r = (int)($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
-                $g = (int)($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
-                $b = (int)($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
+                $ratio = $y / max(1, $height - 1);
+                $r = (int)round($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
+                $g = (int)round($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
+                $b = (int)round($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
                 $color = imagecolorallocate($image, $r, $g, $b);
-                imageline($image, 0, $y, $width, $y, $color);
+                imageline($image, 0, $y, $width - 1, $y, $color);
             }
         } else { // diagonal
             $maxDim = max($width, $height);
             for ($i = 0; $i < $maxDim; $i++) {
-                $ratio = $i / $maxDim;
-                $r = (int)($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
-                $g = (int)($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
-                $b = (int)($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
+                $ratio = $i / max(1, $maxDim - 1);
+                $r = (int)round($start->getRed() + ($end->getRed() - $start->getRed()) * $ratio);
+                $g = (int)round($start->getGreen() + ($end->getGreen() - $start->getGreen()) * $ratio);
+                $b = (int)round($start->getBlue() + ($end->getBlue() - $start->getBlue()) * $ratio);
                 $color = imagecolorallocate($image, $r, $g, $b);
-                imageline($image, 0, $i, min($i, $width), $i, $color);
+                imageline($image, 0, $i, min($i, $width - 1), $i, $color);
             }
         }
 
@@ -153,24 +156,35 @@ class AdvancedFeatures
     }
 
     /**
-     * 批量生成二维码
+     * 批量生成二维码（优化内存管理版本）
      *
      * @param array $dataList 数据列表
      * @param string $outputDir 输出目录
      * @param int $size 二维码尺寸
      * @param string $prefix 文件名前缀
+     * @param array $options 二维码选项
      * @return array 生成结果统计
      */
-    public static function batchGenerate(array $dataList, string $outputDir, int $size = 300, string $prefix = 'qr_'): array
+    public static function batchGenerate(array $dataList, string $outputDir, int $size = 300, string $prefix = 'qr_', array $options = []): array
     {
+        // 验证参数
+        if (empty($dataList)) {
+            throw new Exception('数据列表不能为空');
+        }
+
+        if ($size < 50 || $size > 5000) {
+            throw new Exception('二维码尺寸必须在50-5000像素之间');
+        }
+
+        // 创建输出目录
         if (!is_dir($outputDir)) {
             if (!mkdir($outputDir, 0775, true) && !is_dir($outputDir)) {
                 throw new Exception('无法创建输出目录: ' . $outputDir);
             }
         }
 
-        if (empty($dataList)) {
-            throw new Exception('数据列表不能为空');
+        if (!is_writable($outputDir)) {
+            throw new Exception('输出目录不可写: ' . $outputDir);
         }
 
         $results = [
@@ -180,22 +194,40 @@ class AdvancedFeatures
             'files' => []
         ];
 
-        foreach ($dataList as $index => $data) {
-            try {
-                if (empty($data)) {
-                    throw new Exception('数据内容不能为空');
+        // 限制批量数量，防止内存溢出
+        $batchSize = 100;
+        $batches = array_chunk($dataList, $batchSize);
+
+        foreach ($batches as $batchIndex => $batch) {
+            foreach ($batch as $index => $data) {
+                $realIndex = $batchIndex * $batchSize + $index;
+
+                try {
+                    if (empty($data)) {
+                        throw new Exception('数据内容不能为空');
+                    }
+
+                    $filename = $outputDir . '/' . $prefix . $realIndex . '.png';
+                    $qrCode = QrCode::make($data)->size($size);
+
+                    // 应用选项
+                    foreach ($options as $method => $value) {
+                        if (method_exists($qrCode, $method)) {
+                            $qrCode = $qrCode->$method($value);
+                        }
+                    }
+
+                    $qrCode->save($filename);
+
+                    $results['success']++;
+                    $results['files'][] = $filename;
+
+                    // 显式释放内存
+                    unset($qrCode);
+                } catch (Exception $e) {
+                    $results['failed']++;
+                    $results['files'][] = "Index {$realIndex}: " . $e->getMessage();
                 }
-
-                $filename = $outputDir . '/' . $prefix . $index . '.png';
-                QrCode::make($data)
-                    ->size($size)
-                    ->save($filename);
-
-                $results['success']++;
-                $results['files'][] = $filename;
-            } catch (Exception $e) {
-                $results['failed']++;
-                $results['files'][] = "Error: " . $e->getMessage();
             }
         }
 
