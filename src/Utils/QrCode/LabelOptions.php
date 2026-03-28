@@ -120,7 +120,7 @@ class LabelOptions
         }
 
         // 尝试作为字体名称查找
-        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        $fontByName = dirname(__FILE__, 3) . '/resource/font/' . $fontPath . '.ttf';
         if (is_file($fontByName)) {
             self::$defaultFontPath = $fontByName;
             return;
@@ -164,7 +164,7 @@ class LabelOptions
     {
         if (empty($fontPath)) {
             // 使用默认字体
-            $defaultFont = dirname(__FILE__, 2) . '/resource/font/xingkai.ttf';
+            $defaultFont = dirname(__FILE__, 3) . '/resource/font/xingkai.ttf';
             if (is_file($defaultFont)) {
                 $this->fontPath = $defaultFont;
                 return $this;
@@ -179,7 +179,7 @@ class LabelOptions
         }
 
         // 尝试作为字体名称查找
-        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        $fontByName = dirname(__FILE__, 3) . '/resource/font/' . $fontPath . '.ttf';
         if (is_file($fontByName)) {
             $this->fontPath = $fontByName;
             return $this;
