@@ -23,11 +23,6 @@ class ConstCode
     const TYPE_SINA             = 4; //sina新浪微博
     const TYPE_GITHUB           = 5; //GitHub
     const TYPE_ALIPAY           = 6; //AliPay
-    const TYPE_FACEBOOK         = 7; //faceBook
-    const TYPE_GOOGLE           = 8; //google
-    const TYPE_TWITTER          = 9; //飞鸽
-    const TYPE_LINE             = 10;//line
-    const TYPE_NAVER            = 11;//naver
     const TYPE_ALIYUN           = 12; //阿里云
     const TYPE_BAIDU            = 13; //百度
     const TYPE_CODING           = 14; //Coding
@@ -40,10 +35,6 @@ class ConstCode
     const TYPE_KUAISHOU         = 41; //快手;
     const TYPE_XIAOMI           = 42; //小米
     const TYPE_HUAWEI           = 43; //华为
-    const TYPE_AMAZON           = 44; //亚马逊
-    const TYPE_APPLE            = 45; //苹果
-    const TYPE_YAHOO            = 46; //雅虎
-    const TYPE_MICROSOFT        = 47; //微软
 
     const TYPE_QQ_APP           = 21; //qqAPP
     const TYPE_WECHAT_APP       = 22; //微信APP

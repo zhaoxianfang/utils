@@ -75,7 +75,10 @@ class Dingtalk extends Gateway
         ];
         
         $data = $this->get($this->UserInfoURL, [], $headers);
-        return json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
+        return $data;
     }
 
     /**
@@ -91,7 +94,9 @@ class Dingtalk extends Gateway
         ];
         
         $response = $this->post($this->AccessTokenURL, $params);
-        $response = json_decode($response, true);
+        if(is_string($response)){
+            $response = json_decode($response, true);
+        }
         
         if (!isset($response['accessToken'])) {
             throw new OAuthException('获取钉钉 access_token 出错：' . json_encode($response));
@@ -110,7 +115,9 @@ class Dingtalk extends Gateway
                 'x-acs-dingtalk-access-token' => $accessToken
             ];
             $data = $this->get($this->UserInfoURL, [], $headers);
-            $data = json_decode($data, true);
+            if(is_string($data)){
+                $data = json_decode($data, true);
+            }
             return isset($data['nick']);
         } catch (\Exception $e) {
             return false;
@@ -130,7 +137,9 @@ class Dingtalk extends Gateway
         ];
         
         $response = $this->post($this->AccessTokenURL, $params);
-        $response = json_decode($response, true);
+        if(is_string($response)){
+            $response = json_decode($response, true);
+        }
         
         if (isset($response['accessToken'])) {
             $this->token = $response;

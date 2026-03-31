@@ -53,6 +53,10 @@ class Sina extends Gateway
         if (isset($this->token['openid'])) {
             return $this->token['openid'];
         } else {
+            if(isset($this->token['uid'])){
+                $this->token['openid'] = $this->token['uid'];
+                return $this->token['openid'];
+            }
             throw new OAuthException('没有获取到新浪微博用户ID！');
         }
     }
@@ -65,11 +69,11 @@ class Sina extends Gateway
     public function userInfo()
     {
         $result = $this->getUserInfo();
-
+        $openId = $this->openid();
         $userInfo = [
-            'open_id'  => $this->openid(),
+            'open_id'  => $openId,
             'access_token'=> $this->token['access_token'] ?? '',
-            'union_id'  => $this->openid(),
+            'union_id'  => $openId,
             'channel' => ConstCode::TYPE_SINA,
             'nickname'    => $result['screen_name'],
             'gender'  => $this->getGender($result['gender']),
@@ -120,7 +124,10 @@ class Sina extends Gateway
         }
 
         $data = $this->$method(self::API_BASE . $api, $params);
-        return json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
+        return $data;
     }
 
     /**

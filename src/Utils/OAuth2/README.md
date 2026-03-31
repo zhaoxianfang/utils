@@ -123,27 +123,6 @@ public function getUserInfo();
 | oschina  |  OSChina  |     PC      |
 |   csdn   |   CSDN    |     PC      |
 
-### 国际平台 (International Platforms)
-
-
-| Gateways  | LoginName | LoginMethod |
-|:---------:|:---------:|:-----------:|
-|  google   |  Google   |     PC      |
-| facebook  | Facebook  |     PC      |
-|  twitter  |  Twitter  |     PC      |
-|   line    |   Line    |     PC      |
-|   naver   |   Naver   |     PC      |
-|  amazon   |  Amazon   |     PC      |
-|   apple   |   Apple   |   PC、APP    |
-|   yahoo   |   Yahoo   |     PC      |
-| microsoft | Microsoft |     PC      |
-
->注意事项 (Notes)：
-1. Google、Facebook、Twitter 等国际平台需要使用海外或香港服务器才能正常回调
-2. 部分平台支持多种授权方式，如 PC 网页授权、APP 授权等
-3. 使用前请先阅读相应平台的开发文档并完成开发者资质认证
-
->注：Google、facebook、twitter等这些国外平台需要海外或者HK服务器才能回调成功
 
 ### Configuration
 
@@ -208,7 +187,7 @@ class Login extends Common
      */
     public function index()
     {
-        $name="qq";//登录类型,例:qq / google
+        $name="qq";//登录类型,例:qq
         if (empty(input('get.'))) {
             /** 登录 */
             $result = $this->login($name);
@@ -299,7 +278,7 @@ class Login extends Common
 }
 ```
 
-通过系统自动设置state，如有需要请自行处理验证，state也放入config里即可 Line和Facebook强制要求传递state，如果你没有设置，则会传递随机值 如果要验证state，则在获取用户信息的时候要加上`->mustCheckState()`方法。
+通过系统自动设置state，如有需要请自行处理验证，state也放入config里即可 ，如果你没有设置，则会传递随机值 如果要验证state，则在获取用户信息的时候要加上`->mustCheckState()`方法。
 
 ```
 $name = "qq";
@@ -330,14 +309,12 @@ App登录回调
 
     /**
     * access_token 通过$_REQUEST['access_token'] 进行传值到oauth中
-    *    facebook App登录
     *    qq App登录
     *    wechat App登录
     */
 
     /**
     * code 通过$_REQUEST['code'] 进行传值到oauth中
-    *    google App登录
     */
 ```
 
@@ -350,10 +327,10 @@ Array
 (
     [open_id] => 1047776979*******   //open_id数据唯一凭证
     [access_token] => 444444445*******  //用户的access_token凭证
-    [union_id] => 444444445*******  //用户的唯一凭证（在同一平台下多设备参数返回一致）,部分登录此字段值是open_id(例:sina/google),
+    [union_id] => 444444445*******  //用户的唯一凭证（在同一平台下多设备参数返回一致）,部分登录此字段值是open_id(例:sina),
     [channel] => 1;                 //登录类型请查看 \tinymeng\OAuth2\Helper\ConstCode
     [nickname] => 'Tinymeng'        //昵称
-    [gender] => 1;                  //0=>未知 1=>男 2=>女   twitter和line不会返回性别，所以这里是0，Facebook根据你的权限，可能也不会返回，所以也可能是0
+    [gender] => 1;                  //0=>未知 1=>男 2=>女   所以这里是0
     [avatar] => http://thirdqq.qlogo.cn/qqapp/101426434/50D523803F5B51AAC01616105161C7B1/100 //头像
     [type] => 21;                   //登录子类型请查看 \tinymeng\OAuth2\Helper\ConstCode ，例如：channel：微信 type：小程序或app
 )

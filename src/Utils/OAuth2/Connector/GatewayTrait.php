@@ -1,7 +1,7 @@
 <?php
 namespace zxf\Utils\OAuth2\Connector;
 
-use zxf\Utils\tools\HttpRequest;
+use zxf\Utils\Http\Curl;
 
 trait GatewayTrait
 {
@@ -34,7 +34,7 @@ trait GatewayTrait
      */
     protected function get($url, $params = [], $headers = [])
     {
-        return HttpRequest::httpGet($url, $params,$headers);
+        return Curl::instance()->setParams($params)->setHeader($headers)->get($url);
     }
 
     /**
@@ -47,7 +47,7 @@ trait GatewayTrait
      */
     protected function post($url, $params = [], $headers = [])
     {
-        return HttpRequest::httpPost($url, $params,$headers);
+        return Curl::instance()->setParams($params)->setHeader($headers)->post($url);
     }
 
 

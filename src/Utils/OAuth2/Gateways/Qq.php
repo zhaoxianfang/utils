@@ -97,7 +97,10 @@ class Qq extends Gateway
             'format'=>'json',
         ];
         $data = $this->get($this->UserInfoURL, $params);
-        return json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
+        return $data;
     }
 
     /**
@@ -158,7 +161,9 @@ class Qq extends Gateway
         }
 
         $data = $this->get(self::API_BASE . 'oauth2.0/me',$query);
-        $data     = json_decode(trim(substr($data, 9), " );\n"), true);
+        if(is_string($data)){
+            $data = json_decode(trim(substr($data, 9), " );\n"), true);
+        }
         if (isset($data['openid'])) {
             return $data;
         } else {

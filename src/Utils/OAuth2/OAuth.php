@@ -14,12 +14,8 @@ use zxf\Utils\OAuth2\Helper\Str;
  * @method static Gateways\Wechat wechat(array $config) 微信
  * @method static Gateways\Wechat weixin(array $config) 微信
  * @method static Gateways\Qq Qq(array $config) QQ
- * @method static Gateways\Facebook Facebook(array $config) Facebook
  * @method static Gateways\Github Github(array $config) Github
- * @method static Gateways\Google Google(array $config) Google
- * @method static Gateways\Line Line(array $config) Line
  * @method static Gateways\Sina Sina(array $config) Sina
- * @method static Gateways\Twitter Twitter(array $config) Twitter
  * @method static Gateways\Douyin Douyin(array $config) 抖音
  * @method static Gateways\Baidu Baidu(array $config) 百度
  * @method static Gateways\Coding Coding(array $config) Coding

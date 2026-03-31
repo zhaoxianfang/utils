@@ -83,7 +83,9 @@ class Baidu extends Gateway
 
         $headers = ['Authorization: Bearer '.$this->token['access_token']];
         $data = $this->get($this->UserInfoURL, [], $headers);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if(!isset($data['uid'])) {
             throw new OAuthException("获取百度用户信息失败：" . ($data['error_description'] ?? '未知错误'));
@@ -179,7 +181,9 @@ class Baidu extends Gateway
             $accessToken = $accessToken ?? $this->token['access_token'];
             $headers = ['Authorization: Bearer ' . $accessToken];
             $data = $this->get($this->UserInfoURL, [], $headers);
-            $data = json_decode($data, true);
+            if(is_string($data)){
+                $data = json_decode($data, true);
+            }
             return isset($data['uid']);
         } catch (Exception $e) {
             return false;

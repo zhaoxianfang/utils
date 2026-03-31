@@ -117,8 +117,10 @@ class Github extends Gateway
             'Authorization: token ' . $this->token['access_token'],
             'Accept: application/json'
         ];
-        $response = $this->get($this->UserInfoURL, [], $headers);
-        $data = json_decode($response, true);
+        $data = $this->get($this->UserInfoURL, [], $headers);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         if (!empty($data['error'])) {
             throw new OAuthException($data['error']);
         }

@@ -147,7 +147,10 @@ class Wechat extends Gateway
             'lang'=>'zh_CN',
         ];
         $data = $this->get(self::API_BASE . 'userinfo', $params);
-        return json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
+        return $data;
     }
 
     /**
@@ -293,7 +296,9 @@ class Wechat extends Gateway
                 'openid'      => $this->openid(),
             ];
             $result = $this->get(self::API_BASE . 'auth', $params);
-            $result = json_decode($result, true);
+            if(is_string($result)){
+                $result = json_decode($result, true);
+            }
             return isset($result['errcode']) && $result['errcode'] == 0;
         } catch (Exception $e) {
             return false;

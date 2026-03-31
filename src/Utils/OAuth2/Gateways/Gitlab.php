@@ -55,7 +55,9 @@ class Gitlab extends Gateway
         $this->openid();
         $headers = ['Authorization: Bearer ' . $this->token['access_token']];
         $data = $this->get(static::API_BASE . $this->UserInfoURL, [], $headers);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if(!isset($data['id'])) {
             throw new OAuthException("获取GitLab用户信息失败：" . ($data['error_description'] ?? '未知错误'));

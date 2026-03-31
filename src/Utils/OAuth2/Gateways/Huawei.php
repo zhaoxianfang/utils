@@ -76,7 +76,9 @@ class Huawei extends Gateway
         ];
         
         $data = $this->get($this->UserInfoURL, $params);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if (!isset($data['displayName'])) {
             throw new OAuthException('获取华为用户信息失败：' . json_encode($data));
@@ -128,7 +130,9 @@ class Huawei extends Gateway
                 'nsp_ts'      => time(),
             ];
             $data = $this->get($this->UserInfoURL, $params);
-            $data = json_decode($data, true);
+            if(is_string($data)){
+                $data = json_decode($data, true);
+            }
             return isset($data['scope']);
         } catch (\Exception $e) {
             return false;

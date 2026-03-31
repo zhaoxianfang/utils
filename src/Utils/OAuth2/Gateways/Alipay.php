@@ -154,9 +154,12 @@ class Alipay extends Gateway
         ];
         $params['sign'] = $this->signature($params);
 
-        $data = $this->post(self::API_BASE, $params);
-        $data = mb_convert_encoding($data, 'utf-8', 'gbk');
-        $result =  json_decode($data, true);
+        $result = $this->post(self::API_BASE, $params);
+        if(is_string($result)){
+            $data = mb_convert_encoding($result, 'utf-8', 'gbk');
+            $result =  json_decode($data, true);
+        }
+
         return $result['alipay_user_info_share_response'];
     }
 

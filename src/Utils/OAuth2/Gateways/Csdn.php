@@ -81,7 +81,9 @@ class Csdn extends Gateway
         $data = $this->get(static::API_BASE . $this->UserInfoURL, [
             'access_token' => $this->token['access_token']
         ]);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if(!isset($data['username'])) {
             throw new OAuthException("获取CSDN用户信息失败：" . ($data['error_description'] ?? '未知错误'));

@@ -46,7 +46,9 @@ class Oschina extends Gateway
             'access_token' => $this->token['access_token'],
             'dataType' => 'json'
         ]);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if(!isset($data['id'])) {
             throw new OAuthException("获取OSChina用户信息失败：" . ($data['error_description'] ?? '未知错误'));

@@ -78,7 +78,10 @@ class Aliyun extends Gateway
 
         $headers = ['Authorization: Bearer '.$this->token['access_token']];
         $data = $this->get($this->UserInfoURL, [],$headers);
-        return json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
+        return $data;
     }
 
     /**

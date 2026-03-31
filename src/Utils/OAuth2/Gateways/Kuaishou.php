@@ -75,7 +75,9 @@ class Kuaishou extends Gateway
         ];
         
         $data = $this->get($this->UserInfoURL, $params);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if (!isset($data['result'])) {
             throw new OAuthException('获取快手用户信息失败：' . json_encode($data));
@@ -96,7 +98,9 @@ class Kuaishou extends Gateway
         ];
         
         $response = $this->post($this->AccessTokenURL, $params);
-        $response = json_decode($response, true);
+        if(is_string($response)){
+            $response = json_decode($response, true);
+        }
         
         if (!isset($response['access_token'])) {
             throw new OAuthException('获取快手 access_token 出错：' . json_encode($response));
@@ -116,7 +120,9 @@ class Kuaishou extends Gateway
                 'access_token' => $accessToken,
             ];
             $data = $this->get($this->UserInfoURL, $params);
-            $data = json_decode($data, true);
+            if(is_string($data)){
+                $data = json_decode($data, true);
+            }
             return isset($data['result']);
         } catch (\Exception $e) {
             return false;
@@ -136,7 +142,9 @@ class Kuaishou extends Gateway
         ];
         
         $response = $this->post($this->AccessTokenURL, $params);
-        $response = json_decode($response, true);
+        if(is_string($response)){
+            $response = json_decode($response, true);
+        }
         
         if (isset($response['access_token'])) {
             $this->token = $response;

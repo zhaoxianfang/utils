@@ -73,7 +73,9 @@ class Wecom extends Gateway
         ];
         
         $data = $this->get($this->UserInfoURL, $params);
-        $data = json_decode($data, true);
+        if(is_string($data)){
+            $data = json_decode($data, true);
+        }
         
         if (!isset($data['userid'])) {
             throw new OAuthException('获取企业微信用户信息失败：' . json_encode($data));
@@ -90,14 +92,16 @@ class Wecom extends Gateway
             'corpid'     => $this->config['app_id'],
             'corpsecret' => $this->config['app_secret'],
         ];
-        
-        $response = $this->get($this->AccessTokenURL, $params);
-        $response = json_decode($response, true);
-        
-        if (!isset($response['access_token'])) {
-            throw new OAuthException('获取企业微信 access_token 出错：' . json_encode($response));
+
+        $data = $this->get($this->AccessTokenURL, $params);
+        if(is_string($data)){
+            $data = json_decode($data, true);
         }
-        return $response;
+        
+        if (!isset($data['access_token'])) {
+            throw new OAuthException('获取企业微信 access_token 出错：' . json_encode($data));
+        }
+        return $data;
     }
 
     /**
@@ -112,7 +116,9 @@ class Wecom extends Gateway
                 'code'        => 'fake_code'
             ];
             $data = $this->get($this->UserInfoURL, $params);
-            $data = json_decode($data, true);
+            if(is_string($data)){
+                $data = json_decode($data, true);
+            }
             return $data['errcode'] === 40029;  // 无效的code但token有效
         } catch (\Exception $e) {
             return false;
