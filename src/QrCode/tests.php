@@ -29,7 +29,7 @@ if (!is_dir($outputDir)) {
 }
 
 // 设置默认字体路径
-LabelOptions::setDefaultFontPath(__DIR__ . '/../../resource/font/lishu.ttf');
+LabelOptions::setDefaultFontPath(__DIR__ . '/../resource/font/lishu.ttf');
 
 $testCount = 0;
 $passedCount = 0;

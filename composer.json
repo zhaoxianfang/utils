@@ -3,32 +3,9 @@
   "description": "现代化的 PHP 工具包，包含强大的 DOM 操作库、数据转换和一些常用的类库、HTTP网络请求、代码压缩、通用函数集和实用工具等",
   "type": "library",
   "keywords": [
-    "utils",
-    "util",
-    "tools",
-    "tool",
-    "tree",
-    "crypto",
-    "file",
-    "array",
-    "curl",
-    "dom",
-    "html",
-    "xml",
-    "css",
-    "xpath",
-    "web-scraper",
-    "html-parser",
-    "xml-parser",
-    "php",
-    "php82",
-    "php83",
-    "php84",
-    "工具",
-    "DOM操作",
-    "image",
-    "http"
-  ],
+    "utils", "util", "tools", "tool", "tree", "crypto", "file", "array", "curl", "dom", "html", "curl",
+    "xml", "css", "xpath", "web-scraper", "html-parser", "xml-parser", "php", "php82", "php83", "php84",
+    "工具", "DOM操作", "image", "http", "qrcode", "barcode", "oauth"  ],
   "license": "MIT",
   "authors": [
     {
@@ -43,7 +20,7 @@
   },
   "autoload": {
     "psr-4": {
-      "zxf\\Utils\\": "src/Utils/"
+      "zxf\\Utils\\": "src/"
     },
     "files": [
       "src/funcs/helpers.php"

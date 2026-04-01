@@ -17,13 +17,22 @@ uuid():string
 ```
 
 ## 强大的DOM操作库
-[🇺🇸 Dom README.md](src/Utils/Dom/README.md)
+[🇺🇸 Dom README.md](src/Dom/README.md)
 
-[🇨🇳 Dom 操作库 中文 README.md](src/Utils/Dom/README_CN.md)
+[🇨🇳 Dom 操作库 中文 README.md](src/Dom/README_CN.md)
+
+## BarCode 一维条形码
+[一维条形码文档](src/BarCode/README.md)
+
+## QrCode 二维码
+[二维码文档](src/QrCode/README.md)
 
 ## Xml 转换处理
+[查看文档](src/Xml/readme.md)
 
 ## Minify 代码压缩
+[查看文档](src/Minify/README.md)
+
 
 ## Image 图片处理
 
