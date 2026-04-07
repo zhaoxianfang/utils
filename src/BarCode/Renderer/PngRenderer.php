@@ -9,29 +9,27 @@ use zxf\Utils\BarCode\DTO\BarcodeConfig;
 use zxf\Utils\BarCode\Exceptions\RenderException;
 
 /**
- * PNG 渲染器（完整增强版）
+ * PNG 渲染器（动态文字定位版）
  * 
- * 功能特性：
- * - 支持长竖线渲染（EAN-13/ISBN/UPC-A/EAN-8）
- * - 支持数字显示（根据条码类型自动调整位置）
- * - 支持自定义颜色、渐变、圆角
- * - 支持水印
- * - 支持文本对齐（左/中/右）
- * - 支持直接输出到浏览器
- * - 支持Bearer Bar（ITF-14上下边框）
+ * 【核心特性】
+ * - 动态检测长竖线（保护符）实际像素位置
+ * - 根据条码内容和结构自动分段显示数字
+ * - 动态计算字号大小适配条码宽度
+ * - 动态计算上下偏移距离
+ * - 每段数字在各自区域内均匀分布
+ * 
+ * 【支持的长竖线特征条码】
+ * - EAN-13: 分段 1+6+6（第1位左静区，2-7位左数据区，8-13位右数据区）
+ * - ISSN: 基于EAN-13，显示格式不同
+ * - UPC-A: 分段 1+5+5+1（第1位左静区，2-6位左数据区，7-11位右数据区，12位右静区）
+ * - EAN-8: 分段 4+4（1-4位左数据区，5-8位右数据区）
  */
 class PngRenderer implements RendererInterface
 {
-    /** @var string 渲染器类型 */
     protected const TYPE = 'png';
     
-    /** @var BarcodeConfig 配置对象 */
     protected BarcodeConfig $config;
-    
-    /** @var resource|null GD图像资源 */
     protected $image = null;
-    
-    /** @var string 条码类型 */
     protected string $barcodeType = '';
     
     // 个性化配置
@@ -42,9 +40,25 @@ class PngRenderer implements RendererInterface
     protected int $cornerRadius = 2;
     protected ?string $watermarkText = null;
     protected int $watermarkOpacity = 50;
-    protected string $textAlign = 'center'; // left, center, right
-    protected bool $enableBearerBar = false; // ITF-14上下边框
-    protected int $bearerBarWidth = 2;
+    protected int $watermarkFontSize = 5;
+    protected string $watermarkColor = '#CCCCCC';
+    protected int $watermarkAngle = 0;
+    protected string $textAlign = 'center';
+    
+    /** @var array<int> 长竖线位置索引 */
+    protected array $longBarPositions = [];
+    
+    /** @var float 长竖线高度比例 */
+    protected float $longBarHeightRatio = 1.12;
+    
+    /** @var array<string, mixed> 条码结构分析结果 */
+    protected array $barcodeStructure = [];
+    
+    /** @var int 动态计算的字号 */
+    protected int $dynamicFontSize = 5;
+    
+    /** @var int 动态计算的文本Y偏移 */
+    protected int $dynamicTextOffset = 3;
 
     public function __construct(?BarcodeConfig $config = null)
     {
@@ -53,21 +67,17 @@ class PngRenderer implements RendererInterface
 
     /**
      * 渲染条形码为PNG
-     * 
-     * @param array  $barcodeData 条形码条空模式数组
-     * @param string $data         原始数据
-     * @param array  $config       渲染配置选项
-     * @return string PNG二进制数据
      */
     public function render(array $barcodeData, string $data, array $config = []): string
     {
         $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), $config));
+        $this->barcodeStructure = []; // 重置结构分析
         
         $this->createImage($barcodeData);
         $this->drawBarcode($barcodeData);
         
         if ($this->config->showText) {
-            $this->drawText($data);
+            $this->drawText($data, $barcodeData);
         }
         
         if ($this->watermarkText !== null) {
@@ -79,10 +89,6 @@ class PngRenderer implements RendererInterface
 
     /**
      * 直接输出到浏览器
-     * 
-     * @param array  $barcodeData 条形码条空模式数组
-     * @param string $data         原始数据
-     * @param array  $config       渲染配置选项
      */
     public function outputToBrowser(array $barcodeData, string $data, array $config = []): void
     {
@@ -119,10 +125,16 @@ class PngRenderer implements RendererInterface
     }
 
     /**
+     * 设置长竖线位置
+     */
+    public function setLongBarPositions(array $positions): self
+    {
+        $this->longBarPositions = $positions;
+        return $this;
+    }
+
+    /**
      * 设置文本对齐方式
-     * 
-     * @param string $align 对齐方式：left, center, right
-     * @return self 支持链式调用
      */
     public function setTextAlign(string $align): self
     {
@@ -132,10 +144,6 @@ class PngRenderer implements RendererInterface
 
     /**
      * 启用渐变效果
-     * 
-     * @param string $startColor 起始颜色
-     * @param string $endColor   结束颜色
-     * @return self 支持链式调用
      */
     public function enableGradient(string $startColor, string $endColor): self
     {
@@ -146,10 +154,16 @@ class PngRenderer implements RendererInterface
     }
 
     /**
+     * 禁用渐变效果
+     */
+    public function disableGradient(): self
+    {
+        $this->enableGradient = false;
+        return $this;
+    }
+
+    /**
      * 启用圆角条
-     * 
-     * @param int $radius 圆角半径
-     * @return self 支持链式调用
      */
     public function enableRoundedBars(int $radius = 2): self
     {
@@ -159,36 +173,32 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 添加水印
+     * 添加水印（增强版）
      * 
-     * @param string $text    水印文字
-     * @param int    $opacity 透明度（0-100）
-     * @return self 支持链式调用
+     * @param string $text 水印文本
+     * @param int $opacity 透明度（0-100，值越大越不透明）
+     * @param int $fontSize 字号（1-5）
+     * @param string $color 颜色（十六进制格式）
+     * @param int $angle 旋转角度（-180到180度）
+     * @return self
      */
-    public function setWatermark(string $text, int $opacity = 50): self
-    {
+    public function setWatermark(
+        string $text, 
+        int $opacity = 70, 
+        int $fontSize = 5, 
+        string $color = '#CCCCCC',
+        int $angle = 0
+    ): self {
         $this->watermarkText = $text;
         $this->watermarkOpacity = max(0, min(100, $opacity));
-        return $this;
-    }
-
-    /**
-     * 启用Bearer Bar（ITF-14上下边框）
-     * 
-     * @param int $width 边框线宽
-     * @return self 支持链式调用
-     */
-    public function enableBearerBar(int $width = 2): self
-    {
-        $this->enableBearerBar = true;
-        $this->bearerBarWidth = $width;
+        $this->watermarkFontSize = max(1, min(5, $fontSize));
+        $this->watermarkColor = $color;
+        $this->watermarkAngle = max(-180, min(180, $angle));
         return $this;
     }
 
     /**
      * 创建图像资源
-     * 
-     * @param array<int> $barcodeData 条空模式数组
      */
     protected function createImage(array $barcodeData): void
     {
@@ -205,11 +215,6 @@ class PngRenderer implements RendererInterface
                   $this->config->marginTop + 
                   $this->config->marginBottom;
         
-        // Bearer bar额外高度
-        if ($this->enableBearerBar) {
-            $height += $this->bearerBarWidth * 2;
-        }
-        
         if ($this->config->showText) {
             $height += $this->config->fontSize + $this->config->textOffset;
         }
@@ -220,12 +225,10 @@ class PngRenderer implements RendererInterface
             throw new RenderException('创建图像失败');
         }
 
-        // 验证颜色对比度
         $bgColorHex = $this->config->bgColor;
         $barColorHex = $this->config->barColor;
         
         if (!$this->validateContrast($bgColorHex, $barColorHex)) {
-            // 对比度不足，使用默认黑白配色
             $bgColorHex = '#FFFFFF';
             $barColorHex = '#000000';
         }
@@ -235,9 +238,9 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 绘制条形码
+     * 绘制条形码并分析结构
      * 
-     * @param array<int> $barcodeData 条空模式数组
+     * 【关键】在绘制过程中分析条码结构，记录关键位置
      */
     protected function drawBarcode(array $barcodeData): void
     {
@@ -248,34 +251,33 @@ class PngRenderer implements RendererInterface
         $barColor = $this->hexToColor($this->config->barColor);
         $x = $this->config->marginLeft;
         
-        // Bearer bar顶部
-        if ($this->enableBearerBar) {
-            imagefilledrectangle(
-                $this->image,
-                $x,
-                $this->config->marginTop,
-                $x + $this->getBarcodeWidth($barcodeData) - 1,
-                $this->config->marginTop + $this->bearerBarWidth - 1,
-                $barColor
-            );
-        }
-        
+        // 计算长竖线位置
         $longBarPositions = $this->calculateLongBarPositions($barcodeData);
         
-        $currentModule = 0;
-        $barY = $this->config->marginTop + ($this->enableBearerBar ? $this->bearerBarWidth : 0);
+        $barY = $this->config->marginTop;
         
-        foreach ($barcodeData as $element) {
+        // 记录所有条的位置和宽度
+        $bars = [];
+        $elementIndex = 0;
+        
+        foreach ($barcodeData as $elementIndex => $element) {
             $isBar = $element > 0;
             $width = abs($element) * $this->config->width;
             
             if ($isBar) {
-                $isLongBar = in_array($currentModule, $longBarPositions, true) && 
+                $isLongBar = in_array($elementIndex, $longBarPositions, true) && 
                              $this->config->rotateLongBars;
+                
+                $bars[] = [
+                    'x' => $x,
+                    'width' => $width,
+                    'isLongBar' => $isLongBar,
+                    'elementIndex' => $elementIndex,
+                ];
                 
                 $barHeight = $this->config->height;
                 if ($isLongBar) {
-                    $barHeight = (int)($barHeight * $this->config->longBarRatio);
+                    $barHeight = (int)($barHeight * $this->longBarHeightRatio);
                 }
                 
                 if ($this->enableGradient) {
@@ -297,69 +299,120 @@ class PngRenderer implements RendererInterface
             }
             
             $x += $width;
-            $currentModule += abs($element);
         }
         
-        // Bearer bar底部
-        if ($this->enableBearerBar) {
-            $bottomY = $barY + $this->config->height;
-            imagefilledrectangle(
-                $this->image,
-                $this->config->marginLeft,
-                $bottomY,
-                $this->config->marginLeft + $this->getBarcodeWidth($barcodeData) - 1,
-                $bottomY + $this->bearerBarWidth - 1,
-                $barColor
-            );
+        // 分析条码结构
+        $this->analyzeBarcodeStructure($bars, $x);
+    }
+
+    /**
+     * 分析条码结构，识别保护符位置和数据区域
+     * 
+     * 【分析逻辑】
+     * 1. 识别所有长竖线（保护符）
+     * 2. 根据长竖线数量和分布判断条码类型
+     * 3. 计算各数据区域的边界
+     */
+    protected function analyzeBarcodeStructure(array $bars, int $totalWidth): void
+    {
+        // 提取长竖线
+        $longBars = array_filter($bars, fn($bar) => $bar['isLongBar']);
+        $longBars = array_values($longBars); // 重新索引
+        
+        $this->barcodeStructure = [
+            'totalWidth' => $totalWidth - $this->config->marginLeft,
+            'longBars' => $longBars,
+            'allBars' => $bars,
+            'hasLongBars' => !empty($longBars),
+        ];
+        
+        if (empty($longBars)) {
+            return;
+        }
+        
+        // 根据长竖线数量和分布判断条码结构
+        $longBarCount = count($longBars);
+        
+        if ($longBarCount >= 6) {
+            // 典型的 EAN/UPC 结构：起始符(2条) + 分隔符(2条) + 终止符(2条)
+            $this->analyzeEANStructure($longBars);
         }
     }
 
     /**
-     * 计算条码宽度
-     * 
-     * @param array<int> $barcodeData 条空模式数组
-     * @return int 宽度（像素）
+     * 分析 EAN/UPC 系列条码结构
      */
-    protected function getBarcodeWidth(array $barcodeData): int
+    protected function analyzeEANStructure(array $longBars): void
     {
-        $width = 0;
-        foreach ($barcodeData as $element) {
-            $width += abs($element) * $this->config->width;
-        }
-        return $width;
+        // 按位置排序
+        usort($longBars, fn($a, $b) => $a['x'] <=> $b['x']);
+        
+        // 提取保护符组
+        // 起始符：前2条长竖线
+        $startGuardLeft = $longBars[0];
+        $startGuardRight = $longBars[1];
+        
+        // 终止符：后2条长竖线
+        $endGuardLeft = $longBars[count($longBars) - 2];
+        $endGuardRight = $longBars[count($longBars) - 1];
+        
+        // 分隔符：中间2条长竖线
+        $middleIdx = (int)(count($longBars) / 2);
+        $middleGuardLeft = $longBars[$middleIdx - 1];
+        $middleGuardRight = $longBars[$middleIdx];
+        
+        // 计算数据区域
+        $this->barcodeStructure['regions'] = [
+            'startGuard' => [
+                'left' => $startGuardLeft['x'],
+                'right' => $startGuardRight['x'] + $startGuardRight['width'],
+            ],
+            'middleGuard' => [
+                'left' => $middleGuardLeft['x'],
+                'right' => $middleGuardRight['x'] + $middleGuardRight['width'],
+            ],
+            'endGuard' => [
+                'left' => $endGuardLeft['x'],
+                'right' => $endGuardRight['x'] + $endGuardRight['width'],
+            ],
+            'leftData' => [
+                'left' => $startGuardRight['x'] + $startGuardRight['width'],
+                'right' => $middleGuardLeft['x'],
+            ],
+            'rightData' => [
+                'left' => $middleGuardRight['x'] + $middleGuardRight['width'],
+                'right' => $endGuardLeft['x'],
+            ],
+            'leftQuietZone' => [
+                'left' => $this->config->marginLeft,
+                'right' => $startGuardLeft['x'],
+                'center' => (int)(($this->config->marginLeft + $startGuardLeft['x']) / 2),
+            ],
+            'rightQuietZone' => [
+                'left' => $endGuardRight['x'] + $endGuardRight['width'],
+                'right' => $this->barcodeStructure['totalWidth'] + $this->config->marginLeft,
+                'center' => (int)((($endGuardRight['x'] + $endGuardRight['width']) + 
+                    ($this->barcodeStructure['totalWidth'] + $this->config->marginLeft)) / 2),
+            ],
+        ];
     }
 
     /**
      * 计算长竖线位置
-     * 
-     * 【长竖线位置说明】：
-     * EAN-13/ISBN（117模块）：起始符(11,13)、分隔符(56,58)、终止符(101,103)
-     * EAN-8（85模块）：起始符(7,9)、分隔符(40,42)
-     * UPC-A（113模块）：起始符(9,11)、分隔符(54,56)、终止符(99,101)
-     * 
-     * @param array<int> $barcodeData 条空模式数组
-     * @return array<int> 长竖线模块位置
      */
     protected function calculateLongBarPositions(array $barcodeData): array
     {
-        // 长竖线位置基于模块索引（0-based）
-        // 对应保护符（起始符/中间分隔符/终止符）中的条(1)位置
-        return match ($this->barcodeType) {
-            'EAN-13', 'ISBN' => [11, 13, 56, 58, 101, 103],  // 静区11+起始符/中间/终止符
-            'EAN-8' => [7, 9, 38, 40, 69, 71],               // 静区7+起始符/中间/终止符
-            'UPC-A' => [9, 11, 54, 56, 99, 101],             // 静区9+起始符/中间/终止符
-            default => [],
-        };
+        if (!empty($this->longBarPositions)) {
+            return $this->longBarPositions;
+        }
+        
+        return [];
     }
 
     /**
-     * 绘制文字
-     * 
-     * 根据条码类型选择不同的文字绘制方式
-     * 
-     * @param string $data 原始数据
+     * 绘制文字（动态定位）
      */
-    protected function drawText(string $data): void
+    protected function drawText(string $data, array $barcodeData): void
     {
         if ($this->image === null) {
             return;
@@ -367,34 +420,223 @@ class PngRenderer implements RendererInterface
 
         $textColor = $this->hexToColor($this->config->barColor);
         
-        switch ($this->barcodeType) {
+        // 判断是否为长竖线特征条码
+        if (!$this->barcodeStructure['hasLongBars']) {
+            // 无长竖线条码使用普通对齐方式
+            switch ($this->barcodeType) {
+                case 'Code 39':
+                    $this->drawAlignedText($this->removeDelimiters($data), $textColor);
+                    break;
+                default:
+                    $this->drawAlignedText($data, $textColor);
+                    break;
+            }
+            return;
+        }
+        
+        // 长竖线特征条码使用动态分段显示
+        $this->drawSegmentedText($data, $textColor);
+    }
+
+    /**
+     * 分段显示文字（核心方法）
+     * 
+     * 【动态计算逻辑】
+     * 1. 根据条码类型确定分段方式
+     * 2. 根据数据区域宽度动态计算字号
+     * 3. 每段数字在各自区域内均匀分布
+     * 4. 文字紧贴长竖线底部
+     */
+    protected function drawSegmentedText(string $data, int $textColor): void
+    {
+        $regions = $this->barcodeStructure['regions'] ?? null;
+        if ($regions === null) {
+            $this->drawAlignedText($data, $textColor);
+            return;
+        }
+        
+        // 根据条码类型确定分段策略
+        $segments = $this->determineSegments($data);
+        if (empty($segments)) {
+            $this->drawAlignedText($data, $textColor);
+            return;
+        }
+        
+        // 计算动态参数
+        $this->calculateDynamicParameters($segments, $regions);
+        
+        // 文字Y位置：长竖线底部下方
+        $barY = $this->config->marginTop;
+        $textY = $barY + (int)($this->config->height * $this->longBarHeightRatio) + $this->dynamicTextOffset;
+        
+        // 绘制每个分段
+        foreach ($segments as $segment) {
+            $this->drawSegment($segment, $regions, $textY, $textColor);
+        }
+    }
+
+    /**
+     * 确定分段策略
+     * 
+     * 【分段规则】
+     * - EAN-13: [第1位, 左6位, 右6位]
+     * - UPC-A: [第1位, 左5位, 右5位, 校验位]
+     * - EAN-8: [左4位, 右4位]
+     * - ISSN: 同EAN-13
+     */
+    protected function determineSegments(string $data): array
+    {
+        $length = strlen($data);
+        $type = $this->barcodeType;
+        
+        // 根据条码类型和数据长度确定分段
+        switch ($type) {
             case 'EAN-13':
-                $this->drawEAN13Text($data, $textColor);
+                if ($length === 13) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
                 break;
-            case 'ISBN':
-                $this->drawISBNText($data, $textColor);
-                break;
-            case 'EAN-8':
-                $this->drawEAN8Text($data, $textColor);
-                break;
+                
             case 'UPC-A':
-                $this->drawUPCAText($data, $textColor);
+                if ($length === 12) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 5), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 6, 5), 'region' => 'rightData', 'type' => 'multi'],
+                        ['text' => $data[11], 'region' => 'rightQuietZone', 'type' => 'single'],
+                    ];
+                }
                 break;
-            case 'Code 39':
-                // Code 39不显示*分隔符
-                $this->drawAlignedText($this->removeDelimiters($data), $textColor);
+                
+            case 'EAN-8':
+                if ($length === 8) {
+                    return [
+                        ['text' => substr($data, 0, 4), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 4, 4), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
                 break;
-            default:
-                $this->drawAlignedText($data, $textColor);
+                
+            case 'ISSN':
+                // ISSN基于EAN-13，但显示格式不同
+                if ($length === 13) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
                 break;
+        }
+        
+        return [];
+    }
+
+    /**
+     * 计算动态参数（字号、偏移等）
+     */
+    protected function calculateDynamicParameters(array $segments, array $regions): void
+    {
+        // 计算最小数据区域宽度
+        $minRegionWidth = PHP_INT_MAX;
+        foreach ($segments as $segment) {
+            if ($segment['type'] === 'multi') {
+                $regionName = $segment['region'];
+                if (isset($regions[$regionName])) {
+                    $width = $regions[$regionName]['right'] - $regions[$regionName]['left'];
+                    $minRegionWidth = min($minRegionWidth, $width);
+                }
+            }
+        }
+        
+        // 根据最小区域宽度计算最大字号
+        // 每个数字需要一定宽度，根据区域宽度和数字数量计算
+        $baseFontSize = $this->config->fontSize;
+        
+        // 计算数据区域的平均宽度,用于更精确的字号调整
+        $avgRegionWidth = 0;
+        $multiCount = 0;
+        foreach ($segments as $segment) {
+            if ($segment['type'] === 'multi' && isset($regions[$segment['region']])) {
+                $region = $regions[$segment['region']];
+                $avgRegionWidth += ($region['right'] - $region['left']) / strlen($segment['text']);
+                $multiCount++;
+            }
+        }
+        
+        if ($multiCount > 0) {
+            $avgRegionWidth = $avgRegionWidth / $multiCount;
+            // 根据平均每个数字的宽度调整字号 (GD库字号范围1-5)
+            if ($avgRegionWidth < 6) {
+                $this->dynamicFontSize = max(2, $baseFontSize - 1);
+            } elseif ($avgRegionWidth > 10) {
+                $this->dynamicFontSize = min(5, $baseFontSize + 1);
+            } else {
+                $this->dynamicFontSize = $baseFontSize;
+            }
+        } else {
+            // 回退到基于总宽度的调整
+            $barcodeWidth = $this->barcodeStructure['totalWidth'] ?? 200;
+            if ($barcodeWidth < 150) {
+                $this->dynamicFontSize = max(3, $baseFontSize - 1);
+            } elseif ($barcodeWidth > 400) {
+                $this->dynamicFontSize = min(6, $baseFontSize + 1);
+            } else {
+                $this->dynamicFontSize = $baseFontSize;
+            }
+        }
+        
+        // 动态计算文本偏移（根据长竖线高度和字号）
+        $longBarHeight = $this->config->height * $this->longBarHeightRatio;
+        $normalHeight = $this->config->height;
+        $extraHeight = $longBarHeight - $normalHeight;
+        
+        // 偏移量基于额外高度和字号，确保文字不会太贴近长竖线
+        $fontBasedOffset = (int)($this->dynamicFontSize * 0.5);
+        $this->dynamicTextOffset = max(3, max($fontBasedOffset, (int)($extraHeight * 0.35)));
+    }
+
+    /**
+     * 绘制单个分段
+     */
+    protected function drawSegment(array $segment, array $regions, int $textY, int $textColor): void
+    {
+        $regionName = $segment['region'];
+        if (!isset($regions[$regionName])) {
+            return;
+        }
+        
+        $region = $regions[$regionName];
+        $text = $segment['text'];
+        $length = strlen($text);
+        
+        if ($length === 0) {
+            return;
+        }
+        
+        if ($segment['type'] === 'single' || $length === 1) {
+            // 单个数字：居中在区域内
+            $centerX = $region['center'] ?? (int)(($region['left'] + $region['right']) / 2);
+            $this->drawChar($text, $centerX, $textY, $textColor, $this->dynamicFontSize);
+        } else {
+            // 多个数字：在区域内均匀分布
+            $regionWidth = $region['right'] - $region['left'];
+            $spacing = $regionWidth / $length;
+            
+            for ($i = 0; $i < $length; $i++) {
+                // 每个数字的中心位置
+                $x = (int)($region['left'] + $spacing * $i + $spacing / 2);
+                $this->drawChar($text[$i], $x, $textY, $textColor, $this->dynamicFontSize);
+            }
         }
     }
 
     /**
      * 移除分隔符
-     * 
-     * @param string $data 原始数据
-     * @return string 移除*后的数据
      */
     protected function removeDelimiters(string $data): string
     {
@@ -402,14 +644,11 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 绘制对齐的文本（用于无长竖线的条码）
-     * 
-     * @param string $data      要显示的数据
-     * @param int    $textColor 文字颜色
+     * 绘制对齐的文本
      */
     protected function drawAlignedText(string $data, int $textColor): void
     {
-        $barY = $this->config->marginTop + ($this->enableBearerBar ? $this->bearerBarWidth : 0);
+        $barY = $this->config->marginTop;
         $y = $barY + $this->config->height + $this->config->textOffset + $this->config->fontSize;
         
         $imgWidth = imagesx($this->image);
@@ -432,205 +671,30 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 绘制EAN-13文字（GS1标准位置优化版）
-     * 
-     * 【EAN-13数字显示位置】：
-     * - 第1位数字：最左侧，静区左侧（约模块位置5-7），避免太靠左
-     * - 第2-7位数字：起始保护符和中间分隔符之间
-     * - 第8-13位数字：中间分隔符和终止保护符之间
-     * 
-     * 【优化点】：
-     * - 第1位数字使用较大偏移，避免与图像左边缘重叠
-     * - 数字之间间隔均匀（每7模块一个数字）
-     * - 文字位置在长竖线下方，避免重叠
-     * 
-     * @param string $data      完整13位数据
-     * @param int    $textColor 文字颜色
-     */
-    protected function drawEAN13Text(string $data, int $textColor): void
-    {
-        if (strlen($data) !== 13) {
-            $this->drawAlignedText($data, $textColor);
-            return;
-        }
-
-        $firstDigit = $data[0];
-        $leftDigits = substr($data, 1, 6);
-        $rightDigits = substr($data, 7, 6);
-
-        $barY = $this->config->marginTop + ($this->enableBearerBar ? $this->bearerBarWidth : 0);
-        // 增加文字与长竖线之间的距离，避免重叠
-        $textY = $barY + $this->config->height + $this->config->textOffset + 2;
-
-        // 第1位数字（最左侧）- 显示在起始保护符左侧静区中
-        // 优化：使用较大偏移(9模块)，避免太靠左或重叠
-        $firstX = $this->config->marginLeft + (int)(9 * $this->config->width);
-        $this->drawChar($firstDigit, $firstX, $textY, $textColor);
-
-        // 左侧6位数字（第2-7位）
-        // 起始位置：静区11 + 起始符3 + 模块中心偏移(3.5) = 模块17.5
-        // 每个数字占7个模块，居中显示
-        $leftStart = $this->config->marginLeft + (int)(17.5 * $this->config->width);
-        for ($i = 0; $i < 6; $i++) {
-            $x = $leftStart + $i * 7 * $this->config->width;
-            $this->drawChar($leftDigits[$i], $x, $textY, $textColor);
-        }
-
-        // 右侧6位数字（第8-13位）
-        // 起始位置：静区11 + 起始符3 + 左侧42 + 分隔符5 + 偏移(3.5) = 模块64.5
-        $rightStart = $this->config->marginLeft + (int)(64.5 * $this->config->width);
-        for ($i = 0; $i < 6; $i++) {
-            $x = $rightStart + $i * 7 * $this->config->width;
-            $this->drawChar($rightDigits[$i], $x, $textY, $textColor);
-        }
-    }
-
-    /**
-     * 绘制ISBN文字
-     * 
-     * ISBN与EAN-13数字显示位置相同
-     * 但通常显示格式化的ISBN（带分隔符）
-     * 
-     * @param string $data      完整13位ISBN
-     * @param int    $textColor 文字颜色
-     */
-    protected function drawISBNText(string $data, int $textColor): void
-    {
-        // ISBN与EAN-13数字显示位置相同
-        $this->drawEAN13Text($data, $textColor);
-    }
-
-    /**
-     * 绘制EAN-8文字（GS1标准位置优化版）
-     * 
-     * 【EAN-8数字显示位置】：
-     * - 第1-4位数字：起始保护符和中间分隔符之间
-     * - 第5-8位数字：中间分隔符和终止保护符之间
-     * 
-     * 【优化点】：
-     * - 数字位置与条码区域精确对齐
-     * - 增加文字与条码间距，避免与长竖线重叠
-     * 
-     * @param string $data      完整8位数据
-     * @param int    $textColor 文字颜色
-     */
-    protected function drawEAN8Text(string $data, int $textColor): void
-    {
-        if (strlen($data) !== 8) {
-            $this->drawAlignedText($data, $textColor);
-            return;
-        }
-
-        $leftDigits = substr($data, 0, 4);
-        $rightDigits = substr($data, 4, 4);
-
-        $barY = $this->config->marginTop + ($this->enableBearerBar ? $this->bearerBarWidth : 0);
-        // 增加文字与长竖线之间的距离
-        $textY = $barY + $this->config->height + $this->config->textOffset + 2;
-
-        // 左侧4位数字
-        // 起始位置：静区7 + 起始符3 + 模块中心偏移(3.5) = 模块13.5
-        $leftStart = $this->config->marginLeft + (int)(13.5 * $this->config->width);
-        for ($i = 0; $i < 4; $i++) {
-            $x = $leftStart + $i * 7 * $this->config->width;
-            $this->drawChar($leftDigits[$i], $x, $textY, $textColor);
-        }
-
-        // 右侧4位数字
-        // 起始位置：静区7 + 起始符3 + 左侧28 + 分隔符5 + 偏移(3.5) = 模块46.5
-        $rightStart = $this->config->marginLeft + (int)(46.5 * $this->config->width);
-        for ($i = 0; $i < 4; $i++) {
-            $x = $rightStart + $i * 7 * $this->config->width;
-            $this->drawChar($rightDigits[$i], $x, $textY, $textColor);
-        }
-    }
-
-    /**
-     * 绘制UPC-A文字（GS1标准位置优化版）
-     * 
-     * 【UPC-A数字显示位置】：
-     * - 第1位数字（系统字符）：最左侧，静区左侧
-     * - 第2-6位数字（厂商代码）：起始保护符和中间分隔符之间
-     * - 第7-11位数字（产品代码）：中间分隔符和终止保护符之间
-     * - 第12位数字（校验位）：最右侧，静区右侧
-     * 
-     * 【优化点】：
-     * - 系统字符位置优化，避免太靠左
-     * - 校验位位置优化，避免太靠右
-     * - 增加文字与条码间距，避免与长竖线重叠
-     * 
-     * @param string $data      完整12位数据
-     * @param int    $textColor 文字颜色
-     */
-    protected function drawUPCAText(string $data, int $textColor): void
-    {
-        if (strlen($data) !== 12) {
-            $this->drawAlignedText($data, $textColor);
-            return;
-        }
-
-        $numberSystem = $data[0];
-        $manufacturer = substr($data, 1, 5);
-        $product = substr($data, 6, 5);
-        $checkDigit = $data[11];
-
-        $barY = $this->config->marginTop + ($this->enableBearerBar ? $this->bearerBarWidth : 0);
-        // 增加文字与长竖线之间的距离
-        $textY = $barY + $this->config->height + $this->config->textOffset + 2;
-
-        // 系统字符（第1位）- 优化位置避免太靠左
-        $firstX = $this->config->marginLeft + (int)(7 * $this->config->width);
-        $this->drawChar($numberSystem, $firstX, $textY, $textColor);
-
-        // 厂商代码（第2-6位）
-        // 起始位置：静区9 + 起始符3 + 模块中心偏移(3.5) = 模块15.5
-        $leftStart = $this->config->marginLeft + (int)(15.5 * $this->config->width);
-        for ($i = 0; $i < 5; $i++) {
-            $x = $leftStart + $i * 7 * $this->config->width;
-            $this->drawChar($manufacturer[$i], $x, $textY, $textColor);
-        }
-
-        // 产品代码（第7-11位）
-        // 起始位置：静区9 + 起始符3 + 左侧35 + 分隔符5 + 偏移(3.5) = 模块57.5
-        $rightStart = $this->config->marginLeft + (int)(57.5 * $this->config->width);
-        for ($i = 0; $i < 5; $i++) {
-            $x = $rightStart + $i * 7 * $this->config->width;
-            $this->drawChar($product[$i], $x, $textY, $textColor);
-        }
-
-        // 校验位（第12位）- 优化位置避免太靠右
-        // 位置：静区9 + 条码95 + 静区偏移(7) = 模块111
-        $checkX = $this->config->marginLeft + (int)(103 * $this->config->width);
-        $this->drawChar($checkDigit, $checkX, $textY, $textColor);
-    }
-
-    /**
      * 绘制单个字符
-     * 
-     * @param string $char      要绘制的字符
-     * @param int    $x         X坐标
-     * @param int    $y         Y坐标
-     * @param int    $textColor 文字颜色
      */
-    protected function drawChar(string $char, int $x, int $y, int $textColor): void
+    protected function drawChar(string $char, int $x, int $y, int $textColor, int $fontSize = 5): void
     {
         if ($this->image === null) {
             return;
         }
 
-        // 居中显示字符
-        $charWidth = imagefontwidth(5);
+        $charWidth = imagefontwidth($fontSize);
+        $charHeight = imagefontheight($fontSize);
+        
+        // 居中显示 - 优化定位精度
         $centeredX = $x - (int)($charWidth / 2);
-        imagestring($this->image, 5, $centeredX, $y, $char, $textColor);
+        
+        // 确保不超出图像边界
+        $imgWidth = imagesx($this->image);
+        $centeredX = max(0, min($centeredX, $imgWidth - $charWidth));
+        
+        // 使用 imagestring 确保字符清晰显示
+        imagestring($this->image, $fontSize, $centeredX, $y - $charHeight + 3, $char, $textColor);
     }
 
     /**
      * 绘制渐变条
-     * 
-     * @param int $x      X坐标
-     * @param int $y      Y坐标
-     * @param int $width  宽度
-     * @param int $height 高度
      */
     protected function drawGradientBar(int $x, int $y, int $width, int $height): void
     {
@@ -650,13 +714,6 @@ class PngRenderer implements RendererInterface
 
     /**
      * 绘制圆角矩形
-     * 
-     * @param int $x      X坐标
-     * @param int $y      Y坐标
-     * @param int $width  宽度
-     * @param int $height 高度
-     * @param int $radius 圆角半径
-     * @param int $color   颜色
      */
     protected function drawRoundedRect(int $x, int $y, int $width, int $height, int $radius, int $color): void
     {
@@ -670,7 +727,23 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 绘制水印
+     * 启用Bearer Bar（ITF-14上下边框）- 已禁用
+     */
+    public function enableBearerBar(int $width = 2): self
+    {
+        return $this;
+    }
+
+    /**
+     * 禁用Bearer Bar
+     */
+    public function disableBearerBar(): self
+    {
+        return $this;
+    }
+
+    /**
+     * 绘制水印（增强版，支持旋转和斜向平铺）
      */
     protected function drawWatermark(): void
     {
@@ -681,24 +754,121 @@ class PngRenderer implements RendererInterface
         $width = imagesx($this->image);
         $height = imagesy($this->image);
         
-        $opacity = (int)(127 * (1 - $this->watermarkOpacity / 100));
-        $watermarkColor = imagecolorallocatealpha($this->image, 128, 128, 128, $opacity);
+        // 解析水印颜色
+        $rgb = $this->parseColor($this->watermarkColor);
         
-        $fontSize = 5;
+        // 计算透明度（GD库alpha值：0不透明，127完全透明）
+        $alpha = (int)(127 * (1 - $this->watermarkOpacity / 100));
+        $watermarkColor = imagecolorallocatealpha($this->image, $rgb['r'], $rgb['g'], $rgb['b'], $alpha);
+        
+        $fontSize = $this->watermarkFontSize;
         $textWidth = imagefontwidth($fontSize) * strlen($this->watermarkText);
         $textHeight = imagefontheight($fontSize);
         
-        $x = (int)(($width - $textWidth) / 2);
-        $y = (int)(($height - $textHeight) / 2);
+        // 如果角度为0，直接绘制在中心
+        if ($this->watermarkAngle === 0) {
+            $x = (int)(($width - $textWidth) / 2);
+            $y = (int)(($height - $textHeight) / 2);
+            imagestring($this->image, $fontSize, $x, $y, $this->watermarkText, $watermarkColor);
+        } else {
+            // 有旋转角度，绘制斜向平铺的水印
+            $this->drawRotatedWatermark($width, $height, $watermarkColor);
+        }
+    }
+    
+    /**
+     * 绘制旋转和平铺的水印
+     */
+    protected function drawRotatedWatermark(int $imgWidth, int $imgHeight, int $color): void
+    {
+        if ($this->image === null || $this->watermarkText === null) {
+            return;
+        }
+
+        // 计算水印间距（根据字号调整）
+        $fontSize = $this->watermarkFontSize;
+        $textWidth = imagefontwidth($fontSize) * strlen($this->watermarkText);
+        $textHeight = imagefontheight($fontSize);
         
-        imagestring($this->image, $fontSize, $x, $y, $this->watermarkText, $watermarkColor);
+        // 斜向水印的间距（水平和垂直）
+        $spacingX = $textWidth + 60;  // 水平间距
+        $spacingY = $textHeight + 40; // 垂直间距
+        
+        // 角度转换为弧度
+        $angleRad = deg2rad($this->watermarkAngle);
+        
+        // 扩大绘制范围，确保旋转后覆盖整个图像
+        $diagonal = (int)sqrt($imgWidth * $imgWidth + $imgHeight * $imgHeight);
+        $startX = -$diagonal;
+        $startY = -$diagonal;
+        $endX = $diagonal + $imgWidth;
+        $endY = $diagonal + $imgHeight;
+        
+        // 斜向平铺水印
+        for ($row = $startY; $row < $endY; $row += $spacingY) {
+            for ($col = $startX; $col < $endX; $col += $spacingX) {
+                // 计算旋转后的位置
+                $x = (int)($col * cos($angleRad) - $row * sin($angleRad) + $imgWidth / 2);
+                $y = (int)($col * sin($angleRad) + $row * cos($angleRad) + $imgHeight / 2);
+                
+                // 只绘制在图像范围内的水印
+                if ($x >= -$textWidth && $x <= $imgWidth && $y >= -$textHeight && $y <= $imgHeight) {
+                    // 使用 imagettftext 需要字体文件，这里用旋转图像的方式
+                    // 创建临时图像用于旋转
+                    $tempImg = imagecreatetruecolor($textWidth + 10, $textHeight + 10);
+                    imagesavealpha($tempImg, true);
+                    $transparent = imagecolorallocatealpha($tempImg, 255, 255, 255, 127);
+                    imagefill($tempImg, 0, 0, $transparent);
+                    
+                    // 在临时图像上绘制文本
+                    $tempColor = imagecolorallocatealpha($tempImg, 
+                        ($color >> 16) & 0xFF, 
+                        ($color >> 8) & 0xFF, 
+                        $color & 0xFF, 
+                        ($color >> 24) & 0x7F
+                    );
+                    imagestring($tempImg, $fontSize, 5, 5, $this->watermarkText, $tempColor);
+                    
+                    // 旋转临时图像
+                    $rotatedImg = imagerotate($tempImg, -$this->watermarkAngle, $transparent);
+                    
+                    // 合并到主图像
+                    $rotatedWidth = imagesx($rotatedImg);
+                    $rotatedHeight = imagesy($rotatedImg);
+                    $destX = $x - (int)($rotatedWidth / 2);
+                    $destY = $y - (int)($rotatedHeight / 2);
+                    
+                    imagecopy($this->image, $rotatedImg, $destX, $destY, 0, 0, $rotatedWidth, $rotatedHeight);
+                    
+                    // 释放临时资源
+                    imagedestroy($tempImg);
+                    imagedestroy($rotatedImg);
+                }
+            }
+        }
+    }
+    
+    /**
+     * 解析颜色字符串
+     */
+    protected function parseColor(string $color): array
+    {
+        $color = ltrim($color, '#');
+        
+        if (strlen($color) === 6) {
+            return [
+                'r' => hexdec(substr($color, 0, 2)),
+                'g' => hexdec(substr($color, 2, 2)),
+                'b' => hexdec(substr($color, 4, 2)),
+            ];
+        }
+        
+        // 默认灰色
+        return ['r' => 204, 'g' => 204, 'b' => 204];
     }
 
     /**
      * 输出PNG数据
-     * 
-     * @return string PNG二进制数据
-     * @throws RenderException 生成失败时抛出
      */
     protected function outputPng(): string
     {
@@ -722,9 +892,6 @@ class PngRenderer implements RendererInterface
 
     /**
      * 十六进制颜色转GD颜色
-     * 
-     * @param string $hex 十六进制颜色值
-     * @return int GD颜色索引
      */
     protected function hexToColor(string $hex): int
     {
@@ -747,9 +914,6 @@ class PngRenderer implements RendererInterface
 
     /**
      * 十六进制颜色转RGB数组
-     * 
-     * @param string $hex 十六进制颜色值
-     * @return array<int> RGB数组 [R, G, B]
      */
     protected function hexToRgb(string $hex): array
     {
@@ -767,48 +931,35 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 验证颜色对比度是否足够（WCAG标准）
-     * 
-     * @param string $bgColor 背景色
-     * @param string $barColor 条码色
-     * @return bool 对比度足够返回true
+     * 验证颜色对比度
      */
     protected function validateContrast(string $bgColor, string $barColor): bool
     {
-        // 计算相对亮度
         $bgLuminance = $this->getRelativeLuminance($bgColor);
         $barLuminance = $this->getRelativeLuminance($barColor);
         
-        // 计算对比度
         $lightest = max($bgLuminance, $barLuminance);
         $darkest = min($bgLuminance, $barLuminance);
         $contrast = ($lightest + 0.05) / ($darkest + 0.05);
         
-        // 条形码要求对比度至少为3:1
         return $contrast >= 3.0;
     }
 
     /**
-     * 获取颜色的相对亮度（WCAG标准）
-     * 
-     * @param string $color 十六进制颜色
-     * @return float 相对亮度（0-1）
+     * 获取颜色的相对亮度
      */
     protected function getRelativeLuminance(string $color): float
     {
         $rgb = $this->hexToRgb($color);
         
-        // 转换为sRGB
         $rsRGB = $rgb[0] / 255;
         $gsRGB = $rgb[1] / 255;
         $bsRGB = $rgb[2] / 255;
         
-        // 应用gamma校正
         $r = $rsRGB <= 0.03928 ? $rsRGB / 12.92 : pow(($rsRGB + 0.055) / 1.055, 2.4);
         $g = $gsRGB <= 0.03928 ? $gsRGB / 12.92 : pow(($gsRGB + 0.055) / 1.055, 2.4);
         $b = $bsRGB <= 0.03928 ? $bsRGB / 12.92 : pow(($bsRGB + 0.055) / 1.055, 2.4);
         
-        // 计算相对亮度
         return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
     }
 }

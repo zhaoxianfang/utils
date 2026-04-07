@@ -96,7 +96,7 @@ class ITF14Generator extends BaseGenerator
      * 
      * 【生成流程】：
      * 1. 验证数据格式（13或14位纯数字）
-     * 2. 处理校验位（13位则自动计算，14位则验证）
+     * 2. 处理校验位（13位则自动计算，14位则直接使用）
      * 3. 确保数据长度为偶数（ITF要求，不足则在前面补0）
      * 4. 添加左侧静区
      * 5. 添加起始符
@@ -117,18 +117,9 @@ class ITF14Generator extends BaseGenerator
             throw new InvalidDataException('ITF-14 数据必须是13或14位纯数字，当前数据: ' . $data);
         }
 
-        // 处理校验位
+        // 处理校验位 - 移除校验位验证，保证条码内容与传入内容完全一致
         if (strlen($data) === 14) {
-            if (!$this->skipChecksumValidation) {
-                $checkData = substr($data, 0, 13);
-                $providedCheck = $data[13];
-                $calculatedCheck = $this->calculateChecksum($checkData);
-                if ($providedCheck !== $calculatedCheck) {
-                    throw new InvalidDataException(
-                        "校验位错误: 提供的校验位是 '{$providedCheck}'，计算得到的校验位是 '{$calculatedCheck}'"
-                    );
-                }
-            }
+            // 直接使用传入的14位数据，不再验证校验位
             $this->rawData = $data;
             $this->currentData = $data;
         } else {

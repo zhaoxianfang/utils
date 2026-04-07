@@ -299,4 +299,261 @@ class QrCodeHelper
 
         return $result;
     }
+
+    /**
+     * 生成WiFi配置二维码
+     *
+     * @param string $ssid WiFi名称
+     * @param string $password WiFi密码
+     * @param string $encryption 加密方式（WPA, WEP, nopass）
+     * @param bool $hidden 是否隐藏网络
+     * @return string WiFi配置字符串
+     */
+    public static function generateWifiString(string $ssid, string $password = '', string $encryption = 'WPA', bool $hidden = false): string
+    {
+        $hiddenStr = $hidden ? 'H:true' : '';
+        return sprintf('WIFI:T:%s;S:%s;P:%s;%s;', $encryption, $ssid, $password, $hiddenStr);
+    }
+
+    /**
+     * 生成VCard名片字符串
+     *
+     * @param array $data 名片数据
+     * @return string VCard字符串
+     */
+    public static function generateVCardString(array $data): string
+    {
+        $vcard = "BEGIN:VCARD\nVERSION:3.0\n";
+        
+        if (isset($data['name'])) {
+            $vcard .= 'FN:' . $data['name'] . "\n";
+        }
+        if (isset($data['title'])) {
+            $vcard .= 'TITLE:' . $data['title'] . "\n";
+        }
+        if (isset($data['phone'])) {
+            $vcard .= 'TEL;TYPE=CELL:' . $data['phone'] . "\n";
+        }
+        if (isset($data['email'])) {
+            $vcard .= 'EMAIL:' . $data['email'] . "\n";
+        }
+        if (isset($data['url'])) {
+            $vcard .= 'URL:' . $data['url'] . "\n";
+        }
+        if (isset($data['address'])) {
+            $vcard .= 'ADR:' . $data['address'] . "\n";
+        }
+        if (isset($data['company'])) {
+            $vcard .= 'ORG:' . $data['company'] . "\n";
+        }
+        
+        $vcard .= "END:VCARD";
+        return $vcard;
+    }
+
+    /**
+     * 生成邮件二维码字符串
+     *
+     * @param string $email 邮箱地址
+     * @param string $subject 邮件主题（可选）
+     * @param string $body 邮件正文（可选）
+     * @return string 邮件二维码字符串
+     */
+    public static function generateEmailString(string $email, string $subject = '', string $body = ''): string
+    {
+        $mailString = 'mailto:' . $email;
+        if ($subject !== '' || $body !== '') {
+            $params = [];
+            if ($subject !== '') {
+                $params[] = 'subject=' . rawurlencode($subject);
+            }
+            if ($body !== '') {
+                $params[] = 'body=' . rawurlencode($body);
+            }
+            $mailString .= '?' . implode('&', $params);
+        }
+        return $mailString;
+    }
+
+    /**
+     * 生成短信二维码字符串
+     *
+     * @param string $phone 电话号码
+     * @param string $message 短信内容
+     * @return string 短信二维码字符串
+     */
+    public static function generateSmsString(string $phone, string $message = ''): string
+    {
+        $smsString = 'smsto:' . $phone;
+        if ($message !== '') {
+            $smsString .= ':' . rawurlencode($message);
+        }
+        return $smsString;
+    }
+
+    /**
+     * 生成电话号码二维码字符串
+     *
+     * @param string $phone 电话号码
+     * @return string 电话二维码字符串
+     */
+    public static function generatePhoneString(string $phone): string
+    {
+        return 'tel:' . $phone;
+    }
+
+    /**
+     * 生成地理位置二维码字符串
+     *
+     * @param float $latitude 纬度
+     * @param float $longitude 经度
+     * @param string $label 位置标签（可选）
+     * @return string 地理位置二维码字符串
+     */
+    public static function generateGeoString(float $latitude, float $longitude, string $label = ''): string
+    {
+        $geoString = sprintf('geo:%.6f,%.6f', $latitude, $longitude);
+        if ($label !== '') {
+            $geoString .= '?' . rawurlencode($label);
+        }
+        return $geoString;
+    }
+
+    /**
+     * 生成日历事件二维码字符串
+     *
+     * @param string $title 事件标题
+     * @param string $start 开始时间（格式：YYYYMMDDTHHMMSS）
+     * @param string $end 结束时间（格式：YYYYMMDDTHHMMSS）
+     * @param string $location 地点
+     * @param string $description 描述
+     * @return string 日历事件二维码字符串
+     */
+    public static function generateEventString(string $title, string $start, string $end = '', string $location = '', string $description = ''): string
+    {
+        $vevent = "BEGIN:VEVENT\nSUMMARY:$title\nDTSTART:$start\n";
+        if ($end !== '') {
+            $vevent .= "DTEND:$end\n";
+        }
+        if ($location !== '') {
+            $vevent .= "LOCATION:$location\n";
+        }
+        if ($description !== '') {
+            $vevent .= "DESCRIPTION:$description\n";
+        }
+        $vevent .= "END:VEVENT";
+        return $vevent;
+    }
+
+    /**
+     * 分析二维码数据并返回推荐配置
+     *
+     * @param string $data 二维码数据
+     * @return array 推荐配置
+     */
+    public static function analyzeData(string $data): array
+    {
+        $result = [
+            'type' => 'text',
+            'length' => strlen($data),
+            'recommended' => [
+                'errorCorrectionLevel' => 'M',
+                'size' => 300,
+                'margin' => 4,
+            ],
+        ];
+
+        // 检测数据类型
+        if (filter_var($data, FILTER_VALIDATE_URL)) {
+            $result['type'] = 'url';
+        } elseif (str_starts_with($data, 'WIFI:')) {
+            $result['type'] = 'wifi';
+        } elseif (str_starts_with($data, 'BEGIN:VCARD')) {
+            $result['type'] = 'vcard';
+        } elseif (str_starts_with($data, 'BEGIN:VEVENT')) {
+            $result['type'] = 'event';
+        } elseif (str_starts_with($data, 'mailto:')) {
+            $result['type'] = 'email';
+        } elseif (str_starts_with($data, 'tel:')) {
+            $result['type'] = 'phone';
+        } elseif (str_starts_with($data, 'smsto:')) {
+            $result['type'] = 'sms';
+        } elseif (preg_match('/^geo:/', $data)) {
+            $result['type'] = 'geo';
+        }
+
+        // 根据数据长度推荐配置
+        $length = strlen($data);
+        if ($length > 1000) {
+            $result['recommended']['errorCorrectionLevel'] = 'L';
+            $result['recommended']['size'] = 500;
+        } elseif ($length > 500) {
+            $result['recommended']['errorCorrectionLevel'] = 'M';
+            $result['recommended']['size'] = 400;
+        }
+
+        return $result;
+    }
+
+    /**
+     * 生成SVG格式的二维码（矢量图）
+     *
+     * @param string $data 二维码数据
+     * @param int $size 二维码尺寸
+     * @param array $options 其他选项
+     * @return string SVG内容
+     */
+    public static function generateSvg(string $data, int $size = 300, array $options = []): string
+    {
+        try {
+            $qrCode = QrCode::make($data)->size($size);
+
+            // 应用选项
+            foreach ($options as $key => $value) {
+                if (method_exists($qrCode, $key)) {
+                    $qrCode = $qrCode->$key($value);
+                }
+            }
+
+            // 获取二维码矩阵
+            $image = $qrCode->render();
+
+            // 生成SVG
+            $width = imagesx($image);
+            $height = imagesy($image);
+
+            $svg = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+            $svg .= '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="' . $size . '" height="' . $size . '" viewBox="0 0 ' . $width . ' ' . $height . '">' . "\n";
+            $svg .= '  <rect width="100%" height="100%" fill="#FFFFFF"/>' . "\n";
+
+            // 获取模块信息
+            $info = $qrCode->getInfo();
+            $moduleCount = (int)(($size - $qrCode->getMargin() * 2) / ($info['version'] > 0 ? 4 : 1));
+            $moduleSize = (int)($width / ($moduleCount + $qrCode->getMargin() * 2));
+
+            // 获取矩阵并绘制
+            // 注意：这里简化处理，实际应用中需要从二维码编码器获取矩阵
+            for ($y = 0; $y < $height; $y += $moduleSize) {
+                for ($x = 0; $x < $width; $x += $moduleSize) {
+                    $color = imagecolorat($image, $x, $y);
+                    if ($color !== false) {
+                        $r = ($color >> 16) & 0xFF;
+                        $g = ($color >> 8) & 0xFF;
+                        $b = $color & 0xFF;
+                        
+                        if ($r < 128 && $g < 128 && $b < 128) {
+                            $svg .= '  <rect x="' . $x . '" y="' . $y . '" width="' . $moduleSize . '" height="' . $moduleSize . '" fill="#000000"/>' . "\n";
+                        }
+                    }
+                }
+            }
+
+            $svg .= '</svg>';
+
+            imagedestroy($image);
+            return $svg;
+        } catch (\Exception $e) {
+            throw new Exception('生成SVG失败: ' . $e->getMessage());
+        }
+    }
 }

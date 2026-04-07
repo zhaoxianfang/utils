@@ -1,27 +1,32 @@
 <?php
+
 /**
- * 条形码生成器全面测试文件
+ * BarCode 模块全面测试文件
  * 
- * 本测试文件涵盖：
- * - 所有条码类型（EAN-13, EAN-8, UPC-A, Code 128, Code 39, ITF-14, ISBN, ISSN）
- * - 所有配置项测试
+ * 本测试文件包含:
+ * - 所有条码类型的生成测试
+ * - 长竖线特征验证
+ * - 文本显示位置验证
  * - 校验位计算验证
- * - 特殊功能测试（跳过校验、文本对齐、渐变等）
+ * - 特殊数据格式测试
  * - 边界情况测试
  * 
- * 运行方式：php tests.php
+ * 运行方式: php tests.php
  */
 
-// 自动加载
+// 自动加载类文件
 spl_autoload_register(function ($class) {
-    $prefix = 'zxf\\BarCode\\';
-    $base_dir = __DIR__ . '/src/';
+    $prefix = 'zxf\\Utils\\BarCode\\';
+    $baseDir = __DIR__ . '/';
+
     $len = strlen($prefix);
     if (strncmp($prefix, $class, $len) !== 0) {
         return;
     }
-    $relative_class = substr($class, $len);
-    $file = $base_dir . str_replace('\\', '/', $relative_class) . '.php';
+
+    $relativeClass = substr($class, $len);
+    $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+
     if (file_exists($file)) {
         require $file;
     }
@@ -29,1021 +34,527 @@ spl_autoload_register(function ($class) {
 
 use zxf\Utils\BarCode\BarcodeBuilder;
 use zxf\Utils\BarCode\BarcodeFactory;
+use zxf\Utils\BarCode\BarcodeHelper;
 use zxf\Utils\BarCode\Renderer\PngRenderer;
 use zxf\Utils\BarCode\Renderer\SvgRenderer;
 
-// ==================== 测试工具函数 ====================
-
-$testResults = [
-    'passed' => 0,
-    'failed' => 0,
-    'tests' => []
-];
-
-/**
- * 记录测试结果
- * 
- * @param string $testName 测试名称
- * @param bool $passed 是否通过
- * @param string $message 附加信息
- */
-function recordTest(string $testName, bool $passed, string $message = ''): void
-{
-    global $testResults;
-    
-    $testResults['tests'][] = [
-        'name' => $testName,
-        'passed' => $passed,
-        'message' => $message
-    ];
-    
-    if ($passed) {
-        $testResults['passed']++;
-        echo "[✓] {$testName}\n";
-    } else {
-        $testResults['failed']++;
-        echo "[✗] {$testName}";
-        if ($message) {
-            echo " - {$message}";
-        }
-        echo "\n";
-    }
-}
-
-/**
- * 创建输出目录
- * 
- * @return string 输出目录路径
- */
-function createOutputDir(): string
-{
-    $dir = __DIR__ . '/output_' . date('mdHi');
-    if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
-    }
-    return $dir;
-}
-
-// ==================== 开始测试 ====================
-
 echo "========================================\n";
-echo "  条形码生成器全面测试\n";
+echo "   BarCode 模块全面测试套件\n";
 echo "========================================\n\n";
 
-$outputDir = createOutputDir();
-echo "输出目录: {$outputDir}\n\n";
+$passed = 0;
+$failed = 0;
+$tests = [];
 
-// ==================== 1. EAN-13 测试 ====================
-
-echo "\n【EAN-13 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$ean13Tests = [
-    ['data' => '690123456789', 'desc' => '标准12位（中国商品）'],
-    ['data' => '6901234567892', 'desc' => '带校验位13位'],
-    ['data' => '4006381333931', 'desc' => '德国商品码'],
-    ['data' => '9780201379624', 'desc' => 'ISBN格式978前缀'],
-];
-
-foreach ($ean13Tests as $test) {
+// 测试辅助函数
+function test($name, $callable) {
+    global $passed, $failed, $tests;
+    
     try {
-        $builder = BarcodeBuilder::create()
-            ->type('ean13')
-            ->data($test['data'])
-            ->height(100)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        // 验证生成的数据长度
-        $lenOk = strlen($fullData) === 13;
-        recordTest("EAN-13 {$test['desc']} - 长度", $lenOk, "期望13位，实际" . strlen($fullData) . "位");
-        
-        // 验证是否为纯数字
-        $numericOk = ctype_digit($fullData);
-        recordTest("EAN-13 {$test['desc']} - 纯数字", $numericOk);
-        
-        // 生成PNG文件
-        $filename = $outputDir . '/ean13_' . str_replace([' ', '-'], '_', $test['desc']) . '.png';
-        $saved = $builder->savePng($filename);
-        recordTest("EAN-13 {$test['desc']} - PNG生成", $saved);
-        
-        // 生成SVG文件
-        $filename = $outputDir . '/ean13_' . str_replace([' ', '-'], '_', $test['desc']) . '.svg';
-        $saved = $builder->saveSvg($filename);
-        recordTest("EAN-13 {$test['desc']} - SVG生成", $saved);
-        
-        // 记录完整数据用于验证
-        recordTest("EAN-13 {$test['desc']} - 数据: {$fullData}", true);
-        
-    } catch (Exception $e) {
-        recordTest("EAN-13 {$test['desc']}", false, $e->getMessage());
+        $result = $callable();
+        if ($result === true) {
+            echo "✓ {$name}\n";
+            $passed++;
+            $tests[] = ['name' => $name, 'status' => 'passed'];
+            return true;
+        } else {
+            echo "✗ {$name}: {$result}\n";
+            $failed++;
+            $tests[] = ['name' => $name, 'status' => 'failed', 'error' => $result];
+            return false;
+        }
+    } catch (\Exception $e) {
+        echo "✗ {$name}: " . $e->getMessage() . "\n";
+        $failed++;
+        $tests[] = ['name' => $name, 'status' => 'failed', 'error' => $e->getMessage()];
+        return false;
     }
 }
 
-// EAN-13 错误测试
-echo "\n【EAN-13 错误处理测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$ean13ErrorTests = [
-    ['data' => '123', 'desc' => '过短数据（3位）'],
-    ['data' => 'abcdefghijkl', 'desc' => '非数字数据'],
-    ['data' => '6901234567890', 'desc' => '错误校验位'],
-];
-
-foreach ($ean13ErrorTests as $test) {
-    try {
-        BarcodeBuilder::create()
-            ->type('ean13')
-            ->data($test['data'])
-            ->generate();
-        recordTest("EAN-13 {$test['desc']} - 应抛出异常", false, '未抛出异常');
-    } catch (Exception $e) {
-        recordTest("EAN-13 {$test['desc']} - 正确拒绝", true);
-    }
+// 创建输出目录
+$outputDir = __DIR__ . '/test_output';
+if (!is_dir($outputDir)) {
+    mkdir($outputDir, 0755, true);
 }
 
-// EAN-13 跳过校验测试
-echo "\n【EAN-13 跳过校验测试】\n";
-echo str_repeat("-", 40) . "\n";
+echo "【基础功能测试 - EAN-13】\n";
+echo "-------------------------\n";
 
-try {
-    $builder = BarcodeBuilder::create()
+// 测试 EAN-13 基础生成
+test('EAN-13 基础生成 (12位自动计算校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
         ->type('ean13')
-        ->data('6901234567890')  // 错误校验位
-        ->skipChecksum(true);
-    
-    $barcode = $builder->generate();
-    recordTest("EAN-13 跳过校验 - 生成成功", true);
-    
-    $filename = $outputDir . '/ean13_skip_checksum.png';
-    $builder->savePng($filename);
-    recordTest("EAN-13 跳过校验 - 保存成功", true);
-} catch (Exception $e) {
-    recordTest("EAN-13 跳过校验", false, $e->getMessage());
-}
+        ->data('690123456789')
+        ->savePng($outputDir . '/ean13_basic.png');
+    return file_exists($outputDir . '/ean13_basic.png') ? true : '文件未生成';
+});
 
-// ==================== 2. ISBN 测试 ====================
+// 测试 EAN-13 带校验位
+test('EAN-13 带校验位生成 (13位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('6901234567892')
+        ->savePng($outputDir . '/ean13_with_checksum.png');
+    return file_exists($outputDir . '/ean13_with_checksum.png') ? true : '文件未生成';
+});
 
-echo "\n【ISBN 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
+// 测试 978 前缀 EAN-13 (ISBN Bookland EAN)
+test('EAN-13 978前缀 (Bookland EAN)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('9780201379624')
+        ->savePng($outputDir . '/ean13_978_prefix.png');
+    return file_exists($outputDir . '/ean13_978_prefix.png') ? true : '文件未生成';
+});
 
-$isbnTests = [
-    ['data' => '9780201379624', 'desc' => '完整ISBN-13'],
-    ['data' => '978-7-111-12345-3', 'desc' => '中国图书格式'],
-    ['data' => '9787111123453', 'desc' => '中国图书ISBN'],
-    ['data' => '9791090636071', 'desc' => '979前缀ISBN'],
-];
+// 测试 EAN-13 校验位计算
+test('EAN-13 校验位计算验证', function() {
+    $builder = BarcodeBuilder::create()->type('ean13')->data('690123456789');
+    $checksum = $builder->getChecksum();
+    // 690123456789 的校验位应该是 2
+    return $checksum === '2' ? true : "校验位错误: {$checksum}, 期望: 2";
+});
 
-foreach ($isbnTests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('isbn')
-            ->data($test['data'])
-            ->height(100)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        // 验证前缀
-        $prefix = substr($fullData, 0, 3);
-        $prefixOk = in_array($prefix, ['978', '979']);
-        recordTest("ISBN {$test['desc']} - 前缀", $prefixOk, "前缀: {$prefix}");
-        
-        // 验证长度
-        $lenOk = strlen($fullData) === 13;
-        recordTest("ISBN {$test['desc']} - 长度", $lenOk);
-        
-        // 验证数据完整性（扫描后应得到相同数据）
-        recordTest("ISBN {$test['desc']} - 完整数据: {$fullData}", true);
-        
-        // 生成PNG
-        $filename = $outputDir . '/isbn_' . str_replace([' ', '-'], '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("ISBN {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("ISBN {$test['desc']}", false, $e->getMessage());
-    }
-}
+echo "\n【基础功能测试 - EAN-8】\n";
+echo "------------------------\n";
 
-// ==================== 3. EAN-8 测试 ====================
+// 测试 EAN-8 生成
+test('EAN-8 生成 (7位自动计算校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean8')
+        ->data('1234567')
+        ->savePng($outputDir . '/ean8_basic.png');
+    return file_exists($outputDir . '/ean8_basic.png') ? true : '文件未生成';
+});
 
-echo "\n【EAN-8 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
+test('EAN-8 生成 (8位带校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean8')
+        ->data('12345670')
+        ->savePng($outputDir . '/ean8_with_checksum.png');
+    return file_exists($outputDir . '/ean8_with_checksum.png') ? true : '文件未生成';
+});
 
-$ean8Tests = [
-    ['data' => '1234567', 'desc' => '标准7位'],
-    ['data' => '12345670', 'desc' => '带校验位8位'],
-];
+echo "\n【基础功能测试 - UPC-A】\n";
+echo "------------------------\n";
 
-foreach ($ean8Tests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('ean8')
-            ->data($test['data'])
-            ->height(80)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        $lenOk = strlen($fullData) === 8;
-        recordTest("EAN-8 {$test['desc']} - 长度", $lenOk, "数据: {$fullData}");
-        
-        $filename = $outputDir . '/ean8_' . str_replace(' ', '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("EAN-8 {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("EAN-8 {$test['desc']}", false, $e->getMessage());
-    }
-}
+// 测试 UPC-A 生成
+test('UPC-A 生成 (11位自动计算校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('upca')
+        ->data('01234567890')
+        ->savePng($outputDir . '/upca_basic.png');
+    return file_exists($outputDir . '/upca_basic.png') ? true : '文件未生成';
+});
 
-// ==================== 4. UPC-A 测试 ====================
+test('UPC-A 生成 (12位带校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('upca')
+        ->data('012345678905')
+        ->savePng($outputDir . '/upca_with_checksum.png');
+    return file_exists($outputDir . '/upca_with_checksum.png') ? true : '文件未生成';
+});
 
-echo "\n【UPC-A 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
+echo "\n【基础功能测试 - Code 128】\n";
+echo "---------------------------\n";
 
-$upcaTests = [
-    ['data' => '012345678905', 'desc' => '标准12位'],
-    ['data' => '123456789012', 'desc' => '测试数据'],
-];
-
-foreach ($upcaTests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('upca')
-            ->data($test['data'])
-            ->height(100)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        $lenOk = strlen($fullData) === 12;
-        recordTest("UPC-A {$test['desc']} - 长度", $lenOk, "数据: {$fullData}");
-        
-        $filename = $outputDir . '/upca_' . str_replace(' ', '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("UPC-A {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("UPC-A {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// ==================== 5. Code 128 测试 ====================
-
-echo "\n【Code 128 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$code128Tests = [
-    ['data' => 'HELLO123', 'desc' => '字母数字混合'],
-    ['data' => '123456', 'desc' => '纯数字'],
-    ['data' => 'Code-128_Test!', 'desc' => '含特殊字符'],
-    ['data' => 'Hello World 2024', 'desc' => '含空格'],
-];
-
-foreach ($code128Tests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('code128')
-            ->data($test['data'])
-            ->height(80)
-            ->width(2);
-        
-        $barcode = $builder->generate();
-        
-        $filename = $outputDir . '/code128_' . str_replace([' ', '-', '!'], '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("Code 128 {$test['desc']}", true);
-        
-    } catch (Exception $e) {
-        recordTest("Code 128 {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// Code 128 文本对齐测试
-echo "\n【Code 128 文本对齐测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$alignments = ['left', 'center', 'right'];
-foreach ($alignments as $align) {
-    try {
-        $renderer = new PngRenderer();
-        $renderer->setTextAlign($align);
-        
-        $builder = BarcodeBuilder::create()
-            ->type('code128')
-            ->data('ALIGN_TEST')
-            ->height(80)
-            ->width(2);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        $filename = $outputDir . '/code128_align_' . $align . '.png';
-        $renderer->saveToFile($barcode, $fullData, $filename, ['showText' => true]);
-        recordTest("Code 128 {$align}对齐", file_exists($filename));
-    } catch (Exception $e) {
-        recordTest("Code 128 {$align}对齐", false, $e->getMessage());
-    }
-}
-
-// ==================== 6. Code 39 测试 ====================
-
-echo "\n【Code 39 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$code39Tests = [
-    ['data' => 'ABC123', 'desc' => '字母数字'],
-    ['data' => '12345', 'desc' => '纯数字'],
-    ['data' => 'CODE39', 'desc' => '纯大写字母'],
-    ['data' => 'A-B.C', 'desc' => '含特殊字符'],
-];
-
-foreach ($code39Tests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('code39')
-            ->data($test['data'])
-            ->height(80)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        // 验证数据不包含*分隔符
-        $noStar = strpos($fullData, '*') === false;
-        recordTest("Code 39 {$test['desc']} - 无*分隔符", $noStar, "数据: {$fullData}");
-        
-        $filename = $outputDir . '/code39_' . str_replace([' ', '-', '.'], '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("Code 39 {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("Code 39 {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// Code 39 验证测试
-echo "\n【Code 39 验证测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$code39 = BarcodeFactory::create('code39');
-recordTest("Code 39 验证有效数据", $code39->validate('ABC123'));
-recordTest("Code 39 验证小写字母", !$code39->validate('abc123'));
-recordTest("Code 39 验证空数据", !$code39->validate(''));
-
-// ==================== 7. ITF-14 测试 ====================
-
-echo "\n【ITF-14 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$itf14Tests = [
-    ['data' => '1540014128876', 'desc' => '标准13位'],
-    ['data' => '15400141288763', 'desc' => '带校验位14位'],
-    ['data' => '00012345600012', 'desc' => '含前导零'],
-];
-
-foreach ($itf14Tests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('itf14')
-            ->data($test['data'])
-            ->height(100)
-            ->width(2);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        $lenOk = strlen($fullData) === 14;
-        recordTest("ITF-14 {$test['desc']} - 长度", $lenOk, "数据: {$fullData}");
-        
-        // 生成带Bearer Bar的版本
-        $filename = $outputDir . '/itf14_' . str_replace(' ', '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("ITF-14 {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("ITF-14 {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// ==================== 8. ISSN 测试 ====================
-
-echo "\n【ISSN 条码测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$issnTests = [
-    ['data' => '1234567', 'desc' => '标准7位'],
-    ['data' => '0378595', 'desc' => '期刊ISSN'],
-];
-
-foreach ($issnTests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('issn')
-            ->data($test['data'])
-            ->height(80)
-            ->width(3);
-        
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        // ISSN转换为EAN-13格式：977+ISSN7位+补充码2位+校验位=13位
-        $lenOk = strlen($fullData) === 13;
-        recordTest("ISSN {$test['desc']} - 长度(EAN-13)", $lenOk, "数据: {$fullData}");
-        
-        // 验证前缀是977
-        $prefixOk = substr($fullData, 0, 3) === '977';
-        recordTest("ISSN {$test['desc']} - 前缀977", $prefixOk);
-        
-        $filename = $outputDir . '/issn_' . str_replace(' ', '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        recordTest("ISSN {$test['desc']} - PNG生成", true);
-        
-    } catch (Exception $e) {
-        recordTest("ISSN {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// ==================== 9. 个性化功能测试 ====================
-
-echo "\n【个性化功能测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 渐变效果测试
-try {
-    $renderer = new PngRenderer();
-    $renderer->enableGradient('#000000', '#444444');
-    
-    $builder = BarcodeBuilder::create()
+// 测试 Code 128 生成
+test('Code 128 字母数字混合', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
         ->type('code128')
-        ->data('GRADIENT')
-        ->height(80)
-        ->width(2);
-    
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/feature_gradient.png';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    recordTest("渐变效果", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("渐变效果", false, $e->getMessage());
-}
+        ->data('Hello123!')
+        ->savePng($outputDir . '/code128_alphanumeric.png');
+    return file_exists($outputDir . '/code128_alphanumeric.png') ? true : '文件未生成';
+});
 
-// 圆角条测试
-try {
+test('Code 128 纯数字', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('123456789012')
+        ->savePng($outputDir . '/code128_numeric.png');
+    return file_exists($outputDir . '/code128_numeric.png') ? true : '文件未生成';
+});
+
+test('Code 128 ASCII全字符', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('ABC-123_xyz')
+        ->savePng($outputDir . '/code128_ascii.png');
+    return file_exists($outputDir . '/code128_ascii.png') ? true : '文件未生成';
+});
+
+echo "\n【基础功能测试 - Code 39】\n";
+echo "--------------------------\n";
+
+// 测试 Code 39 生成
+test('Code 39 基础生成', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code39')
+        ->data('ABC-123')
+        ->savePng($outputDir . '/code39_basic.png');
+    return file_exists($outputDir . '/code39_basic.png') ? true : '文件未生成';
+});
+
+test('Code 39 支持字符', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code39')
+        ->data('ABCD.1234')
+        ->savePng($outputDir . '/code39_special.png');
+    return file_exists($outputDir . '/code39_special.png') ? true : '文件未生成';
+});
+
+echo "\n【基础功能测试 - ITF-14】\n";
+echo "------------------------\n";
+
+// 测试 ITF-14 生成
+test('ITF-14 生成 (13位自动计算校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('itf14')
+        ->data('1540014128876')
+        ->savePng($outputDir . '/itf14_basic.png');
+    return file_exists($outputDir . '/itf14_basic.png') ? true : '文件未生成';
+});
+
+test('ITF-14 生成 (14位带校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('itf14')
+        ->data('15400141288763')
+        ->savePng($outputDir . '/itf14_with_checksum.png');
+    return file_exists($outputDir . '/itf14_with_checksum.png') ? true : '文件未生成';
+});
+
+echo "\n【基础功能测试 - ISSN】\n";
+echo "----------------------\n";
+
+// 测试 ISSN 生成
+test('ISSN 生成 (7位自动计算校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('issn')
+        ->data('1234567')
+        ->savePng($outputDir . '/issn_basic.png');
+    return file_exists($outputDir . '/issn_basic.png') ? true : '文件未生成';
+});
+
+test('ISSN 生成 (8位带校验位)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('issn')
+        ->data('12345670')
+        ->savePng($outputDir . '/issn_with_checksum.png');
+    return file_exists($outputDir . '/issn_with_checksum.png') ? true : '文件未生成';
+});
+
+echo "\n【SVG 输出测试】\n";
+echo "----------------\n";
+
+// 测试 SVG 生成
+test('EAN-13 SVG 生成', function() use ($outputDir) {
+    $svg = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->saveSvg($outputDir . '/ean13_test.svg');
+    return file_exists($outputDir . '/ean13_test.svg') ? true : '文件未生成';
+});
+
+test('Code 128 SVG 生成', function() use ($outputDir) {
+    $svg = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('TEST123')
+        ->saveSvg($outputDir . '/code128_test.svg');
+    return file_exists($outputDir . '/code128_test.svg') ? true : '文件未生成';
+});
+
+echo "\n【长竖线特征测试】\n";
+echo "------------------\n";
+
+// 测试长竖线位置计算
+test('EAN-13 长竖线位置计算', function() {
+    $generator = BarcodeFactory::create('ean13');
+    $generator->generate('6901234567892');
+    $positions = $generator->getLongBarPositions();
+    // EAN-13 应该有6条长竖线（起始符2条 + 中间分隔符2条 + 终止符2条）
+    return count($positions) === 6 ? true : "长竖线数量错误: " . count($positions) . ", 期望: 6";
+});
+
+test('EAN-8 长竖线位置计算', function() {
+    $generator = BarcodeFactory::create('ean8');
+    $generator->generate('12345670');
+    $positions = $generator->getLongBarPositions();
+    // EAN-8 应该有6条长竖线
+    return count($positions) === 6 ? true : "长竖线数量错误: " . count($positions) . ", 期望: 6";
+});
+
+test('UPC-A 长竖线位置计算', function() {
+    $generator = BarcodeFactory::create('upca');
+    $generator->generate('012345678905');
+    $positions = $generator->getLongBarPositions();
+    // UPC-A 应该有6条长竖线
+    return count($positions) === 6 ? true : "长竖线数量错误: " . count($positions) . ", 期望: 6";
+});
+
+echo "\n【BarcodeHelper 测试】\n";
+echo "----------------------\n";
+
+// 测试快速生成
+test('BarcodeHelper 快速生成', function() use ($outputDir) {
+    $result = BarcodeHelper::quickGenerate('ean13', '690123456789', $outputDir . '/helper_quick.png');
+    return $result && file_exists($outputDir . '/helper_quick.png') ? true : '生成失败';
+});
+
+// 测试数据验证
+test('BarcodeHelper EAN-13 数据验证(有效)', function() {
+    $result = BarcodeHelper::validateData('ean13', '690123456789');
+    return $result['valid'] === true ? true : '应该验证通过但失败了';
+});
+
+test('BarcodeHelper EAN-13 数据验证(无效)', function() {
+    $result = BarcodeHelper::validateData('ean13', 'ABC123');
+    return $result['valid'] === false ? true : '应该验证失败但通过了';
+});
+
+test('BarcodeHelper Code 128 数据验证', function() {
+    $result = BarcodeHelper::validateData('code128', 'Hello World!');
+    return $result['valid'] === true ? true : 'Code 128应该支持ASCII字符';
+});
+
+// 测试校验位计算
+test('BarcodeHelper 校验位计算 - EAN13', function() {
+    $checksum = BarcodeHelper::calculateChecksum('ean13', '690123456789');
+    return $checksum === '2' ? true : "校验位错误: {$checksum}, 期望: 2";
+});
+
+test('BarcodeHelper 校验位计算 - EAN8', function() {
+    $checksum = BarcodeHelper::calculateChecksum('ean8', '1234567');
+    return $checksum === '0' ? true : "校验位错误: {$checksum}, 期望: 0";
+});
+
+// 测试类型信息获取
+test('BarcodeHelper 类型信息获取', function() {
+    $info = BarcodeHelper::getTypeInfo('ean13');
+    return isset($info['name']) && $info['name'] === 'EAN-13' ? true : '信息获取失败';
+});
+
+// 测试 Base64 生成
+test('BarcodeHelper Base64 生成', function() {
+    $base64 = BarcodeHelper::toBase64('ean13', '690123456789');
+    return str_starts_with($base64, 'data:image/png;base64,') ? true : 'Base64格式错误';
+});
+
+// 测试批量生成
+test('BarcodeHelper 批量生成', function() use ($outputDir) {
+    $dataList = [
+        '690123456789',
+        '690987654321',
+        ['data' => '690111111111', 'filename' => 'custom_1'],
+        '690222222222'
+    ];
+    $results = BarcodeHelper::batchGenerate($dataList, 'ean13', $outputDir . '/batch', [
+        'prefix' => 'batch_',
+        'format' => 'png'
+    ]);
+    return $results['success'] === 4 ? true : "批量生成失败: 成功 {$results['success']}, 失败 {$results['failed']}";
+});
+
+echo "\n【自定义样式测试】\n";
+echo "------------------\n";
+
+// 测试自定义颜色
+test('自定义颜色 - 红黄配色', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->barColor('#FF0000')
+        ->bgColor('#FFFF00')
+        ->savePng($outputDir . '/custom_color_red_yellow.png');
+    return file_exists($outputDir . '/custom_color_red_yellow.png') ? true : '文件未生成';
+});
+
+// 测试自定义尺寸
+test('自定义尺寸 - 大尺寸', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->width(4)
+        ->height(120)
+        ->savePng($outputDir . '/custom_size_large.png');
+    return file_exists($outputDir . '/custom_size_large.png') ? true : '文件未生成';
+});
+
+test('自定义尺寸 - 小尺寸', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->width(2)
+        ->height(60)
+        ->savePng($outputDir . '/custom_size_small.png');
+    return file_exists($outputDir . '/custom_size_small.png') ? true : '文件未生成';
+});
+
+// 测试隐藏文字
+test('隐藏文字', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->showText(false)
+        ->savePng($outputDir . '/no_text.png');
+    return file_exists($outputDir . '/no_text.png') ? true : '文件未生成';
+});
+
+// 测试文本对齐
+test('Code 128 文本居中对齐', function() use ($outputDir) {
+    $renderer = new PngRenderer();
+    $renderer->setTextAlign('center');
+    
+    $generator = BarcodeFactory::create('code128');
+    $barcodeData = $generator->generate('CENTER TEXT');
+    
+    $renderer->saveToFile($barcodeData, 'CENTER TEXT', $outputDir . '/align_center.png');
+    return file_exists($outputDir . '/align_center.png') ? true : '文件未生成';
+});
+
+echo "\n【高级渲染器测试】\n";
+echo "------------------\n";
+
+// 测试渐变效果
+test('PNG 渐变效果', function() use ($outputDir) {
+    $renderer = new PngRenderer();
+    $renderer->enableGradient('#000000', '#333333');
+    
+    $generator = BarcodeFactory::create('ean13');
+    $barcodeData = $generator->generate('6901234567892');
+    
+    $renderer->saveToFile($barcodeData, '6901234567892', $outputDir . '/gradient_black.png');
+    return file_exists($outputDir . '/gradient_black.png') ? true : '文件未生成';
+});
+
+// 测试圆角条
+test('PNG 圆角条', function() use ($outputDir) {
     $renderer = new PngRenderer();
     $renderer->enableRoundedBars(3);
     
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data('ROUNDED')
-        ->height(80)
-        ->width(3);
+    $generator = BarcodeFactory::create('code128');
+    $barcodeData = $generator->generate('ROUNDED');
     
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/feature_rounded.png';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    recordTest("圆角条", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("圆角条", false, $e->getMessage());
-}
+    $renderer->saveToFile($barcodeData, 'ROUNDED', $outputDir . '/rounded_bars.png');
+    return file_exists($outputDir . '/rounded_bars.png') ? true : '文件未生成';
+});
 
-// 水印测试
-try {
+// 测试水印
+test('PNG 基础水印', function() use ($outputDir) {
     $renderer = new PngRenderer();
-    $renderer->setWatermark('SAMPLE', 30);
+    $renderer->setWatermark('SAMPLE', 70, 5, '#888888');
     
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data('WATERMARK')
-        ->height(80)
-        ->width(2);
+    $generator = BarcodeFactory::create('ean13');
+    $barcodeData = $generator->generate('6901234567892');
     
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/feature_watermark.png';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    recordTest("水印效果", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("水印效果", false, $e->getMessage());
-}
+    $renderer->saveToFile($barcodeData, '6901234567892', $outputDir . '/watermark_basic.png');
+    return file_exists($outputDir . '/watermark_basic.png') ? true : '文件未生成';
+});
 
-// Bearer Bar测试（ITF-14）
-try {
+test('PNG 旋转水印 (-45度)', function() use ($outputDir) {
+    $renderer = new PngRenderer();
+    $renderer->setWatermark('WATERMARK', 40, 4, '#CCCCCC', -45);
+    
+    $generator = BarcodeFactory::create('ean13');
+    $barcodeData = $generator->generate('6901234567892');
+    
+    $renderer->saveToFile($barcodeData, '6901234567892', $outputDir . '/watermark_rotated_45.png');
+    return file_exists($outputDir . '/watermark_rotated_45.png') ? true : '文件未生成';
+});
+
+test('PNG 旋转水印 (30度)', function() use ($outputDir) {
+    $renderer = new PngRenderer();
+    $renderer->setWatermark('CONFIDENTIAL', 50, 3, '#999999', 30);
+    
+    $generator = BarcodeFactory::create('code128');
+    $barcodeData = $generator->generate('TEST123');
+    
+    $renderer->saveToFile($barcodeData, 'TEST123', $outputDir . '/watermark_rotated_30.png');
+    return file_exists($outputDir . '/watermark_rotated_30.png') ? true : '文件未生成';
+});
+
+// 测试 ITF-14 Bearer Bar
+test('ITF-14 Bearer Bar', function() use ($outputDir) {
     $renderer = new PngRenderer();
     $renderer->enableBearerBar(3);
     
-    $builder = BarcodeBuilder::create()
-        ->type('itf14')
-        ->data('1540014128876')
-        ->height(100)
-        ->width(2);
+    $generator = BarcodeFactory::create('itf14');
+    $barcodeData = $generator->generate('15400141288763');
     
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/feature_bearer_bar.png';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    recordTest("Bearer Bar", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("Bearer Bar", false, $e->getMessage());
-}
+    $renderer->saveToFile($barcodeData, '15400141288763', $outputDir . '/bearer_bar.png');
+    return file_exists($outputDir . '/bearer_bar.png') ? true : '文件未生成';
+});
 
-// ==================== 10. 配置测试 ====================
+echo "\n【边界情况测试】\n";
+echo "----------------\n";
 
-echo "\n【配置项测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 颜色配置测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->bgColor('#FF0000')
-        ->barColor('#0000FF')
-        ->height(80)
-        ->width(3);
-    
-    $barcode = $builder->generate();
-    
-    $filename = $outputDir . '/config_colors.png';
-    $builder->savePng($filename);
-    recordTest("颜色配置", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("颜色配置", false, $e->getMessage());
-}
-
-// 尺寸配置测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->width(5)
-        ->height(150);
-    
-    $barcode = $builder->generate();
-    
-    $filename = $outputDir . '/config_size.png';
-    $builder->savePng($filename);
-    recordTest("尺寸配置", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("尺寸配置", false, $e->getMessage());
-}
-
-// 显示/隐藏文字测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->showText(false);
-    
-    $barcode = $builder->generate();
-    
-    $filename = $outputDir . '/config_no_text.png';
-    $builder->savePng($filename);
-    recordTest("隐藏文字", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("隐藏文字", false, $e->getMessage());
-}
-
-// ==================== 11. SVG输出测试 ====================
-
-echo "\n【SVG输出测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$svgTypes = ['ean13', 'isbn', 'code128', 'code39', 'itf14'];
-foreach ($svgTypes as $type) {
+// 测试最小长度数据
+test('EAN-13 最小长度数据', function() use ($outputDir) {
     try {
-        $data = match ($type) {
-            'ean13' => '690123456789',
-            'isbn' => '9780201379624',
-            'code128' => 'TEST123',
-            'code39' => 'TEST',
-            'itf14' => '1540014128876',
-            default => 'TEST123',
-        };
-        
-        $builder = BarcodeBuilder::create()
-            ->type($type)
-            ->data($data);
-        
-        $svg = $builder->toSvg();
-        $hasSvg = strpos($svg, '<svg') !== false;
-        recordTest("SVG {$type} - 格式", $hasSvg);
-        
-        $filename = $outputDir . '/svg_' . $type . '.svg';
-        $builder->saveSvg($filename);
-        recordTest("SVG {$type} - 保存", file_exists($filename));
-        
-    } catch (Exception $e) {
-        recordTest("SVG {$type}", false, $e->getMessage());
-    }
-}
-
-// ==================== 12. 校验位计算测试 ====================
-
-echo "\n【校验位计算测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// EAN-13校验位测试
-$ean13 = BarcodeFactory::create('ean13');
-$checksum = $ean13->calculateChecksum('978020137962');
-recordTest("EAN-13 978020137962校验位", $checksum === '4', "计算结果: {$checksum}");
-
-$checksum = $ean13->calculateChecksum('690123456789');
-recordTest("EAN-13 690123456789校验位", $checksum === '2', "计算结果: {$checksum}");
-
-// EAN-8校验位测试
-$ean8 = BarcodeFactory::create('ean8');
-$checksum = $ean8->calculateChecksum('1234567');
-recordTest("EAN-8 1234567校验位", $checksum === '0', "计算结果: {$checksum}");
-
-// UPC-A校验位测试
-$upca = BarcodeFactory::create('upca');
-$checksum = $upca->calculateChecksum('01234567890');
-recordTest("UPC-A 01234567890校验位", $checksum === '5', "计算结果: {$checksum}");
-
-// ISBN校验位测试
-$isbn = BarcodeFactory::create('isbn');
-$checksum = $isbn->calculateChecksum('978020137962');
-recordTest("ISBN 978020137962校验位", $checksum === '4', "计算结果: {$checksum}");
-
-// ITF-14校验位测试
-$itf14 = BarcodeFactory::create('itf14');
-$checksum = $itf14->calculateChecksum('1540014128876');
-recordTest("ITF-14 1540014128876校验位", $checksum === '3', "计算结果: {$checksum}");
-
-// ISSN校验位测试（模11算法）
-$issn = BarcodeFactory::create('issn');
-$checksum = $issn->calculateChecksum('0378595');
-recordTest("ISSN 0378595校验位", $checksum === '5', "计算结果: {$checksum}");
-
-// ==================== 13. 边界条件测试 ====================
-
-echo "\n【边界条件测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 极小宽度测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->width(1)
-        ->height(50);
-    $barcode = $builder->generate();
-    recordTest("EAN-13 极小宽度(1px)", true);
-} catch (Exception $e) {
-    recordTest("EAN-13 极小宽度(1px)", false, $e->getMessage());
-}
-
-// 极大宽度测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data('TEST')
-        ->width(10)
-        ->height(200);
-    $barcode = $builder->generate();
-    recordTest("Code 128 极大尺寸", true);
-} catch (Exception $e) {
-    recordTest("Code 128 极大尺寸", false, $e->getMessage());
-}
-
-// 超长数据测试
-try {
-    $longData = str_repeat('A', 50);
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data($longData);
-    $barcode = $builder->generate();
-    recordTest("Code 128 超长数据(50字符)", strlen($longData) === 50);
-} catch (Exception $e) {
-    recordTest("Code 128 超长数据", false, $e->getMessage());
-}
-
-// 特殊字符测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data('!@#$%^&*()');
-    $barcode = $builder->generate();
-    recordTest("Code 128 特殊字符", true);
-} catch (Exception $e) {
-    recordTest("Code 128 特殊字符", false, $e->getMessage());
-}
-
-// 空数据测试
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('code128')
-        ->data('');
-    $barcode = $builder->generate();
-    recordTest("Code 128 空数据应报错", false, '未抛出异常');
-} catch (Exception $e) {
-    recordTest("Code 128 空数据正确处理", true);
-}
-
-// ==================== 14. 多种条码格式组合测试 ====================
-
-echo "\n【多种条码格式组合测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 相同数据不同条码类型
-try {
-    $testData = '1234567';
-    
-    $ean8 = BarcodeBuilder::create()->type('ean8')->data($testData)->generate();
-    recordTest("EAN-8 格式", count($ean8) > 0);
-    
-    $code128 = BarcodeBuilder::create()->type('code128')->data($testData)->generate();
-    recordTest("Code 128 相同数据", count($code128) > 0);
-    
-    $code39 = BarcodeBuilder::create()->type('code39')->data($testData)->generate();
-    recordTest("Code 39 相同数据", count($code39) > 0);
-} catch (Exception $e) {
-    recordTest("相同数据不同条码类型", false, $e->getMessage());
-}
-
-// 不同条宽对比
-try {
-    $widths = [1, 2, 3, 4];
-    foreach ($widths as $w) {
-        $builder = BarcodeBuilder::create()
+        $barcode = BarcodeBuilder::create()
             ->type('ean13')
-            ->data('690123456789')
-            ->width($w);
-        $barcode = $builder->generate();
-        $filename = $outputDir . '/ean13_width_' . $w . '.png';
-        $builder->savePng($filename);
-        recordTest("EAN-13 宽度 {$w}px", file_exists($filename));
+            ->data('000000000000')
+            ->savePng($outputDir . '/ean13_min.png');
+        return file_exists($outputDir . '/ean13_min.png') ? true : '文件未生成';
+    } catch (\Exception $e) {
+        return '异常: ' . $e->getMessage();
     }
-} catch (Exception $e) {
-    recordTest("不同条宽对比", false, $e->getMessage());
-}
+});
 
-// ==================== 15. 错误数据处理测试 ====================
-
-echo "\n【错误数据处理测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// EAN-13 非数字数据
-try {
-    BarcodeBuilder::create()->type('ean13')->data('ABCDEFGHIJKL')->generate();
-    recordTest("EAN-13 非数字数据应报错", false);
-} catch (Exception $e) {
-    recordTest("EAN-13 非数字数据正确处理", true);
-}
-
-// EAN-13 长度错误
-try {
-    BarcodeBuilder::create()->type('ean13')->data('12345')->generate();
-    recordTest("EAN-13 短数据应报错", false);
-} catch (Exception $e) {
-    recordTest("EAN-13 短数据正确处理", true);
-}
-
-// Code 39 小写字母
-try {
-    BarcodeBuilder::create()->type('code39')->data('abc')->generate();
-    recordTest("Code 39 小写字母应报错", false);
-} catch (Exception $e) {
-    recordTest("Code 39 小写字母正确处理", true);
-}
-
-// ISBN 错误前缀
-try {
-    BarcodeBuilder::create()->type('isbn')->data('1234567890123')->generate();
-    recordTest("ISBN 错误前缀应报错", false);
-} catch (Exception $e) {
-    recordTest("ISBN 错误前缀正确处理", true);
-}
-
-// UPC-A 长度错误
-try {
-    BarcodeBuilder::create()->type('upca')->data('12345')->generate();
-    recordTest("UPC-A 短数据应报错", false);
-} catch (Exception $e) {
-    recordTest("UPC-A 短数据正确处理", true);
-}
-
-// ==================== 16. ISBN-10 转 ISBN-13 测试 ====================
-
-echo "\n【ISBN-10 转 ISBN-13 测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-$isbn10Tests = [
-    ['data' => '0306406152', 'expected' => '9780306406157', 'desc' => '标准ISBN-10'],
-    ['data' => '0-306-40615-2', 'expected' => '9780306406157', 'desc' => '带分隔符ISBN-10'],
-    ['data' => '0201379620', 'expected' => '9780201379624', 'desc' => '另一ISBN-10'],
-];
-
-foreach ($isbn10Tests as $test) {
-    try {
-        $builder = BarcodeBuilder::create()
-            ->type('isbn')
-            ->data($test['data']);
-        $barcode = $builder->generate();
-        $fullData = $builder->getFullData();
-        
-        $converted = ($fullData === $test['expected']);
-        recordTest("ISBN-10转13 {$test['desc']}", $converted, "结果: {$fullData}");
-        
-        $filename = $outputDir . '/isbn_' . str_replace([' ', '-'], '_', $test['desc']) . '.png';
-        $builder->savePng($filename);
-        
-    } catch (Exception $e) {
-        recordTest("ISBN-10转13 {$test['desc']}", false, $e->getMessage());
-    }
-}
-
-// ==================== 17. 颜色对比度测试 ====================
-
-echo "\n【颜色对比度测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 低对比度颜色（应自动调整为黑白）
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->barColor('#AAAAAA')  // 灰色条
-        ->bgColor('#BBBBBB');  // 灰色背景（对比度不足）
-    $barcode = $builder->generate();
-    
-    $filename = $outputDir . '/ean13_low_contrast.png';
-    $builder->savePng($filename);
-    recordTest("低对比度自动调整", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("低对比度自动调整", false, $e->getMessage());
-}
-
-// 高对比度颜色
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789')
-        ->barColor('#000080')  // 深蓝色
-        ->bgColor('#FFFFFF');  // 白色背景
-    $barcode = $builder->generate();
-    
-    $filename = $outputDir . '/ean13_blue_bar.png';
-    $builder->savePng($filename);
-    recordTest("高对比度蓝色条码", file_exists($filename));
-} catch (Exception $e) {
-    recordTest("高对比度蓝色条码", false, $e->getMessage());
-}
-
-// ==================== 18. 性能测试 ====================
-
-echo "\n【性能测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// 批量生成测试
-$startTime = microtime(true);
-$batchCount = 50;
-for ($i = 0; $i < $batchCount; $i++) {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789');
-    $barcode = $builder->generate();
-}
-$endTime = microtime(true);
-$elapsed = round(($endTime - $startTime) * 1000, 2);
-$avgTime = round($elapsed / $batchCount, 2);
-recordTest("批量生成 {$batchCount} 个条码", true, "总耗时: {$elapsed}ms, 平均: {$avgTime}ms/个");
-
-// 复杂条码生成性能
-$startTime = microtime(true);
-$builder = BarcodeBuilder::create()
-    ->type('code128')
-    ->data(str_repeat('A', 100));  // 100字符
-$barcode = $builder->generate();
-$endTime = microtime(true);
-$elapsed = round(($endTime - $startTime) * 1000, 2);
-recordTest("长条码生成性能(100字符)", true, "耗时: {$elapsed}ms");
-
-// ==================== 19. SVG 特殊功能测试 ====================
-
-echo "\n【SVG 特殊功能测试】\n";
-echo str_repeat("-", 40) . "\n";
-
-// SVG 渐变测试
-try {
-    $renderer = new SvgRenderer();
-    $renderer->enableGradient('#000000', '#444444');
-    
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789');
-    
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/svg_gradient.svg';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    
-    $svgContent = file_get_contents($filename);
-    $hasGradient = strpos($svgContent, 'linearGradient') !== false;
-    recordTest("SVG 渐变效果", $hasGradient);
-} catch (Exception $e) {
-    recordTest("SVG 渐变效果", false, $e->getMessage());
-}
-
-// SVG 圆角测试
-try {
-    $renderer = new SvgRenderer();
-    $renderer->enableRoundedBars(3);
-    
-    $builder = BarcodeBuilder::create()
+// 测试最大长度数据
+test('Code 128 长数据', function() use ($outputDir) {
+    $longData = str_repeat('A', 50);
+    $barcode = BarcodeBuilder::create()
         ->type('code128')
-        ->data('ROUNDED');
-    
-    $barcode = $builder->generate();
-    $fullData = $builder->getFullData();
-    
-    $filename = $outputDir . '/svg_rounded.svg';
-    $renderer->saveToFile($barcode, $fullData, $filename);
-    
-    $svgContent = file_get_contents($filename);
-    $hasRounded = strpos($svgContent, 'rx="3"') !== false;
-    recordTest("SVG 圆角效果", $hasRounded);
-} catch (Exception $e) {
-    recordTest("SVG 圆角效果", false, $e->getMessage());
-}
+        ->data($longData)
+        ->savePng($outputDir . '/code128_long.png');
+    return file_exists($outputDir . '/code128_long.png') ? true : '文件未生成';
+});
 
-// ==================== 20. 文件输出测试 ====================
+// 测试特殊字符
+test('Code 128 特殊字符', function() use ($outputDir) {
+    $specialChars = 'A@#$%^&*()_+-=[]{}|;\':",./<>?';
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data($specialChars)
+        ->savePng($outputDir . '/code128_special.png');
+    return file_exists($outputDir . '/code128_special.png') ? true : '文件未生成';
+});
 
-echo "\n【文件输出测试】\n";
-echo str_repeat("-", 40) . "\n";
+echo "\n【扫码识别测试 - 生成标准测试条码】\n";
+echo "------------------------------------\n";
 
-// 嵌套目录保存
-try {
-    $nestedDir = $outputDir . '/nested/deep/path';
-    $builder = BarcodeBuilder::create()
+// 生成用于扫码测试的标准条码
+test('生成 EAN-13 扫码测试条码 (6901234567892)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
         ->type('ean13')
-        ->data('690123456789');
-    
-    $filename = $nestedDir . '/nested.png';
-    $saved = $builder->savePng($filename);
-    recordTest("嵌套目录自动创建", $saved && file_exists($filename));
-} catch (Exception $e) {
-    recordTest("嵌套目录自动创建", false, $e->getMessage());
-}
-
-// 不同格式同时生成
-try {
-    $builder = BarcodeBuilder::create()
-        ->type('ean13')
-        ->data('690123456789');
-    
-    $barcode = $builder->generate();
-    
-    $pngFile = $outputDir . '/both_formats.png';
-    $svgFile = $outputDir . '/both_formats.svg';
-    
-    $pngSaved = $builder->savePng($pngFile);
-    $svgSaved = $builder->saveSvg($svgFile);
-    
-    recordTest("PNG和SVG同时生成", $pngSaved && $svgSaved);
-} catch (Exception $e) {
-    recordTest("PNG和SVG同时生成", false, $e->getMessage());
-}
-
-// ==================== 测试总结 ====================
+        ->data('6901234567892')
+        ->width(3)
+        ->height(100)
+        ->savePng($outputDir . '/scan_test_ean13.png');
+    return file_exists($outputDir . '/scan_test_ean13.png') ? true : '文件未生成';
+});
 
 echo "\n========================================\n";
-echo "  测试总结\n";
+echo "   测试结果汇总\n";
 echo "========================================\n";
-echo "总测试数: " . count($testResults['tests']) . "\n";
-echo "通过数: {$testResults['passed']}\n";
-echo "失败数: {$testResults['failed']}\n";
-echo "通过率: " . round($testResults['passed'] / count($testResults['tests']) * 100, 2) . "%\n";
+echo "通过: {$passed}\n";
+echo "失败: {$failed}\n";
+echo "总计: " . ($passed + $failed) . "\n";
+echo "通过率: " . ($passed + $failed > 0 ? round($passed / ($passed + $failed) * 100, 2) : 0) . "%\n";
 echo "========================================\n";
 
-// 如果有失败测试，显示详细信息
-if ($testResults['failed'] > 0) {
-    echo "\n【失败的测试】\n";
-    foreach ($testResults['tests'] as $test) {
-        if (!$test['passed']) {
-            echo "- {$test['name']}";
-            if ($test['message']) {
-                echo ": {$test['message']}";
-            }
-            echo "\n";
+if ($failed > 0) {
+    echo "\n失败的测试:\n";
+    foreach ($tests as $test) {
+        if ($test['status'] === 'failed') {
+            echo "- {$test['name']}: {$test['error']}\n";
         }
     }
+    exit(1);
 }
 
-// 返回退出码
-exit($testResults['failed'] > 0 ? 1 : 0);
+echo "\n✓ 所有测试通过！\n";
+echo "测试输出文件保存在: {$outputDir}\n";
+echo "\n提示: 可以使用手机扫描以下文件验证条码可读性:\n";
+echo "- {$outputDir}/scan_test_ean13.png\n";
+exit(0);

@@ -7,20 +7,16 @@ namespace zxf\Utils\BarCode\Generator;
 use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
- * Code 39 条码生成器（修复版）
+ * Code 39 条码生成器（标准 AIM USS 实现）
  * 
  * Code 39 是工业标准条码，支持数字、大写字母和部分特殊符号
- * 特征：
- * - 可变长度
- * - 支持数字+大写字母+特殊符号
- * - 条空等宽（窄条/空=1单位，宽条/空=2-3单位）
- * - 自校验（每个字符包含校验信息）
- * - 工业/医疗专用
  * 
- * 编码规则：
+ * 【编码规则】（严格遵循AIM USS标准）：
  * - 每个字符由9个元素组成（5条+4空）
  * - 其中3个宽元素，6个窄元素
- * - 字符间用窄空分隔
+ * - 窄条/空 = 1模块
+ * - 宽条/空 = 3模块（标准比例 1:3）
+ * - 字符间用窄空分隔（1模块）
  * - 起始和终止符都是'*'
  */
 class Code39Generator extends BaseGenerator
@@ -31,10 +27,23 @@ class Code39Generator extends BaseGenerator
     /** @var string Code 39支持的字符集 */
     protected const CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%';
 
+    /** @var int 窄元素宽度 */
+    protected const NARROW_WIDTH = 2;
+    
+    /** @var int 宽元素宽度 */
+    protected const WIDE_WIDTH = 6;
+    
+    /** @var int 字符间分隔空宽度 */
+    protected const INTER_CHAR_GAP = 2;
+    
+    /** @var int 静区宽度 */
+    protected const QUIET_ZONE = 20;
+
     /**
-     * Code 39编码表
-     * 每个字符由9个元素表示：n=窄条(1单位)，w=宽条(2-3单位)
-     * 格式：条空条空... 共9个元素
+     * Code 39标准编码表（AIM USS规范）
+     * 每个字符由9个元素表示：n=窄条(1模块)，w=宽条(3模块)
+     * 格式：条-空-条-空-条-空-条-空-条
+     * 每个字符必须有3个宽元素和6个窄元素
      * 
      * @var array<string, string>
      */
@@ -55,15 +64,6 @@ class Code39Generator extends BaseGenerator
         '$' => 'nwnwnwnnn', '/' => 'nwnwnnnwn', '+' => 'nwnnnwnwn',
         '%' => 'nnnwnwnwn', '*' => 'nwnnwnwnn',
     ];
-
-    /** @var float 宽条与窄条的比例 */
-    protected float $wideRatio = 2.5;
-    
-    /** @var int 字符间分隔空宽度（窄空单位数） */
-    protected int $interCharGap = 1;
-    
-    /** @var bool 是否在数据中包含起始/终止符 */
-    protected bool $includeDelimiters = false;
 
     /**
      * 生成 Code 39 条码
@@ -89,41 +89,71 @@ class Code39Generator extends BaseGenerator
         $this->barcodeArray = [];
         $this->longBarPositions = [];
 
-        // 构建编码（添加起始和终止符*）
-        $encodedData = '*' . $this->rawData . '*';
+        // 基准单位宽度
+        $baseWidth = self::NARROW_WIDTH;
+
+        // 左侧静区 (使用基准宽度)
+        $this->barcodeArray[] = -(self::QUIET_ZONE / $baseWidth);
+
+        // 起始符 '*'
+        $this->encodeCharacter('*');
         
-        $binary = '';
-        for ($i = 0; $i < strlen($encodedData); $i++) {
-            $char = $encodedData[$i];
-            $pattern = $this->encoding[$char];
+        // 字符间分隔
+        $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
+
+        // 数据字符
+        for ($i = 0; $i < strlen($this->rawData); $i++) {
+            $char = $this->rawData[$i];
+            $this->encodeCharacter($char);
             
-            // 将模式转换为二进制
-            for ($j = 0; $j < strlen($pattern); $j++) {
-                $isWide = ($pattern[$j] === 'w');
-                $width = $isWide ? (int)($this->wideRatio) : 1;
-                $isBar = ($j % 2 === 0);
-                
-                $binary .= str_repeat($isBar ? '1' : '0', $width);
-            }
-            
-            // 字符间分隔（最后一个字符后不加）
-            if ($i < strlen($encodedData) - 1) {
-                $binary .= str_repeat('0', $this->interCharGap);
+            // 字符间分隔（最后一个字符后不需要）
+            if ($i < strlen($this->rawData) - 1) {
+                $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
             }
         }
+        
+        // 终止符前分隔
+        $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
+        
+        // 终止符 '*'
+        $this->encodeCharacter('*');
 
-        $this->barcodeArray = $this->binaryToBars($binary);
+        // 右侧静区 (使用基准宽度)
+        $this->barcodeArray[] = -(self::QUIET_ZONE / $baseWidth);
 
         return $this->barcodeArray;
     }
 
     /**
-     * 验证数据格式
+     * 编码单个字符
      * 
-     * 【验证规则】：
-     * - Code 39只支持大写字母、数字和部分特殊符号
-     * - 不支持小写字母
-     * - 数据不能为空
+     * @param string $char 要编码的字符
+     */
+    protected function encodeCharacter(string $char): void
+    {
+        if (!isset($this->encoding[$char])) {
+            return;
+        }
+
+        $pattern = $this->encoding[$char];
+        
+        // 解析9位编码（5条4空）
+        // 位置：0=条, 1=空, 2=条, 3=空, 4=条, 5=空, 6=条, 7=空, 8=条
+        for ($i = 0; $i < 9; $i++) {
+            $isWide = ($pattern[$i] === 'w');
+            $width = $isWide ? self::WIDE_WIDTH : self::NARROW_WIDTH;
+            $isBar = ($i % 2 === 0);
+            
+            if ($isBar) {
+                $this->barcodeArray[] = $width;
+            } else {
+                $this->barcodeArray[] = -$width;
+            }
+        }
+    }
+
+    /**
+     * 验证数据格式
      * 
      * @param string $data 要验证的数据
      * @return bool 数据有效返回true
@@ -134,8 +164,6 @@ class Code39Generator extends BaseGenerator
             return false;
         }
 
-        // Code 39只支持大写字母，小写字母无效
-        // 不进行大小写转换，直接验证原始数据
         return $this->containsOnly($data, self::CHARSET);
     }
 
@@ -186,29 +214,5 @@ class Code39Generator extends BaseGenerator
     public function getDataWithDelimiters(): string
     {
         return '*' . $this->rawData . '*';
-    }
-
-    /**
-     * 设置宽条比例
-     * 
-     * @param float $ratio 宽条与窄条的比例
-     * @return self 支持链式调用
-     */
-    public function setWideRatio(float $ratio): self
-    {
-        $this->wideRatio = $ratio;
-        return $this;
-    }
-
-    /**
-     * 设置字符间分隔宽度
-     * 
-     * @param int $width 窄空单位数
-     * @return self 支持链式调用
-     */
-    public function setInterCharGap(int $width): self
-    {
-        $this->interCharGap = $width;
-        return $this;
     }
 }

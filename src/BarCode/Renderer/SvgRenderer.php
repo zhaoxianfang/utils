@@ -9,16 +9,20 @@ use zxf\Utils\BarCode\DTO\BarcodeConfig;
 use zxf\Utils\BarCode\Exceptions\RenderException;
 
 /**
- * SVG 渲染器（修复版）
+ * SVG 渲染器（动态文字定位版）
  * 
- * 支持长竖线、数字显示、自定义颜色、渐变、圆角等功能
+ * 【核心特性】
+ * - 动态检测长竖线（保护符）实际像素位置
+ * - 根据条码内容和结构自动分段显示数字
+ * - 动态计算字号大小适配条码宽度
+ * - 动态计算上下偏移距离
+ * - 每段数字在各自区域内均匀分布
  */
 class SvgRenderer implements RendererInterface
 {
     protected const TYPE = 'svg';
     protected BarcodeConfig $config;
     protected string $barcodeType = '';
-    protected array $digitLayout = [];
     
     // 个性化配置
     protected bool $enableGradient = false;
@@ -26,6 +30,21 @@ class SvgRenderer implements RendererInterface
     protected string $gradientEndColor = '#333333';
     protected bool $enableRoundedBars = false;
     protected int $cornerRadius = 2;
+    
+    /** @var array<int> 长竖线位置索引 */
+    protected array $longBarPositions = [];
+    
+    /** @var float 长竖线高度比例 */
+    protected float $longBarHeightRatio = 1.15;
+    
+    /** @var array<string, mixed> 条码结构分析结果 */
+    protected array $barcodeStructure = [];
+    
+    /** @var int 动态计算的字号 */
+    protected int $dynamicFontSize = 12;
+    
+    /** @var int 动态计算的文本Y偏移 */
+    protected int $dynamicTextOffset = 3;
 
     public function __construct(?BarcodeConfig $config = null)
     {
@@ -35,6 +54,7 @@ class SvgRenderer implements RendererInterface
     public function render(array $barcodeData, string $data, array $config = []): string
     {
         $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), $config));
+        $this->barcodeStructure = []; // 重置结构分析
 
         $totalWidth = 0;
         foreach ($barcodeData as $element) {
@@ -43,7 +63,7 @@ class SvgRenderer implements RendererInterface
 
         $barcodeWidth = $totalWidth * $this->config->width;
         
-        // 确保有足够的静区宽度（GS1标准要求至少11个模块）
+        // 确保有足够的静区宽度
         $marginLeft = $this->config->marginLeft;
         $marginRight = $this->config->marginRight;
         if ($this->config->showQuietZone) {
@@ -91,9 +111,12 @@ class SvgRenderer implements RendererInterface
         return $this;
     }
 
-    /**
-     * 启用渐变效果
-     */
+    public function setLongBarPositions(array $positions): self
+    {
+        $this->longBarPositions = $positions;
+        return $this;
+    }
+
     public function enableGradient(string $startColor, string $endColor): self
     {
         $this->enableGradient = true;
@@ -102,9 +125,6 @@ class SvgRenderer implements RendererInterface
         return $this;
     }
 
-    /**
-     * 启用圆角条
-     */
     public function enableRoundedBars(int $radius = 2): self
     {
         $this->enableRoundedBars = true;
@@ -114,24 +134,21 @@ class SvgRenderer implements RendererInterface
 
     protected function calculateLongBarPositions(array $barcodeData): array
     {
-        // 长竖线位置基于模块索引（0-based）
-        // 对应保护符（起始符/中间分隔符/终止符）中的条(1)位置
-        return match ($this->barcodeType) {
-            'EAN-13', 'ISBN' => [11, 13, 56, 58, 101, 103],  // 静区11+起始符/中间/终止符
-            'EAN-8' => [7, 9, 38, 40, 69, 71],               // 静区7+起始符/中间/终止符
-            'UPC-A' => [9, 11, 54, 56, 99, 101],             // 静区9+起始符/中间/终止符
-            default => [],
-        };
+        if (!empty($this->longBarPositions)) {
+            return $this->longBarPositions;
+        }
+        return [];
     }
 
+    /**
+     * 构建SVG并分析条码结构
+     */
     protected function buildSvg(array $barcodeData, string $data, int $width, int $height, array $longBarPositions, int $marginLeft, int $marginRight): string
     {
         $bgColor = $this->config->bgColor;
         $barColor = $this->config->barColor;
 
-        // 验证颜色对比度，确保可被扫描
         if (!$this->validateContrast($bgColor, $barColor)) {
-            // 如果对比度不足，使用默认黑白配色
             $bgColor = '#FFFFFF';
             $barColor = '#000000';
         }
@@ -139,7 +156,6 @@ class SvgRenderer implements RendererInterface
         $svg = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
         $svg .= '<svg xmlns="http://www.w3.org/2000/svg" width="' . $width . '" height="' . $height . '" viewBox="0 0 ' . $width . ' ' . $height . '">' . "\n";
         
-        // 定义渐变
         if ($this->enableGradient) {
             $svg .= '  <defs>' . "\n";
             $svg .= '    <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">' . "\n";
@@ -151,23 +167,31 @@ class SvgRenderer implements RendererInterface
         
         $svg .= '  <rect width="100%" height="100%" fill="' . $bgColor . '"/>' . "\n";
 
-        // 绘制条码条
+        // 绘制条码条并分析结构
         $x = $marginLeft;
-        $currentModule = 0;
-        
         $fillColor = $this->enableGradient ? 'url(#barGradient)' : $barColor;
-
-        foreach ($barcodeData as $element) {
+        
+        // 记录所有条的位置
+        $bars = [];
+        
+        foreach ($barcodeData as $elementIndex => $element) {
             $isBar = $element > 0;
             $barWidth = abs($element) * $this->config->width;
 
             if ($isBar) {
-                $isLongBar = in_array($currentModule, $longBarPositions, true) &&
+                $isLongBar = in_array($elementIndex, $longBarPositions, true) &&
                     $this->config->rotateLongBars;
+
+                $bars[] = [
+                    'x' => $x,
+                    'width' => $barWidth,
+                    'isLongBar' => $isLongBar,
+                    'elementIndex' => $elementIndex,
+                ];
 
                 $barHeight = $this->config->height;
                 if ($isLongBar) {
-                    $barHeight = (int)($barHeight * $this->config->longBarRatio);
+                    $barHeight = (int)($barHeight * $this->longBarHeightRatio);
                 }
                 
                 $rx = $this->enableRoundedBars ? $this->cornerRadius : 0;
@@ -176,8 +200,10 @@ class SvgRenderer implements RendererInterface
             }
             
             $x += $barWidth;
-            $currentModule += abs($element);
         }
+
+        // 分析条码结构
+        $this->analyzeBarcodeStructure($bars, $x, $marginLeft);
 
         // 绘制文字
         if ($this->config->showText) {
@@ -190,56 +216,316 @@ class SvgRenderer implements RendererInterface
     }
 
     /**
-     * 验证颜色对比度是否足够（WCAG标准）
-     * 
-     * @param string $bgColor 背景色
-     * @param string $barColor 条码色
-     * @return bool 对比度足够返回true
+     * 分析条码结构
+     */
+    protected function analyzeBarcodeStructure(array $bars, int $totalWidth, int $marginLeft): void
+    {
+        $longBars = array_filter($bars, fn($bar) => $bar['isLongBar']);
+        $longBars = array_values($longBars);
+        
+        $this->barcodeStructure = [
+            'totalWidth' => $totalWidth - $marginLeft,
+            'longBars' => $longBars,
+            'allBars' => $bars,
+            'hasLongBars' => !empty($longBars),
+            'marginLeft' => $marginLeft,
+        ];
+        
+        if (empty($longBars)) {
+            return;
+        }
+        
+        $longBarCount = count($longBars);
+        
+        if ($longBarCount >= 6) {
+            $this->analyzeEANStructure($longBars);
+        }
+    }
+
+    /**
+     * 分析 EAN/UPC 系列条码结构
+     */
+    protected function analyzeEANStructure(array $longBars): void
+    {
+        usort($longBars, fn($a, $b) => $a['x'] <=> $b['x']);
+        
+        $startGuardLeft = $longBars[0];
+        $startGuardRight = $longBars[1];
+        
+        $endGuardLeft = $longBars[count($longBars) - 2];
+        $endGuardRight = $longBars[count($longBars) - 1];
+        
+        $middleIdx = (int)(count($longBars) / 2);
+        $middleGuardLeft = $longBars[$middleIdx - 1];
+        $middleGuardRight = $longBars[$middleIdx];
+        
+        $marginLeft = $this->barcodeStructure['marginLeft'];
+        
+        $this->barcodeStructure['regions'] = [
+            'startGuard' => [
+                'left' => $startGuardLeft['x'],
+                'right' => $startGuardRight['x'] + $startGuardRight['width'],
+            ],
+            'middleGuard' => [
+                'left' => $middleGuardLeft['x'],
+                'right' => $middleGuardRight['x'] + $middleGuardRight['width'],
+            ],
+            'endGuard' => [
+                'left' => $endGuardLeft['x'],
+                'right' => $endGuardRight['x'] + $endGuardRight['width'],
+            ],
+            'leftData' => [
+                'left' => $startGuardRight['x'] + $startGuardRight['width'],
+                'right' => $middleGuardLeft['x'],
+            ],
+            'rightData' => [
+                'left' => $middleGuardRight['x'] + $middleGuardRight['width'],
+                'right' => $endGuardLeft['x'],
+            ],
+            'leftQuietZone' => [
+                'left' => $marginLeft,
+                'right' => $startGuardLeft['x'],
+                'center' => (int)(($marginLeft + $startGuardLeft['x']) / 2),
+            ],
+            'rightQuietZone' => [
+                'left' => $endGuardRight['x'] + $endGuardRight['width'],
+                'right' => $this->barcodeStructure['totalWidth'] + $marginLeft,
+                'center' => (int)((($endGuardRight['x'] + $endGuardRight['width']) + 
+                    ($this->barcodeStructure['totalWidth'] + $marginLeft)) / 2),
+            ],
+        ];
+    }
+
+    /**
+     * 构建文字元素
+     */
+    protected function buildTextElements(string $data, int $marginLeft): string
+    {
+        if (!$this->barcodeStructure['hasLongBars']) {
+            return $this->buildSimpleText($data, $marginLeft);
+        }
+        
+        return $this->buildSegmentedText($data);
+    }
+
+    /**
+     * 简单文本（无长竖线）
+     */
+    protected function buildSimpleText(string $data, int $marginLeft): string
+    {
+        $textY = $this->config->marginTop + $this->config->height + $this->config->textOffset + $this->config->fontSize;
+        $barColor = $this->config->barColor;
+        $fontSize = $this->config->fontSize;
+        
+        return '  <text x="' . $marginLeft . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '">' . htmlspecialchars($data) . '</text>' . "\n";
+    }
+
+    /**
+     * 分段文本（长竖线特征条码）
+     */
+    protected function buildSegmentedText(string $data): string
+    {
+        $regions = $this->barcodeStructure['regions'] ?? null;
+        if ($regions === null) {
+            return '';
+        }
+        
+        $segments = $this->determineSegments($data);
+        if (empty($segments)) {
+            return '';
+        }
+        
+        $this->calculateDynamicParameters($segments, $regions);
+        
+        $barY = $this->config->marginTop;
+        $textY = $barY + (int)($this->config->height * $this->longBarHeightRatio) + $this->dynamicTextOffset;
+        
+        $textElements = '';
+        foreach ($segments as $segment) {
+            $textElements .= $this->buildSegment($segment, $regions, $textY);
+        }
+        
+        return $textElements;
+    }
+
+    /**
+     * 确定分段策略
+     */
+    protected function determineSegments(string $data): array
+    {
+        $length = strlen($data);
+        $type = $this->barcodeType;
+        
+        switch ($type) {
+            case 'EAN-13':
+                if ($length === 13) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
+                break;
+                
+            case 'UPC-A':
+                if ($length === 12) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 5), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 6, 5), 'region' => 'rightData', 'type' => 'multi'],
+                        ['text' => $data[11], 'region' => 'rightQuietZone', 'type' => 'single'],
+                    ];
+                }
+                break;
+                
+            case 'EAN-8':
+                if ($length === 8) {
+                    return [
+                        ['text' => substr($data, 0, 4), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 4, 4), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
+                break;
+                
+            case 'ISSN':
+                if ($length === 13) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
+                break;
+        }
+        
+        return [];
+    }
+
+    /**
+     * 计算动态参数
+     */
+    protected function calculateDynamicParameters(array $segments, array $regions): void
+    {
+        $barcodeWidth = $this->barcodeStructure['totalWidth'] ?? 200;
+        $baseFontSize = $this->config->fontSize;
+        
+        // 动态调整字号 - 根据条码宽度和数据密度
+        // 计算数据区域的平均宽度,用于更精确的字号调整
+        $avgRegionWidth = 0;
+        $multiCount = 0;
+        foreach ($segments as $segment) {
+            if ($segment['type'] === 'multi' && isset($regions[$segment['region']])) {
+                $region = $regions[$segment['region']];
+                $avgRegionWidth += ($region['right'] - $region['left']) / strlen($segment['text']);
+                $multiCount++;
+            }
+        }
+        
+        if ($multiCount > 0) {
+            $avgRegionWidth = $avgRegionWidth / $multiCount;
+            // 根据平均每个数字的宽度调整字号
+            if ($avgRegionWidth < 8) {
+                $this->dynamicFontSize = max(10, $baseFontSize - 2);
+            } elseif ($avgRegionWidth > 12) {
+                $this->dynamicFontSize = min(16, $baseFontSize + 2);
+            } else {
+                $this->dynamicFontSize = $baseFontSize;
+            }
+        } else {
+            // 回退到基于总宽度的调整
+            if ($barcodeWidth < 150) {
+                $this->dynamicFontSize = max(10, $baseFontSize - 2);
+            } elseif ($barcodeWidth > 400) {
+                $this->dynamicFontSize = min(16, $baseFontSize + 2);
+            } else {
+                $this->dynamicFontSize = $baseFontSize;
+            }
+        }
+        
+        // 动态计算偏移 - 确保文字与长竖线有足够距离
+        $longBarHeight = $this->config->height * $this->longBarHeightRatio;
+        $normalHeight = $this->config->height;
+        $extraHeight = $longBarHeight - $normalHeight;
+        
+        // 根据字号调整偏移量,确保文字不会太贴近长竖线
+        $fontBasedOffset = (int)($this->dynamicFontSize * 0.2);
+        $this->dynamicTextOffset = max(3, max($fontBasedOffset, (int)($extraHeight * 0.35)));
+    }
+
+    /**
+     * 构建单个分段
+     */
+    protected function buildSegment(array $segment, array $regions, int $textY): string
+    {
+        $regionName = $segment['region'];
+        if (!isset($regions[$regionName])) {
+            return '';
+        }
+        
+        $region = $regions[$regionName];
+        $text = $segment['text'];
+        $length = strlen($text);
+        
+        if ($length === 0) {
+            return '';
+        }
+        
+        $barColor = $this->config->barColor;
+        $fontSize = $this->dynamicFontSize;
+        
+        $textElements = '';
+        
+        if ($segment['type'] === 'single' || $length === 1) {
+            $centerX = $region['center'] ?? (int)(($region['left'] + $region['right']) / 2);
+            $textElements .= '  <text x="' . $centerX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . htmlspecialchars($text) . '</text>' . "\n";
+        } else {
+            $regionWidth = $region['right'] - $region['left'];
+            $spacing = $regionWidth / $length;
+            
+            for ($i = 0; $i < $length; $i++) {
+                $x = (int)($region['left'] + $spacing * $i + $spacing / 2);
+                $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . htmlspecialchars($text[$i]) . '</text>' . "\n";
+            }
+        }
+        
+        return $textElements;
+    }
+
+    /**
+     * 验证颜色对比度
      */
     protected function validateContrast(string $bgColor, string $barColor): bool
     {
-        // 计算相对亮度
         $bgLuminance = $this->getRelativeLuminance($bgColor);
         $barLuminance = $this->getRelativeLuminance($barColor);
         
-        // 计算对比度
         $lightest = max($bgLuminance, $barLuminance);
         $darkest = min($bgLuminance, $barLuminance);
         $contrast = ($lightest + 0.05) / ($darkest + 0.05);
         
-        // 条形码要求对比度至少为3:1（实际应更高，推荐4.5:1以上）
         return $contrast >= 3.0;
     }
 
     /**
-     * 获取颜色的相对亮度（WCAG标准）
-     * 
-     * @param string $color 十六进制颜色
-     * @return float 相对亮度（0-1）
+     * 获取颜色的相对亮度
      */
     protected function getRelativeLuminance(string $color): float
     {
         $rgb = $this->hexToRgb($color);
         
-        // 转换为sRGB
         $rsRGB = $rgb[0] / 255;
         $gsRGB = $rgb[1] / 255;
         $bsRGB = $rgb[2] / 255;
         
-        // 应用gamma校正
         $r = $rsRGB <= 0.03928 ? $rsRGB / 12.92 : pow(($rsRGB + 0.055) / 1.055, 2.4);
         $g = $gsRGB <= 0.03928 ? $gsRGB / 12.92 : pow(($gsRGB + 0.055) / 1.055, 2.4);
         $b = $bsRGB <= 0.03928 ? $bsRGB / 12.92 : pow(($bsRGB + 0.055) / 1.055, 2.4);
         
-        // 计算相对亮度
         return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
     }
 
     /**
      * 十六进制颜色转换为RGB数组
-     * 
-     * @param string $hex 十六进制颜色值
-     * @return array<int> RGB数组 [R, G, B]
      */
     protected function hexToRgb(string $hex): array
     {
@@ -254,109 +540,5 @@ class SvgRenderer implements RendererInterface
             (int) hexdec(substr($hex, 2, 2)),
             (int) hexdec(substr($hex, 4, 2)),
         ];
-    }
-
-    protected function buildTextElements(string $data, int $marginLeft): string
-    {
-        // 增加文字与条码间距，避免与长竖线重叠
-        $textY = $this->config->marginTop + $this->config->height + $this->config->textOffset + $this->config->fontSize + 2;
-        $barColor = $this->config->barColor;
-        $fontSize = $this->config->fontSize;
-
-        $textElements = '';
-
-        switch ($this->barcodeType) {
-            case 'EAN-13':
-            case 'ISBN':
-                if (strlen($data) === 13) {
-                    $firstDigit = $data[0];
-                    $leftDigits = substr($data, 1, 6);
-                    $rightDigits = substr($data, 7, 6);
-
-                    // 第1位数字（最左侧，静区左侧）- 优化位置避免太靠左
-                    $firstX = $marginLeft + 9 * $this->config->width;
-                    $textElements .= '  <text x="' . $firstX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $firstDigit . '</text>' . "\n";
-
-                    // 左侧6位数字（第2-7位，在起始和中间保护符之间）
-                    // 优化起始位置：静区11 + 起始符3 + 模块中心偏移(3.5) = 模块17.5
-                    $leftStart = $marginLeft + 17.5 * $this->config->width;
-                    for ($i = 0; $i < 6; $i++) {
-                        $x = $leftStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $leftDigits[$i] . '</text>' . "\n";
-                    }
-
-                    // 右侧6位数字（第8-13位，在中间和终止保护符之间）
-                    // 优化起始位置：静区11 + 起始符3 + 左侧42 + 分隔符5 + 偏移(3.5) = 模块64.5
-                    $rightStart = $marginLeft + 64.5 * $this->config->width;
-                    for ($i = 0; $i < 6; $i++) {
-                        $x = $rightStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $rightDigits[$i] . '</text>' . "\n";
-                    }
-                }
-                break;
-
-            case 'EAN-8':
-                if (strlen($data) === 8) {
-                    $leftDigits = substr($data, 0, 4);
-                    $rightDigits = substr($data, 4, 4);
-
-                    // 左侧4位数字
-                    // 优化起始位置：静区7 + 起始符3 + 模块中心偏移(3.5) = 模块13.5
-                    $leftStart = $marginLeft + 13.5 * $this->config->width;
-                    for ($i = 0; $i < 4; $i++) {
-                        $x = $leftStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $leftDigits[$i] . '</text>' . "\n";
-                    }
-
-                    // 右侧4位数字
-                    // 优化起始位置：静区7 + 起始符3 + 左侧28 + 分隔符5 + 偏移(3.5) = 模块46.5
-                    $rightStart = $marginLeft + 46.5 * $this->config->width;
-                    for ($i = 0; $i < 4; $i++) {
-                        $x = $rightStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $rightDigits[$i] . '</text>' . "\n";
-                    }
-                }
-                break;
-
-            case 'UPC-A':
-                if (strlen($data) === 12) {
-                    $numberSystem = $data[0];
-                    $manufacturer = substr($data, 1, 5);
-                    $product = substr($data, 6, 5);
-                    $checkDigit = $data[11];
-
-                    // 系统字符（第1位）- 优化位置避免太靠左
-                    $firstX = $marginLeft + 7 * $this->config->width;
-                    $textElements .= '  <text x="' . $firstX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $numberSystem . '</text>' . "\n";
-
-                    // 厂商代码（第2-6位）
-                    // 优化起始位置：静区9 + 起始符3 + 模块中心偏移(3.5) = 模块15.5
-                    $leftStart = $marginLeft + 15.5 * $this->config->width;
-                    for ($i = 0; $i < 5; $i++) {
-                        $x = $leftStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $manufacturer[$i] . '</text>' . "\n";
-                    }
-
-                    // 产品代码（第7-11位）
-                    // 优化起始位置：静区9 + 起始符3 + 左侧35 + 分隔符5 + 偏移(3.5) = 模块57.5
-                    $rightStart = $marginLeft + 57.5 * $this->config->width;
-                    for ($i = 0; $i < 5; $i++) {
-                        $x = $rightStart + $i * 7 * $this->config->width;
-                        $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $product[$i] . '</text>' . "\n";
-                    }
-
-                    // 校验位（第12位）- 优化位置避免太靠右
-                    $checkX = $marginLeft + 103 * $this->config->width;
-                    $textElements .= '  <text x="' . $checkX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $checkDigit . '</text>' . "\n";
-                }
-                break;
-
-            default:
-                $textX = $marginLeft;
-                $textElements .= '  <text x="' . $textX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '">' . htmlspecialchars($data) . '</text>' . "\n";
-                break;
-        }
-
-        return $textElements;
     }
 }

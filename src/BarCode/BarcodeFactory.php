@@ -12,7 +12,6 @@ use zxf\Utils\BarCode\Generator\UPCAGenerator;
 use zxf\Utils\BarCode\Generator\Code128Generator;
 use zxf\Utils\BarCode\Generator\Code39Generator;
 use zxf\Utils\BarCode\Generator\ITF14Generator;
-use zxf\Utils\BarCode\Generator\ISBNGenerator;
 use zxf\Utils\BarCode\Generator\ISSNGenerator;
 use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
@@ -42,7 +41,6 @@ class BarcodeFactory
         'code-39' => Code39Generator::class,
         'itf14' => ITF14Generator::class,
         'itf-14' => ITF14Generator::class,
-        'isbn' => ISBNGenerator::class,
         'issn' => ISSNGenerator::class,
     ];
 

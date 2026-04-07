@@ -7,17 +7,15 @@ namespace zxf\Utils\BarCode\Generator;
 use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
- * Code 128 条码生成器
+ * Code 128 条码生成器（标准实现）
  * 
  * Code 128 是高密度线性条码，支持所有128个ASCII字符
- * 广泛应用于物流、仓储、运输等行业
  * 
- * 特征：
- * - 可变长度，支持数字、字母、符号
- * - 无长竖线特征
- * - 条空宽窄不同（1-4个模块宽）
- * - 高密度编码
- * - 物流/仓储专用
+ * 【编码规则】：
+ * - 每个字符由11个模块组成（条空交替）
+ * - 3个条和3个空，每个1-4模块宽
+ * - 总宽度恒为11模块
+ * - 使用起始符、校验符、终止符
  */
 class Code128Generator extends BaseGenerator
 {
@@ -26,9 +24,16 @@ class Code128Generator extends BaseGenerator
     protected const START_B = 104;
     protected const START_C = 105;
     protected const STOP = 106;
+    
+    /** @var int 模块宽度 */
+    protected const MODULE_WIDTH = 2;
+    
+    /** @var int 静区宽度（10模块） */
+    protected const QUIET_ZONE = 20;
 
     /**
      * Code 128 编码表（每个值对应11个模块的条空模式）
+     * 1=条，0=空
      * 
      * @var array<string>
      */
@@ -63,7 +68,7 @@ class Code128Generator extends BaseGenerator
      * 生成 Code 128 条码
      * 
      * @param string $data 要编码的数据
-     * @return array<int> 返回条形码条空模式数组
+     * @return array<int> 条空模式数组
      */
     public function generate(string $data): array
     {
@@ -117,6 +122,7 @@ class Code128Generator extends BaseGenerator
             return false;
         }
 
+        // Code 128 支持所有标准 ASCII (0-127)
         for ($i = 0; $i < strlen($data); $i++) {
             if (ord($data[$i]) > 127) {
                 return false;
@@ -124,26 +130,6 @@ class Code128Generator extends BaseGenerator
         }
 
         return true;
-    }
-
-    /**
-     * 计算 Code 128 校验位
-     * 
-     * @return int 返回校验值
-     */
-    public function calculateChecksum(string $data = ''): string
-    {
-        return (string) $this->calculateCode128Checksum();
-    }
-
-    /**
-     * 获取条码类型名称
-     * 
-     * @return string 返回'Code 128'
-     */
-    public function getType(): string
-    {
-        return self::TYPE;
     }
 
     /**
@@ -166,14 +152,14 @@ class Code128Generator extends BaseGenerator
             return $ord - 32;
         }
         
-        // ` (96) 到 DEL (127) -> 64-95
-        if ($ord >= 96 && $ord <= 127) {
+        // ` (96) 到 ~ (126) -> 64-94
+        if ($ord >= 96 && $ord <= 126) {
             return $ord - 32;
         }
         
-        // 控制字符 (0-31) -> 64-95
-        if ($ord >= 0 && $ord <= 31) {
-            return $ord + 64;
+        // DEL (127) -> 95
+        if ($ord === 127) {
+            return 95;
         }
         
         return 0;
@@ -186,6 +172,10 @@ class Code128Generator extends BaseGenerator
      */
     protected function calculateCode128Checksum(): int
     {
+        if (empty($this->encodedValues)) {
+            return 0;
+        }
+        
         $sum = $this->encodedValues[0]; // 起始符
         
         for ($i = 1; $i < count($this->encodedValues); $i++) {
@@ -202,15 +192,50 @@ class Code128Generator extends BaseGenerator
      */
     protected function convertToBars(): array
     {
-        $binary = '';
+        $bars = [];
+        
+        // 左侧静区 (统一使用模块宽度)
+        $bars[] = -(self::QUIET_ZONE / self::MODULE_WIDTH) * self::MODULE_WIDTH;
         
         foreach ($this->encodedValues as $value) {
-            $binary .= $this->encoding[$value];
+            $pattern = $this->encoding[$value];
+            
+            // 解析11位编码
+            for ($i = 0; $i < strlen($pattern); $i++) {
+                $isBar = ($pattern[$i] === '1');
+                $width = self::MODULE_WIDTH;
+                
+                if ($isBar) {
+                    $bars[] = $width;
+                } else {
+                    $bars[] = -$width;
+                }
+            }
         }
         
-        // 添加终止条（2个模块）
-        $binary .= '11';
+        // 右侧静区 (统一使用模块宽度)
+        $bars[] = -(self::QUIET_ZONE / self::MODULE_WIDTH) * self::MODULE_WIDTH;
         
-        return $this->binaryToBars($binary);
+        return $bars;
+    }
+
+    /**
+     * 计算 Code 128 校验位
+     * 
+     * @return string 返回校验值
+     */
+    public function calculateChecksum(string $data = ''): string
+    {
+        return (string) $this->calculateCode128Checksum();
+    }
+
+    /**
+     * 获取条码类型名称
+     * 
+     * @return string 返回'Code 128'
+     */
+    public function getType(): string
+    {
+        return self::TYPE;
     }
 }

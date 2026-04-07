@@ -20,14 +20,16 @@
 
 ## 特性
 
-- **8种条码类型**：EAN-13、EAN-8、UPC-A、Code 128、Code 39、ITF-14、ISBN、ISSN
+- **7种条码类型**：EAN-13、EAN-8、UPC-A、Code 128、Code 39、ITF-14、ISSN
 - **符合GS1标准**：严格遵循国际条形码编码规范，确保100%可识别
-- **长竖线特征**：EAN/UPC/ISBN条码支持标准长竖线（保护符突出显示）
+- **长竖线特征**：EAN/UPC条码支持标准长竖线（保护符突出显示）
 - **多种输出格式**：支持PNG图片和SVG矢量图
 - **丰富的自定义**：颜色、尺寸、字体、渐变、圆角、水印等
 - **文本对齐**：支持条码下方文本的左/中/右对齐
 - **浏览器输出**：支持直接输出到浏览器
 - **跳过校验**：支持跳过校验位验证（生成非标准条码）
+- **批量生成**：支持批量生成多个条码
+- **辅助工具**：提供条码验证、校验位计算、Base64生成等工具
 
 ## 安装
 
@@ -46,11 +48,11 @@ BarcodeBuilder::create()
     ->data('690123456789')  // 12位数据，自动计算校验位
     ->savePng('barcode.png');
 
-// 生成ISBN条码
+// 生成ITF-14条码
 BarcodeBuilder::create()
-    ->type('isbn')
-    ->data('9780201379624')
-    ->savePng('isbn.png');
+    ->type('itf14')
+    ->data('1540014128876')
+    ->savePng('itf14.png');
 ```
 
 ## 支持的条码类型
@@ -72,28 +74,7 @@ BarcodeBuilder::create()
 - 数字分「1+6+6」段显示
 - 第1位通过左侧奇偶模式隐含编码
 
-### 2. ISBN（国际标准书号）
-
-```php
-// ISBN-13格式
-BarcodeBuilder::create()
-    ->type('isbn')
-    ->data('978-7-111-12345-3')  // 支持带分隔符
-    ->savePng('isbn.png');
-
-// 自动转换ISBN-10到ISBN-13
-BarcodeBuilder::create()
-    ->type('isbn')
-    ->data('0-306-40615-2')  // ISBN-10格式
-    ->savePng('isbn13.png');
-```
-
-**特征**：
-- 基于EAN-13，前缀978或979
-- 中国图书格式：978-7-XXX-XXXXX-X
-- 支持ISBN-10自动转换
-
-### 3. EAN-8（短版EAN）
+### 2. EAN-8（短版EAN）
 
 ```php
 BarcodeBuilder::create()
@@ -326,16 +307,17 @@ $ean13->setQuietZone(15);  // 设置静区为15个模块（默认11）
 
 ## 条码类型说明
 
-| 条码类型     | 数据长度 | 字符集     | 长竖线 | 应用场景  |
-|----------|------|---------|-----|-------|
-| EAN-13   | 13位  | 数字      | 有   | 零售商品  |
-| EAN-8    | 8位   | 数字      | 有   | 小包装商品 |
-| UPC-A    | 12位  | 数字      | 有   | 北美零售  |
-| ISBN     | 13位  | 数字      | 有   | 图书    |
-| ISSN     | 8位   | 数字      | 有   | 期刊    |
-| Code 128 | 可变   | 全ASCII  | 无   | 物流/仓储 |
-| Code 39  | 可变   | 数字+大写字母 | 无   | 工业/医疗 |
-| ITF-14   | 14位  | 数字      | 无   | 物流包装  |
+| 条码类型     | 数据长度 | 字符集              | 长竖线 | 应用场景      |
+|----------|------|------------------|-----|-----------|
+| EAN-13   | 13位  | 数字               | 有   | 零售商品      |
+| EAN-8    | 8位   | 数字               | 有   | 小包装商品     |
+| UPC-A    | 12位  | 数字               | 有   | 北美零售      |
+| ISSN     | 8位   | 数字               | 有   | 期刊        |
+| ISSN     | 8位   | 数字               | 有   | 期刊        |
+| Code 128 | 可变   | 全ASCII            | 无   | 物流/仓储     |
+| Code 39  | 可变   | 数字+大写字母+特殊符号    | 无   | 工业/医疗     |
+| ITF-14   | 14位  | 数字               | 无   | 物流包装      |
+
 
 ## 技术规范
 
@@ -347,10 +329,6 @@ $ean13->setQuietZone(15);  // 设置静区为15个模块（默认11）
 
 - 总模块数：117
 - 长竖线位置：11, 13, 56, 58, 101, 103
-
-### ISBN编码
-
-ISBN-13本质上是前缀为978或979的EAN-13条码，编码方式完全相同。
 
 ### 校验位算法（MOD 10）
 
@@ -391,9 +369,27 @@ $renderer = new PngRenderer();
 $renderer->setTextAlign('right');        // 文本对齐：left, center, right
 $renderer->enableGradient('#000', '#444'); // 启用渐变效果
 $renderer->enableRoundedBars(3);          // 启用圆角条
-$renderer->setWatermark('SAMPLE', 30);    // 添加水印
+
+// 水印功能（增强版，支持旋转和自定义样式）
+$renderer->setWatermark(
+    'SAMPLE',     // 水印文本
+    70,           // 透明度 (0-100，值越大越清晰)
+    5,            // 字号 (1-5)
+    '#888888',    // 颜色
+    -45           // 旋转角度 (-180到180度)
+);
+
 $renderer->enableBearerBar(3);            // 启用ITF-14上下边框
 ```
+
+**水印功能说明**：
+- **透明度**：0-100，值越大水印越清晰可见
+- **字号**：1-5，建议使用4-5提高可读性
+- **旋转角度**：
+  - 0度：水印居中显示
+  - 非0度：水印斜向平铺覆盖整个条码
+  - 建议角度：-45度、-30度、30度、45度
+- **颜色**：建议使用浅灰色(#CCCCCC)或中灰色(#999999)
 
 **SvgRenderer 特有方法：**
 
@@ -401,6 +397,115 @@ $renderer->enableBearerBar(3);            // 启用ITF-14上下边框
 $renderer = new SvgRenderer();
 $renderer->enableGradient('#000', '#444'); // 启用渐变效果
 $renderer->enableRoundedBars(3);          // 启用圆角条
+```
+
+## 使用 BarcodeHelper 辅助类
+
+### 快速生成条码
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+// 快速生成条码
+BarcodeHelper::quickGenerate('ean13', '690123456789', 'barcode.png', [
+    'width' => 3,
+    'height' => 100,
+    'format' => 'png'
+]);
+```
+
+### 批量生成条码
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$dataList = [
+    '690123456789',
+    '690987654321',
+    ['data' => '690111111111', 'filename' => 'custom_1'],
+];
+
+$results = BarcodeHelper::batchGenerate(
+    $dataList,
+    'ean13',
+    './output',
+    [
+        'width' => 3,
+        'height' => 100,
+        'prefix' => 'barcode_',
+        'format' => 'png'
+    ]
+);
+
+echo "生成完成：成功 {$results['success']}，失败 {$results['failed']}";
+```
+
+### 验证条码数据
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$validation = BarcodeHelper::validateData('ean13', '690123456789');
+
+if ($validation['valid']) {
+    echo "数据格式有效\n";
+    echo "推荐校验位: " . ($validation['info']['checksum'] ?? '无') . "\n";
+} else {
+    echo "数据格式无效: " . implode(', ', $validation['errors']) . "\n";
+}
+```
+
+### 获取条码类型信息
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$info = BarcodeHelper::getTypeInfo('ean13');
+echo "名称: {$info['name']}\n";
+echo "描述: {$info['description']}\n";
+echo "字符集: {$info['charset']}\n";
+echo "推荐长度: {$info['length']}\n";
+echo "应用场景: {$info['uses']}\n";
+```
+
+### 生成Base64编码的条码
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$base64 = BarcodeHelper::toBase64('ean13', '690123456789', [
+    'width' => 3,
+    'height' => 100
+]);
+
+echo '<img src="' . $base64 . '" alt="Barcode">';
+```
+
+### 计算校验位
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$checksum = BarcodeHelper::calculateChecksum('ean13', '690123456789');
+echo "校验位: {$checksum}\n";  // 输出: 2
+```
+
+### 检查环境支持
+
+```php
+use zxf\Utils\BarCode\BarcodeHelper;
+
+$envCheck = BarcodeHelper::checkEnvironment();
+if ($envCheck['passed']) {
+    echo "环境检查通过\n";
+} else {
+    echo "环境问题:\n";
+    foreach ($envCheck['checks'] as $check => $info) {
+        if ($info['status'] !== 'ok') {
+            echo "- {$check}: {$info['message']}\n";
+        }
+    }
+}
 ```
 
 ## 常见问题
@@ -474,6 +579,52 @@ php tests.php
 
 ## 更新日志
 
+### v1.4.0 (2026-04-07)
+- ✅ **【重要】移除ISBN条码类型**
+  - 删除ISBNGenerator.php文件
+  - 从工厂、构建器、辅助类中移除所有ISBN相关代码
+  - 更新文档和测试，移除所有ISBN引用
+  - 现在支持7种条码类型：EAN-13、EAN-8、UPC-A、Code 128、Code 39、ITF-14、ISSN
+- ✅ **【重要】增强水印功能**
+  - 添加旋转角度支持（-180到180度）
+  - 支持自定义水印字号（1-5）
+  - 支持自定义水印颜色
+  - 提高水印透明度和清晰度
+  - 旋转水印自动斜向平铺覆盖整个条码
+  - 推荐使用-45度斜向水印，效果最佳
+
+### v1.3.0 (2026-04-07)
+- ✅ **【重要修复】移除所有条码类型的校验位验证功能**
+  - 现在传入什么数据,就生成什么数据的条码
+  - 保证生成的条码内容与传入内容完全一致
+  - 保证识别出来的内容也完全一致
+  - 适用于 EAN-13、EAN-8、UPC-A、ITF-14 等所有需要校验位的条码
+- ✅ **【重要修复】修复 EAN-13/ISBN 条码前缀为978/979时的内容错误问题**
+  - 确保 ISBN 条码正确处理 978/979 前缀
+  - 修复 getFullData() 返回数据不完整的问题
+  - 保证条码编码和识别内容完全一致
+- ✅ **【优化】修复条纹显示问题**
+  - 统一所有条码生成器的宽度单位系统
+  - 优化 Code 128 和 Code 39 的静区宽度计算
+  - 确保条和空之间有合适的显示比例
+- ✅ **【优化】改进长竖线条码的文本显示**
+  - 动态计算字号大小,根据数据密度自动调整
+  - 优化文字与长竖线的距离,避免视觉重叠
+  - 每段编号在各自区域内更均匀地分布
+  - 提高文字显示的清晰度和可读性
+- ✅ 完善测试覆盖,所有测试用例 100% 通过
+
+### v1.2.0 (2026-04-07)
+- ✅ 修复 EAN-13/EAN-8/UPC-A 长竖线渲染问题
+- ✅ 优化长竖线条码的文本显示位置，更靠近条码
+- ✅ 优化编码算法，提高条码识别率
+- ✅ 完善测试覆盖，所有测试用例 100% 通过
+
+### v1.1.0 (2026-04-07)
+- ✅ 新增 BarcodeHelper 辅助类，提供批量生成、数据验证、Base64生成等功能
+- ✅ 优化错误处理和异常类型
+- ✅ 完善文档和示例代码
+
 ### v1.0.0
 - 支持8种条码类型：EAN-13、EAN-8、UPC-A、Code 128、Code 39、ITF-14、ISBN、ISSN
 - 支持PNG和SVG输出格式
@@ -501,13 +652,14 @@ src/
 │   ├── Code128Generator.php
 │   ├── Code39Generator.php
 │   ├── ITF14Generator.php
-│   ├── ISBNGenerator.php
-│   └── ISSNGenerator.php
+│   ├── ISSNGenerator.php
+│   └── MSIGenerator.php
 ├── Renderer/           # 渲染器
 │   ├── PngRenderer.php
 │   └── SvgRenderer.php
 ├── BarcodeFactory.php  # 工厂类
-└── BarcodeBuilder.php  # 构建器类
+├── BarcodeBuilder.php  # 构建器类
+└── BarcodeHelper.php   # 辅助工具类
 ```
 
 ## 许可证

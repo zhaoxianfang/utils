@@ -1404,9 +1404,10 @@ class QrCode
         // 计算总标签高度（包含外边距）- 变量将在后续版本中使用
         // $totalLabelHeight = $contentHeight + $marginTop + $this->labelOptions->getMarginBottom();
 
-        // 检查标签是否超出图像底部
-        // $labelY = $qrY + $qrHeight + $marginTop;
-        $labelY = $qrHeight + $marginTop - $qrY * 2;
+        // 计算标签位置：紧贴二维码底部，间距最小化
+        // 标签Y坐标 = 二维码Y坐标 + 二维码高度 + 最小上边距
+        $effectiveMarginTop = max(1, (int)($marginTop / 4)); // 进一步减少上边距，使文本更靠近二维码
+        $labelY = $qrY + $qrHeight + $effectiveMarginTop;
 
         if ($labelY + $contentHeight > $finalImageHeight) {
             // 如果会超出，缩小字号
@@ -1771,6 +1772,141 @@ class QrCode
     public function getBackgroundColor(): Color
     {
         return $this->backgroundColor;
+    }
+
+    /**
+     * 获取外边距
+     *
+     * @return int
+     */
+    public function getPadding(): int
+    {
+        return $this->padding;
+    }
+
+    /**
+     * 获取二维码版本
+     *
+     * @return int
+     */
+    public function getVersion(): int
+    {
+        return $this->version;
+    }
+
+    /**
+     * 获取编码格式
+     *
+     * @return string|null
+     */
+    public function getEncoding(): ?string
+    {
+        return $this->encoding;
+    }
+
+    /**
+     * 获取输出格式
+     *
+     * @return string
+     */
+    public function getFormat(): string
+    {
+        return $this->format;
+    }
+
+    /**
+     * 获取图片质量
+     *
+     * @return int
+     */
+    public function getQuality(): int
+    {
+        return $this->quality;
+    }
+
+    /**
+     * 检查是否启用圆点风格
+     *
+     * @return bool
+     */
+    public function isRounded(): bool
+    {
+        return $this->rounded;
+    }
+
+    /**
+     * 获取圆点半径
+     *
+     * @return float
+     */
+    public function getRoundedRadius(): float
+    {
+        return $this->roundedRadius;
+    }
+
+    /**
+     * 检查是否启用透明背景
+     *
+     * @return bool
+     */
+    public function isTransparentBackground(): bool
+    {
+        return $this->transparentBackground;
+    }
+
+    /**
+     * 获取Logo路径
+     *
+     * @return string|null
+     */
+    public function getLogoPath(): ?string
+    {
+        return $this->logoPath;
+    }
+
+    /**
+     * 克隆当前二维码配置并修改数据
+     *
+     * @param string $newData 新数据
+     * @return self
+     */
+    public function cloneWithData(string $newData): self
+    {
+        $cloned = new self();
+        
+        // 复制所有属性
+        $cloned->data = $newData;
+        $cloned->size = $this->size;
+        $cloned->margin = $this->margin;
+        $cloned->padding = $this->padding;
+        $cloned->errorCorrectionLevel = $this->errorCorrectionLevel;
+        $cloned->version = $this->version;
+        $cloned->foregroundColor = $this->foregroundColor->cloneColor();
+        $cloned->backgroundColor = $this->backgroundColor->cloneColor();
+        $cloned->logoPath = $this->logoPath;
+        $cloned->logoWidth = $this->logoWidth;
+        $cloned->logoHeight = $this->logoHeight;
+        $cloned->logoScale = $this->logoScale;
+        $cloned->logoCircular = $this->logoCircular;
+        $cloned->logoRounded = $this->logoRounded;
+        $cloned->logoRadius = $this->logoRadius;
+        $cloned->logoBackgroundColor = $this->logoBackgroundColor?->cloneColor();
+        $cloned->logoShadowColor = $this->logoShadowColor?->cloneColor();
+        $cloned->logoShadowOffsetX = $this->logoShadowOffsetX;
+        $cloned->logoShadowOffsetY = $this->logoShadowOffsetY;
+        $cloned->logoOpacity = $this->logoOpacity;
+        $cloned->logoRotation = $this->logoRotation;
+        $cloned->labelOptions = $this->labelOptions;
+        $cloned->format = $this->format;
+        $cloned->quality = $this->quality;
+        $cloned->encoding = $this->encoding;
+        $cloned->backgroundImagePath = $this->backgroundImagePath;
+        $cloned->rounded = $this->rounded;
+        $cloned->transparentBackground = $this->transparentBackground;
+        $cloned->validateContrast = $this->validateContrast;
+        $cloned->roundedRadius = $this->roundedRadius;
+        
+        return $cloned;
     }
 
     /**

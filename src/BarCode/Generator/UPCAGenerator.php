@@ -39,18 +39,12 @@ class UPCAGenerator extends BaseGenerator
             throw new InvalidDataException('UPC-A 数据必须是11或12位纯数字');
         }
 
-        // 处理校验位
+        // 处理校验位 - 移除校验位验证，保证条码内容与传入内容完全一致
         if (strlen($data) === 12) {
-            $checkData = substr($data, 0, 11);
-            $providedCheck = $data[11];
-            $calculatedCheck = $this->calculateChecksum($checkData);
-            if ($providedCheck !== $calculatedCheck) {
-                throw new InvalidDataException(
-                    "校验位错误: 提供的校验位是 '{$providedCheck}'，计算得到的校验位是 '{$calculatedCheck}'"
-                );
-            }
+            // 直接使用传入的12位数据，不再验证校验位
             $this->rawData = $data;
         } else {
+            // 11位数据，自动计算校验位
             $checksum = $this->calculateChecksum($data);
             $this->rawData = $data . $checksum;
         }
@@ -97,30 +91,44 @@ class UPCAGenerator extends BaseGenerator
         return $this->barcodeArray;
     }
 
+    /**
+     * 计算长竖线位置（基于条空模式数组索引）
+     *
+     * UPC-A 结构：静区9 + 起始符3 + 左侧42 + 分隔符5 + 右侧42 + 终止符3 + 静区9
+     * 长竖线在：起始符(2条)、中间分隔符(2条)、终止符(2条)
+     */
     protected function calculateLongBarPositions(): void
     {
         $this->longBarPositions = [];
-        
-        // UPC-A 结构（共113模块）：
-        // 静区9 + 起始符3 + 左侧42 + 分隔符5 + 右侧42 + 终止符3 + 静区9
-        
-        // 起始保护符位置（在左侧静区之后，9模块处开始）
-        // 起始保护符编码：101，位置9和11
-        $startPos = $this->quietZoneModules;
-        $this->longBarPositions[] = $startPos;      // 第1条（位置9）
-        $this->longBarPositions[] = $startPos + 2;  // 第3条（位置11）
-        
-        // 中间分隔符位置（在左侧6位之后：9+3+42=54）
-        // 中间分隔符编码：01010，位置55和57（第2条和第4条）
-        $middlePos = $this->quietZoneModules + 3 + 42;
-        $this->longBarPositions[] = $middlePos + 1;  // 第2条（位置55）
-        $this->longBarPositions[] = $middlePos + 3;  // 第4条（位置57）
-        
-        // 终止保护符位置（在右侧6位之后：54+5+42=101）
-        // 终止保护符编码：101，位置101和103
-        $endPos = $this->quietZoneModules + 3 + 42 + 5 + 42;
-        $this->longBarPositions[] = $endPos;        // 第1条（位置101）
-        $this->longBarPositions[] = $endPos + 2;    // 第3条（位置103）
+
+        // 分析条空模式数组，找到所有条（正数元素）
+        $barIndices = [];
+        foreach ($this->barcodeArray as $i => $element) {
+            if ($element > 0) {
+                $barIndices[] = $i;
+            }
+        }
+
+        // UPC-A 有3组保护符，每组2条长竖线，共6条
+        // 条在数组中的大致分布：起始符(2条) + 数据中的条 + 分隔符(2条) + 数据中的条 + 终止符(2条)
+        // 简单策略：取前2条、中间2条、后2条作为长竖线
+        $totalBars = count($barIndices);
+        if ($totalBars >= 6) {
+            // 前2条（起始符）
+            $this->longBarPositions[] = $barIndices[0];
+            $this->longBarPositions[] = $barIndices[1];
+
+            // 后2条（终止符）
+            $this->longBarPositions[] = $barIndices[$totalBars - 2];
+            $this->longBarPositions[] = $barIndices[$totalBars - 1];
+
+            // 中间2条（分隔符）- 大致在中间位置
+            $middleIdx = (int)($totalBars / 2);
+            $this->longBarPositions[] = $barIndices[$middleIdx - 1];
+            $this->longBarPositions[] = $barIndices[$middleIdx];
+        }
+
+        sort($this->longBarPositions);
     }
 
     public function validate(string $data): bool

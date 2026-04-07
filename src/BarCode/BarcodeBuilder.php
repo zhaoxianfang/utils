@@ -66,7 +66,7 @@ class BarcodeBuilder
     /**
      * 设置条码类型
      * 
-     * @param string $type 条码类型（ean13, isbn, code128等）
+     * @param string $type 条码类型（ean13, code128等）
      * @return self 支持链式调用
      */
     public function type(string $type): self
@@ -241,6 +241,10 @@ class BarcodeBuilder
         
         if ($this->generator !== null) {
             $renderer->setBarcodeType($this->generator->getType());
+            // 传递长竖线位置
+            if (method_exists($this->generator, 'getLongBarPositions')) {
+                $renderer->setLongBarPositions($this->generator->getLongBarPositions());
+            }
         }
 
         return $renderer->render($this->barcodeData, $this->getFullData(), []);
@@ -261,6 +265,10 @@ class BarcodeBuilder
         
         if ($this->generator !== null) {
             $renderer->setBarcodeType($this->generator->getType());
+            // 传递长竖线位置
+            if (method_exists($this->generator, 'getLongBarPositions')) {
+                $renderer->setLongBarPositions($this->generator->getLongBarPositions());
+            }
         }
 
         return $renderer->render($this->barcodeData, $this->getFullData(), []);

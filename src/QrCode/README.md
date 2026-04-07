@@ -543,10 +543,20 @@ $image = QrCode::make('Output Test')
 | `getData()` | string | 获取编码数据 |
 | `getSize()` | int | 获取尺寸 |
 | `getMargin()` | int | 获取边距 |
+| `getPadding()` | int | 获取外边距 |
+| `getVersion()` | int | 获取二维码版本 |
+| `getEncoding()` | string | 获取编码格式 |
+| `getFormat()` | string | 获取输出格式 |
+| `getQuality()` | int | 获取图片质量 |
 | `getErrorCorrectionLevel()` | ErrorCorrectionLevel | 获取纠错级别 |
 | `getForegroundColor()` | Color | 获取前景色 |
 | `getBackgroundColor()` | Color | 获取背景色 |
+| `getLogoPath()` | string|null | 获取Logo路径 |
+| `isRounded()` | bool | 检查是否启用圆点风格 |
+| `getRoundedRadius()` | float | 获取圆点半径 |
+| `isTransparentBackground()` | bool | 检查是否启用透明背景 |
 | `getInfo()` | array | 获取完整配置信息 |
+| `cloneWithData(string $newData)` | QrCode | 克隆配置并修改数据 |
 
 **示例：**
 ```php
@@ -717,6 +727,28 @@ $batchConfig = QrCodeHelper::prepareBatch(
     './output',
     ['size' => 300]
 );
+
+// 生成WiFi配置字符串
+$wifiString = QrCodeHelper::generateWifiString('MyNetwork', 'password123', 'WPA');
+QrCode::make($wifiString)->save('wifi.png');
+
+// 生成VCard名片字符串
+$vcardString = QrCodeHelper::generateVCardString([
+    'name' => '张三',
+    'phone' => '13800138000',
+    'email' => 'zhangsan@example.com',
+    'company' => '示例公司'
+]);
+QrCode::make($vcardString)->save('vcard.png');
+
+// 分析二维码数据类型
+$analysis = QrCodeHelper::analyzeData('https://www.example.com');
+echo "数据类型: {$analysis['type']}\n";
+echo "推荐纠错级别: {$analysis['recommended']['errorCorrectionLevel']}\n";
+
+// 生成SVG格式二维码
+$svg = QrCodeHelper::generateSvg('Hello World', 300);
+file_put_contents('qrcode.svg', $svg);
 ```
 
 ---
@@ -1033,6 +1065,21 @@ foreach ($batches as $batch) {
 
 ## 📝 更新日志
 
+### v2.6.0 (2026-04-07)
+- ✅ 优化二维码下方标签/文本位置，更靠近二维码内容
+- ✅ 改进标签渲染算法，减少文本与二维码间距
+- ✅ 完善测试覆盖，所有测试用例 100% 通过
+- ✅ 优化性能和内存管理
+
+### v2.5.0 (2026-04-07)
+- ✅ 新增二维码数据克隆功能（`cloneWithData()`）
+- ✅ 新增二维码数据类型分析功能
+- ✅ 新增 SVG 格式二维码生成功能
+- ✅ 新增更多实用工具方法（WiFi、VCard、邮件、短信等字符串生成）
+- ✅ 优化 QrCodeHelper 辅助类功能
+- ✅ 完善 Getter 方法和属性访问
+- ✅ 优化性能与内存管理
+
 ### v2.4.0 (2026-03-28)
 - ✅ 修复圆点半径计算 bug（移除错误的0.72系数）
 - ✅ 修复纠错级别映射错误
@@ -1059,6 +1106,101 @@ foreach ($batches as $batch) {
 - ✅ 新增背景图片支持
 
 ---
+
+## 📋 QrCodeHelper API 参考
+
+### 估算版本
+
+```php
+$version = QrCodeHelper::estimateVersion('My QR Code Data', 'M');
+echo "推荐版本: {$version}\n";
+```
+
+### 获取容量信息
+
+```php
+$capacity = QrCodeHelper::getCapacity(10, 'M');
+print_r($capacity);
+```
+
+### 数据类型分析
+
+```php
+$analysis = QrCodeHelper::analyzeData('https://www.example.com');
+// 返回: [
+//     'type' => 'url',
+//     'length' => 23,
+//     'recommended' => [
+//         'errorCorrectionLevel' => 'M',
+//         'size' => 300,
+//         'margin' => 4
+//     ]
+// ]
+```
+
+### 生成各种数据格式字符串
+
+```php
+// WiFi配置
+$wifiString = QrCodeHelper::generateWifiString(
+    $ssid,           // WiFi名称
+    $password,       // WiFi密码
+    $encryption,     // 加密方式（WPA, WEP, nopass）
+    $hidden          // 是否隐藏网络
+);
+
+// VCard名片
+$vcardString = QrCodeHelper::generateVCardString([
+    'name' => '张三',
+    'title' => '经理',
+    'phone' => '13800138000',
+    'email' => 'zhangsan@example.com',
+    'url' => 'https://www.example.com',
+    'address' => '北京市',
+    'company' => '示例公司'
+]);
+
+// 邮件
+$emailString = QrCodeHelper::generateEmailString(
+    'contact@example.com',
+    '邮件主题',
+    '邮件正文'
+);
+
+// 短信
+$smsString = QrCodeHelper::generateSmsString(
+    '13800138000',
+    '短信内容'
+);
+
+// 电话
+$phoneString = QrCodeHelper::generatePhoneString('13800138000');
+
+// 地理位置
+$geoString = QrCodeHelper::generateGeoString(
+    39.9042,          // 纬度
+    116.4074,         // 经度
+    '天安门广场'       // 位置标签
+);
+
+// 日历事件
+$eventString = QrCodeHelper::generateEventString(
+    '会议标题',
+    '20260407T100000',
+    '20260407T120000',
+    '会议室A',
+    '会议描述'
+);
+```
+
+### 生成SVG二维码
+
+```php
+$svg = QrCodeHelper::generateSvg('Hello World', 300, [
+    'errorCorrectionLevel' => 'H',
+    'margin' => 4
+]);
+```
 
 ## 📄 许可证
 
