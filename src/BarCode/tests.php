@@ -72,7 +72,7 @@ function test($name, $callable) {
 }
 
 // 创建输出目录
-$outputDir = __DIR__ . '/test_output';
+$outputDir = __DIR__ . '/test_output_'.date('Ymd_Hi');
 if (!is_dir($outputDir)) {
     mkdir($outputDir, 0755, true);
 }
@@ -370,23 +370,69 @@ test('自定义颜色 - 红黄配色', function() use ($outputDir) {
 
 // 测试自定义尺寸
 test('自定义尺寸 - 大尺寸', function() use ($outputDir) {
-    $barcode = BarcodeBuilder::create()
+    BarcodeBuilder::create()
         ->type('ean13')
         ->data('690123456789')
-        ->width(4)
+        ->width(400)
         ->height(120)
         ->savePng($outputDir . '/custom_size_large.png');
     return file_exists($outputDir . '/custom_size_large.png') ? true : '文件未生成';
 });
 
 test('自定义尺寸 - 小尺寸', function() use ($outputDir) {
-    $barcode = BarcodeBuilder::create()
+    BarcodeBuilder::create()
         ->type('ean13')
         ->data('690123456789')
-        ->width(2)
+        ->width(200)
         ->height(60)
         ->savePng($outputDir . '/custom_size_small.png');
     return file_exists($outputDir . '/custom_size_small.png') ? true : '文件未生成';
+});
+
+test('设置整体宽度和高度', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->totalWidth(500)
+        ->totalHeight(200)
+        ->savePng($outputDir . '/total_size.png');
+    return file_exists($outputDir . '/total_size.png') ? true : '文件未生成';
+});
+
+test('统一边距设置 margin()', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('code128')
+        ->data('MARGIN-TEST')
+        ->margin(20)
+        ->savePng($outputDir . '/margin_test.png');
+    return file_exists($outputDir . '/margin_test.png') ? true : '文件未生成';
+});
+
+test('静区控制 quietZone()', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->quietZone(true, 15)
+        ->savePng($outputDir . '/quiet_zone.png');
+    return file_exists($outputDir . '/quiet_zone.png') ? true : '文件未生成';
+});
+
+test('长竖线比例 longBarRatio()', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->longBarRatio(1.3)
+        ->savePng($outputDir . '/long_bar_ratio.png');
+    return file_exists($outputDir . '/long_bar_ratio.png') ? true : '文件未生成';
+});
+
+test('字体大小设置 fontSize()', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('code128')
+        ->data('FONT-SIZE-TEST')
+        ->fontSize(18)
+        ->savePng($outputDir . '/font_size.png');
+    return file_exists($outputDir . '/font_size.png') ? true : '文件未生成';
 });
 
 // 测试隐藏文字
@@ -476,12 +522,71 @@ test('PNG 旋转水印 (30度)', function() use ($outputDir) {
 test('ITF-14 Bearer Bar', function() use ($outputDir) {
     $renderer = new PngRenderer();
     $renderer->enableBearerBar(3);
-    
+
     $generator = BarcodeFactory::create('itf14');
     $barcodeData = $generator->generate('15400141288763');
-    
+
     $renderer->saveToFile($barcodeData, '15400141288763', $outputDir . '/bearer_bar.png');
     return file_exists($outputDir . '/bearer_bar.png') ? true : '文件未生成';
+});
+
+test('SVG Bearer Bar', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('itf14')
+        ->data('15400141288763')
+        ->bearerBar(3)
+        ->saveSvg($outputDir . '/bearer_bar.svg');
+    return file_exists($outputDir . '/bearer_bar.svg') ? true : '文件未生成';
+});
+
+test('PNG 边框功能', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->border(3, '#FF0000')
+        ->savePng($outputDir . '/border_red.png');
+    return file_exists($outputDir . '/border_red.png') ? true : '文件未生成';
+});
+
+test('SVG 透明背景', function() use ($outputDir) {
+    $svg = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('TRANSPARENT')
+        ->transparentBackground(true)
+        ->toSvg();
+    file_put_contents($outputDir . '/transparent.svg', $svg);
+    $hasBgRect = str_contains($svg, '<rect width="100%" height="100%" fill="');
+    return file_exists($outputDir . '/transparent.svg') && !$hasBgRect ? true : '未生成透明SVG';
+});
+
+test('Base64 PNG 输出', function() {
+    $base64 = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->toBase64('png');
+    return str_starts_with($base64, 'data:image/png;base64,') ? true : 'Base64格式错误';
+});
+
+test('Base64 SVG 输出', function() {
+    $base64 = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->toBase64('svg');
+    return str_starts_with($base64, 'data:image/svg+xml;base64,') ? true : 'Base64格式错误';
+});
+
+test('组合样式测试 - 渐变+圆角+水印+边框', function() use ($outputDir) {
+    BarcodeBuilder::create()
+        ->type('code128')
+        ->data('COMBO-STYLE-TEST')
+        ->width(350)
+        ->height(100)
+        ->gradient('#000000', '#444444')
+        ->roundedBars(3)
+        ->watermark('COMBO', 40, 16, '#AAAAAA', 0)
+        ->border(2, '#0000FF')
+        ->savePng($outputDir . '/combo_style.png');
+    return file_exists($outputDir . '/combo_style.png') ? true : '文件未生成';
 });
 
 echo "\n【边界情况测试】\n";
@@ -506,6 +611,7 @@ test('Code 128 长数据', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('code128')
         ->data($longData)
+        ->height(120)
         ->savePng($outputDir . '/code128_long.png');
     return file_exists($outputDir . '/code128_long.png') ? true : '文件未生成';
 });
@@ -516,8 +622,44 @@ test('Code 128 特殊字符', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('code128')
         ->data($specialChars)
+        ->height(120)
         ->savePng($outputDir . '/code128_special.png');
     return file_exists($outputDir . '/code128_special.png') ? true : '文件未生成';
+});
+
+// 测试控制字符支持（字符集 A）
+test('Code 128 控制字符支持（制表符）', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data("A\tB")
+        ->savePng($outputDir . '/code128_control_tab.png');
+    return file_exists($outputDir . '/code128_control_tab.png') ? true : '文件未生成';
+});
+
+test('Code 128 换行符支持', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data("LINE1\nLINE2")
+        ->savePng($outputDir . '/code128_control_newline.png');
+    return file_exists($outputDir . '/code128_control_newline.png') ? true : '文件未生成';
+});
+
+// 测试自动字符集 C 数字压缩
+test('Code 128 纯数字自动切换字符集 C', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('12345678901234')
+        ->savePng($outputDir . '/code128_numeric_compressed.png');
+    return file_exists($outputDir . '/code128_numeric_compressed.png') ? true : '文件未生成';
+});
+
+// 测试混合内容（控制字符 + 字母 + 数字）
+test('Code 128 混合内容（字符集 A/B/C 自动切换）', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code128')
+        ->data("\x01START\x0212345\x03END")
+        ->savePng($outputDir . '/code128_mixed_charset.png');
+    return file_exists($outputDir . '/code128_mixed_charset.png') ? true : '文件未生成';
 });
 
 echo "\n【扫码识别测试 - 生成标准测试条码】\n";
@@ -525,10 +667,10 @@ echo "------------------------------------\n";
 
 // 生成用于扫码测试的标准条码
 test('生成 EAN-13 扫码测试条码 (6901234567892)', function() use ($outputDir) {
-    $barcode = BarcodeBuilder::create()
+    BarcodeBuilder::create()
         ->type('ean13')
         ->data('6901234567892')
-        ->width(3)
+        ->width(300)
         ->height(100)
         ->savePng($outputDir . '/scan_test_ean13.png');
     return file_exists($outputDir . '/scan_test_ean13.png') ? true : '文件未生成';

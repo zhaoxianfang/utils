@@ -6,7 +6,6 @@ namespace zxf\Utils\BarCode\Generator;
 
 use zxf\Utils\BarCode\Contracts\BarcodeGeneratorInterface;
 use zxf\Utils\BarCode\DTO\BarcodeConfig;
-use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
  * 条形码生成器抽象基类
@@ -94,6 +93,31 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
     public function getLongBarPositions(): array
     {
         return $this->longBarPositions;
+    }
+
+    /**
+     * 获取完整数据（含校验位等附加信息）
+     * 
+     * 子类可覆盖此方法以返回包含校验位的完整数据。
+     * 
+     * @return string 完整数据
+     */
+    public function getFullData(): string
+    {
+        return $this->rawData;
+    }
+
+    /**
+     * 设置是否跳过校验位验证
+     * 
+     * 对于不需要校验位的条码类型，默认实现为空操作。
+     * 
+     * @param bool $skip 是否跳过
+     * @return self 支持链式调用
+     */
+    public function setSkipChecksumValidation(bool $skip): self
+    {
+        return $this;
     }
 
     /**
@@ -262,5 +286,33 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
     protected function containsOnly(string $str, string $charset): bool
     {
         return strspn($str, $charset) === strlen($str);
+    }
+
+    /**
+     * 将二进制字符串偏移量转换为条空模式数组索引
+     * 
+     * 用于精确定位 guard bars 等特定 bit 在 binaryToBars 结果中的位置
+     * 
+     * @param string $binary 二进制字符串
+     * @param int    $offset 目标字符偏移量（0-based）
+     * @return int 条空模式数组索引
+     */
+    protected function binaryOffsetToBarIndex(string $binary, int $offset): int
+    {
+        if ($binary === '' || $offset < 0 || $offset >= strlen($binary)) {
+            return 0;
+        }
+
+        $current = $binary[0];
+        $index = 0;
+
+        for ($i = 0; $i <= $offset; $i++) {
+            if ($binary[$i] !== $current) {
+                $index++;
+                $current = $binary[$i];
+            }
+        }
+
+        return $index;
     }
 }

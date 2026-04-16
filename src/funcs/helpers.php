@@ -80,142 +80,138 @@ if (! function_exists('uuid')) {
 
 if (! function_exists('is_crawler')) {
     /**
-     * 检测爬虫 - 增强版
+     * [isCrawler 检测是否为爬虫]
      *
-     * 优化内容：
-     * 1. 更新爬虫列表
-     * 2. 改进匹配算法
-     * 3. 添加缓存机制
-     * 4. 支持更多爬虫类型
      *
-     * @param bool $returnName 是否返回爬虫名称
-     * @param array $extendRules 自定义额外规则
-     * @param bool $useCache 是否使用缓存
-     * @return bool|string
+     * @DateTime 2019-12-24
+     *
+     * @param  bool  $returnName  [是否返回爬虫名称]
+     * @param  array  $extendRules  [自定义额外规则：eg: ['Googlebot'=> 'Google Bot'])]
+     * @return bool|string [description]
      */
-    function is_crawler(bool $returnName = false, array $extendRules = [], bool $useCache = true): bool|string
+    function is_crawler(bool $returnName = false, array $extendRules = []): bool|string
     {
-        static $cache = [];
+        $userAgent = is_laravel() ? request()->userAgent() : (isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '');
+        if (! empty($userAgent)) {
+            // 扩展的爬虫标识符列表，包括更多类型的爬虫
+            $crawlers = [
+                // 主流搜索引擎爬虫
+                'Googlebot' => 'Google Bot',
+                'Bingbot' => 'Bing Bot',
+                'Slurp' => 'Yahoo Slurp',
+                'DuckDuckBot' => 'DuckDuckGo Bot',
+                'Baiduspider' => 'Baidu Spider',
+                'YandexBot' => 'Yandex Bot',
+                'Sogou web spider' => 'Sogou Web Spider', // Sogou Web 爬虫
+                'Sogou' => 'Sogou Spider',
+                'Exabot' => 'ExaBot',
+                'ia_archiver' => 'Alexa Bot',
+                '360Spider' => '360 Search Bot',
+                'SeznamBot' => 'Seznam Bot',
+                'YisouSpider' => 'Yisou Spider',
+                'Bytespider' => 'Byte Spider',
 
-        $userAgent = is_laravel() ?
-            (\request()->userAgent() ?? '') :
-            ($_SERVER['HTTP_USER_AGENT'] ?? '');
+                // 国际搜索引擎爬虫
+                'Yeti' => 'Naver Yeti',
+                'Coccocbot' => 'CocCoc Bot',
+                'archive.org_bot' => 'Internet Archive Bot',
+                'MojeekBot' => 'Mojeek Bot',
+                'TroveBot' => 'Trove Bot',
 
-        if (empty($userAgent)) {
-            return $returnName ? '' : false;
-        }
+                // 数据抓取和内容分析
+                'SemrushBot' => 'SEMrush Bot',
+                'AhrefsBot' => 'Ahrefs Bot',
+                'ZoominfoBot' => 'Zoominfo Bot',
+                'DotBot' => 'Moz DotBot',
+                'BLEXBot' => 'BLEXBot',
+                'MegaIndex' => 'MegaIndex Crawler',
+                'SiteAnalyzer' => 'Site Analyzer Bot',
+                'DataForSeoBot' => 'DataForSeo Bot',
+                'NetcraftSurveyAgent' => 'Netcraft Survey Agent',
 
-        // 缓存检查
-        $cacheKey = md5($userAgent . ($returnName ? '1' : '0'));
-        if ($useCache && isset($cache[$cacheKey])) {
-            return $cache[$cacheKey];
-        }
+                // API与数据采集工具
+                'axios' => 'Axios Client',
+                'Scrapy' => 'Scrapy Framework',
+                'curl' => 'cURL',
+                'wget' => 'Wget',
 
-        $crawlers = [
-            // 主流搜索引擎爬虫
-            'Googlebot' => 'Google Bot',
-            'Google-InspectionTool' => 'Google Inspection Tool',
-            'Bingbot' => 'Bing Bot',
-            'Slurp' => 'Yahoo Slurp',
-            'DuckDuckBot' => 'DuckDuckGo Bot',
-            'Baiduspider' => 'Baidu Spider',
-            'YandexBot' => 'Yandex Bot',
-            'Sogou web spider' => 'Sogou Web Spider',
-            'Sogou' => 'Sogou Spider',
-            'Exabot' => 'ExaBot',
-            'ia_archiver' => 'Alexa Bot',
-            '360Spider' => '360 Search Bot',
-            'SeznamBot' => 'Seznam Bot',
-            'YisouSpider' => 'Yisou Spider',
-            'Bytespider' => 'Byte Spider',
-            'CCBot' => 'Common Crawler Bot',
+                // 开发语言脚本判断
+                'python-requests|python-urllib|scrapy\/|httpx\/|aiohttp\/|tornado\/|python\/[0-9.]+' => 'Python Script',
+                'okhttp\/|apache-httpclient\/|jersey-client\/|unirest-java\/|java\/[0-9.]+' => 'JAVA Script',
+                'node-fetch\/|axios\/|superagent\/|got\/|node\.js\/[0-9.]+|needle\/|request-promise\/|request' => 'Node.js Script',
+                'httparty\/|rest-client\/|faraday\/|mechanize\/|ruby\/[0-9.]+' => 'Ruby Script',
+                'guzzlehttp\/|symfony-httpclient\/|curl-php\/|http-request\/|php\/[0-9.]+' => 'PHP Script',
+                'lwp::useragent\/|http-simple\/|libwww-perl\/|perl\/[0-9.]+' => 'Perl Script',
+                'go-http-client\/|gorequest\/|resty\/|go\/[0-9.]+' => 'Go Script',
+                'reqwest\/|hyper\/|rust\/[0-9.]+' => 'Rust Script',
+                'powershell\/|invoke-webrequest|invoke-restmethod' => 'PowerShell Script',
+                'alamofire\/|swift\/[0-9.]+' => 'Swift Script',
+                'httpoison\/|hackney\/|elixir\/[0-9.]+' => 'Elixir Script',
+                'akka-http\/|dispatch\/|scalaj-http\/|scala\/[0-9.]+' => 'Scala Script',
+                'http-conduit\/|wreq\/|haskell\/[0-9.]+' => 'Haskell Script',
+                'dart-http\/|dart\/[0-9.]+' => 'Dart Script',
+                'clj-http\/|http-kit\/|clojure\/[0-9.]+' => 'Clojure Script',
+                'R-curl\/|R-httr\/' => 'R Script',
+                'lua-http\/|luasocket\/|lua\/[0-9.]+' => 'Lua Script',
 
-            // AI 和数据分析爬虫
-            'ChatGPT-User' => 'OpenAI ChatGPT',
-            'Claude-Web' => 'Anthropic Claude',
-            'cohere-ai' => 'Cohere AI',
-            'YouBot' => 'You.com Bot',
-            'PerplexityBot' => 'Perplexity AI Bot',
+                // 常用的开发与调试工具
+                'Postman' => 'Postman',
+                'Insomnia' => 'Insomnia REST Client',
+                'RestSharp' => 'RestSharp',
+                'Apipost' => 'Apipost',
 
-            // 新增国际搜索引擎
-            'NaverBot' => 'Naver Bot',
-            'Daumoa' => 'Daum Bot',
-            'Teoma' => 'Teoma Bot',
-            'AOLBuild' => 'AOL Bot',
+                // 通用爬虫标识
+                'Spider' => 'Generic Spider',
+                'Crawler' => 'Generic Crawler',
+                'Bot' => 'Generic Bot',
+            ];
 
-            // 安全扫描器
-            'Nmap' => 'Nmap Security Scanner',
-            'Nessus' => 'Nessus Vulnerability Scanner',
-            'Qualys' => 'Qualys Security Scanner',
-            'Acunetix' => 'Acunetix Web Vulnerability Scanner',
-            'BurpSuite' => 'Burp Suite Security Tool',
+            if (! empty($extendRules)) {
+                $crawlers = array_merge($crawlers, $extendRules);
+            }
 
-            // 新增数据抓取工具
-            'Apache-HttpClient' => 'Apache HttpClient',
-            'Go-http-client' => 'Go Http Client',
-            'node-fetch' => 'Node.js Fetch',
-            'python-requests' => 'Python Requests',
-            'curl' => 'cURL',
-            'wget' => 'Wget',
+            // 使用不区分大小写的正则表达式匹配 User-Agent 中的爬虫关键字
+            $pattern = '/'.implode('|', array_keys($crawlers)).'/i';
+            preg_match_all($pattern, $userAgent, $matches);
 
-            // 社交媒体爬虫
-            'facebookexternalhit' => 'Facebook Bot',
-            'Twitterbot' => 'Twitter Bot',
-            'LinkedInBot' => 'LinkedIn Bot',
-            'Pinterest' => 'Pinterest Bot',
-            'WhatsApp' => 'WhatsApp Bot',
+            if (! empty($matches[0])) {
+                // 返回第一个匹配的爬虫名称
+                $matchedCrawler = $matches[0][0];
+                $crawlerName = ! empty($crawlers[$matchedCrawler])
+                    ? $crawlers[$matchedCrawler]
+                    : (! empty($crawlers[ucfirst($matchedCrawler)])
+                        ? $crawlers[ucfirst($matchedCrawler)]
+                        : $matchedCrawler
+                    );
 
-            // 新增监控和性能工具
-            'UptimeRobot' => 'Uptime Robot',
-            'Pingdom' => 'Pingdom Bot',
-            'NewRelicPinger' => 'New Relic Pinger',
-            'DataDog' => 'Datadog Bot',
+                // 如果匹配到 "Spider" 、 "Crawler" 和 “Bot”，重新截取出前面的字符串
+                if (in_array(strtolower(substr($crawlerName, 0, 7)), ['generic', 'unknown'])) {
+                    $suffix = (stripos($matchedCrawler, 'Spider') !== false)
+                        ? 'Spider'
+                        : (stripos($matchedCrawler, 'Crawler') !== false
+                            ? 'Crawler'
+                            : (stripos($matchedCrawler, 'Bot') !== false
+                                ? 'Bot'
+                                : ''
+                            )
+                        );
+                    if (! empty($suffix)) {
+                        // 找到 "Spider" 或 "Crawler" 的位置
+                        $pattern = '/\s+(\S+)'.$suffix.'/i';
 
-            // 通用爬虫标识
-            'bot' => 'Generic Bot',
-            'crawler' => 'Generic Crawler',
-            'spider' => 'Generic Spider',
-            'scraper' => 'Generic Scraper',
-        ];
-
-        if (!empty($extendRules)) {
-            $crawlers = array_merge($crawlers, $extendRules);
-        }
-
-        // 改进的匹配逻辑
-        $matchedCrawler = null;
-        $crawlerName = '';
-
-        foreach ($crawlers as $pattern => $name) {
-            // 支持正则表达式
-            if (str_starts_with($pattern, '/') && str_ends_with($pattern, '/')) {
-                if (preg_match($pattern, $userAgent)) {
-                    $matchedCrawler = $pattern;
-                    $crawlerName = $name;
-                    break;
+                        if (preg_match($pattern, $userAgent, $subMatches)) {
+                            if (! empty($subMatches[0])) {
+                                return $returnName ? $subMatches[1].$suffix : true;
+                            }
+                        }
+                    }
                 }
-            }
-            // 普通字符串匹配
-            elseif (stripos($userAgent, $pattern) !== false) {
-                $matchedCrawler = $pattern;
-                $crawlerName = $name;
-                break;
+                return $returnName ? $crawlerName : true;
             }
         }
 
-        if ($matchedCrawler !== null) {
-            $result = $returnName ? $crawlerName : true;
-            if ($useCache) {
-                $cache[$cacheKey] = $result;
-            }
-            return $result;
-        }
-
-        $result = $returnName ? '' : false;
-        if ($useCache) {
-            $cache[$cacheKey] = $result;
-        }
-        return $result;
+        // 没有匹配到任何爬虫
+        return $returnName ? '' : false;
     }
 }
 
@@ -684,6 +680,39 @@ if (! function_exists('detach_html')) {
         $output = preg_replace('/\s{2,}/', ' ', $output);
 
         return trim($output);
+    }
+}
+
+if (! function_exists('zxf_substr')) {
+    /**
+     * 字符串截取
+     */
+    function zxf_substr($string, $start = 0, $length = 5): bool|string
+    {
+        $string = str_ireplace(' ', '', $string); // 去除空格
+        if (function_exists('mb_substr')) {
+            $newstr = mb_substr($string, $start, $length, 'UTF-8');
+        } elseif (function_exists('iconv_substr')) {
+            $newstr = iconv_substr($string, $start, $length, 'UTF-8');
+        } else {
+            $newStrings = [];
+            for ($i = 0; $i < $length; $i++) {
+                $tempString = substr($string, $start, 1);
+                if (ord($tempString) > 127) {
+                    $i++;
+                    if ($i < $length) {
+                        $newStrings[] = substr($string, $start, 3);
+                        $string = substr($string, 3);
+                    }
+                } else {
+                    $newStrings[] = substr($string, $start, 1);
+                    $string = substr($string, 1);
+                }
+            }
+            $newstr = implode($newStrings);
+        }
+
+        return $newstr;
     }
 }
 

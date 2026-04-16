@@ -104,8 +104,6 @@ class EAN13Generator extends BaseGenerator
      * 【重要】EAN-13包括ISBN(978/979前缀)都遵循相同的编码规范
      * 扫描器识别出来的是完整的13位数字，包括前缀和校验位
      * 
-     * 【修改】移除校验位验证，保证条码内容与传入内容完全一致
-     * 
      * @param string $data 要编码的数据（12或13位数字）
      * @return array<int> 条空模式数组
      * @throws InvalidDataException 数据格式错误时抛出
@@ -118,13 +116,10 @@ class EAN13Generator extends BaseGenerator
             throw new InvalidDataException('EAN-13 数据必须是12或13位纯数字，当前数据: ' . $data);
         }
 
-        // 处理校验位 - 移除校验位验证，保证条码内容与传入内容完全一致
         if (strlen($data) === 13) {
-            // 直接使用传入的13位数据，不再验证校验位
             $this->rawData = $data;
             $this->currentData = $data;
         } else {
-            // 12位数据，自动计算校验位
             $checksum = $this->calculateChecksum($data);
             $this->rawData = $data . $checksum;
             $this->currentData = $this->rawData;
@@ -133,109 +128,93 @@ class EAN13Generator extends BaseGenerator
         $this->barcodeArray = [];
         $this->longBarPositions = [];
 
-        // 解析数据
         $firstDigit = (int) $this->rawData[0];
         $leftData = substr($this->rawData, 1, 6);
         $rightData = substr($this->rawData, 7, 6);
 
-        // 构建条空模式
-        $this->barcodeArray = [];
-        
-        // 左侧静区
-        $this->addQuietZoneToArray();
-        
+        $binary = '';
+
+        // 左侧静区（每个模块重复 MODULE_WIDTH 次，保持与旧版像素尺寸一致）
+        $binary .= str_repeat('0', self::QUIET_ZONE_MODULES * self::MODULE_WIDTH);
+
         // 起始保护符
-        $this->encodePattern(self::START_GUARD);
-        
+        $startGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::START_GUARD);
+
         // 左侧6位编码
         $parity = $this->parityPattern[$firstDigit];
+        $leftBinary = '';
         for ($i = 0; $i < 6; $i++) {
             $digit = (int) $leftData[$i];
             $mode = $parity[$i];
-            $pattern = $mode === 'A' ? $this->encodingA[$digit] : $this->encodingB[$digit];
-            $this->encodePattern($pattern);
+            $leftBinary .= $this->expandPattern(
+                $mode === 'A' ? $this->encodingA[$digit] : $this->encodingB[$digit]
+            );
         }
-        
+        $binary .= $leftBinary;
+
         // 中间分隔符
-        $this->encodePattern(self::MIDDLE_GUARD);
-        
+        $middleGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::MIDDLE_GUARD);
+
         // 右侧6位编码
+        $rightBinary = '';
         for ($i = 0; $i < 6; $i++) {
             $digit = (int) $rightData[$i];
-            $this->encodePattern($this->encodingC[$digit]);
+            $rightBinary .= $this->expandPattern($this->encodingC[$digit]);
         }
-        
-        // 终止保护符
-        $this->encodePattern(self::END_GUARD);
-        
-        // 右侧静区
-        $this->addQuietZoneToArray();
+        $binary .= $rightBinary;
 
-        // 计算长竖线位置
-        $this->calculateLongBarPositions();
+        // 终止保护符
+        $endGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::END_GUARD);
+
+        // 右侧静区
+        $binary .= str_repeat('0', self::QUIET_ZONE_MODULES * self::MODULE_WIDTH);
+
+        // 转换为严格交替的条空模式
+        $this->barcodeArray = $this->binaryToBars($binary);
+
+        // 精确计算长竖线位置
+        $this->calculateLongBarPositionsFromBinary($binary, $startGuardOffset, $middleGuardOffset, $endGuardOffset);
 
         return $this->barcodeArray;
     }
 
     /**
-     * 添加静区到条码数组
+     * 将模式按 MODULE_WIDTH 展开（保持像素尺寸兼容）
      */
-    protected function addQuietZoneToArray(): void
+    protected function expandPattern(string $pattern): string
     {
-        $this->barcodeArray[] = -self::QUIET_ZONE_MODULES * self::MODULE_WIDTH;
-    }
-
-    /**
-     * 编码模式字符串
-     * 
-     * @param string $pattern 二进制模式字符串（1=条，0=空）
-     */
-    protected function encodePattern(string $pattern): void
-    {
+        $expanded = '';
         for ($i = 0; $i < strlen($pattern); $i++) {
-            $isBar = ($pattern[$i] === '1');
-            $width = self::MODULE_WIDTH;
-            
-            if ($isBar) {
-                $this->barcodeArray[] = $width;
-            } else {
-                $this->barcodeArray[] = -$width;
-            }
+            $expanded .= str_repeat($pattern[$i], self::MODULE_WIDTH);
         }
+        return $expanded;
     }
 
     /**
-     * 计算长竖线位置
+     * 基于二进制偏移量精确计算长竖线位置
      */
-    protected function calculateLongBarPositions(): void
-    {
+    protected function calculateLongBarPositionsFromBinary(
+        string $binary,
+        int $startGuardOffset,
+        int $middleGuardOffset,
+        int $endGuardOffset
+    ): void {
         $this->longBarPositions = [];
 
-        // 找到所有条的位置
-        $barIndices = [];
-        foreach ($this->barcodeArray as $i => $element) {
-            if ($element > 0) {
-                $barIndices[] = $i;
-            }
-        }
+        // 起始符 '101' -> 条在偏移 +0 和 +2
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset + 2 * self::MODULE_WIDTH);
 
-        // EAN-13 长竖线分布：
-        // 起始符(2条) + 左侧数据条 + 分隔符(2条) + 右侧数据条 + 终止符(2条)
-        $totalBars = count($barIndices);
-        if ($totalBars >= 6) {
-            // 前2条（起始符）
-            $this->longBarPositions[] = $barIndices[0];
-            $this->longBarPositions[] = $barIndices[1];
+        // 中间分隔符 '01010' -> 条在偏移 +1 和 +3
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 1 * self::MODULE_WIDTH);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 3 * self::MODULE_WIDTH);
 
-            // 后2条（终止符）
-            $this->longBarPositions[] = $barIndices[$totalBars - 2];
-            $this->longBarPositions[] = $barIndices[$totalBars - 1];
-
-            // 中间2条（分隔符）
-            $middleIdx = (int)($totalBars / 2);
-            $this->longBarPositions[] = $barIndices[$middleIdx - 1];
-            $this->longBarPositions[] = $barIndices[$middleIdx];
-        }
+        // 终止符 '101' -> 条在偏移 +0 和 +2
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset + 2 * self::MODULE_WIDTH);
 
         sort($this->longBarPositions);
     }

@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace zxf\Utils\BarCode\Renderer;
 
-use zxf\Utils\BarCode\Contracts\RendererInterface;
 use zxf\Utils\BarCode\DTO\BarcodeConfig;
-use zxf\Utils\BarCode\Exceptions\RenderException;
 
 /**
  * SVG 渲染器（动态文字定位版）
- * 
+ *
  * 【核心特性】
  * - 动态检测长竖线（保护符）实际像素位置
  * - 根据条码内容和结构自动分段显示数字
@@ -18,56 +16,40 @@ use zxf\Utils\BarCode\Exceptions\RenderException;
  * - 动态计算上下偏移距离
  * - 每段数字在各自区域内均匀分布
  */
-class SvgRenderer implements RendererInterface
+class SvgRenderer extends BaseRenderer
 {
     protected const TYPE = 'svg';
-    protected BarcodeConfig $config;
-    protected string $barcodeType = '';
-    
-    // 个性化配置
-    protected bool $enableGradient = false;
-    protected string $gradientStartColor = '#000000';
-    protected string $gradientEndColor = '#333333';
-    protected bool $enableRoundedBars = false;
-    protected int $cornerRadius = 2;
-    
-    /** @var array<int> 长竖线位置索引 */
-    protected array $longBarPositions = [];
-    
-    /** @var float 长竖线高度比例 */
-    protected float $longBarHeightRatio = 1.15;
-    
-    /** @var array<string, mixed> 条码结构分析结果 */
-    protected array $barcodeStructure = [];
-    
-    /** @var int 动态计算的字号 */
+
+    /** @var int 动态计算的字号，用于长竖线条码的自动适配（SVG px） */
     protected int $dynamicFontSize = 12;
-    
-    /** @var int 动态计算的文本Y偏移 */
+
+    /** @var int 动态计算的文本Y轴偏移量 */
     protected int $dynamicTextOffset = 3;
 
     public function __construct(?BarcodeConfig $config = null)
     {
-        $this->config = $config ?? new BarcodeConfig();
+        parent::__construct($config);
     }
 
     public function render(array $barcodeData, string $data, array $config = []): string
     {
         $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), $config));
         $this->barcodeStructure = []; // 重置结构分析
+        $this->renderModuleSize = $this->resolveModuleSize($barcodeData);
 
         $totalWidth = 0;
         foreach ($barcodeData as $element) {
             $totalWidth += abs($element);
         }
 
-        $barcodeWidth = $totalWidth * $this->config->width;
-        
+        $moduleSize = $this->renderModuleSize;
+        $barcodeWidth = $totalWidth * $moduleSize;
+
         // 确保有足够的静区宽度
         $marginLeft = $this->config->marginLeft;
         $marginRight = $this->config->marginRight;
         if ($this->config->showQuietZone) {
-            $minQuietZone = 11 * $this->config->width;
+            $minQuietZone = 11 * $moduleSize;
             if ($marginLeft < $minQuietZone) {
                 $marginLeft = $minQuietZone;
             }
@@ -83,7 +65,11 @@ class SvgRenderer implements RendererInterface
             $height += $this->config->fontSize + $this->config->textOffset;
         }
 
-        $longBarPositions = $this->calculateLongBarPositions($barcodeData);
+        if ($this->bearerBarEnabled) {
+            $height += $this->bearerBarWidth * 2;
+        }
+
+        $longBarPositions = $this->calculateLongBarPositions();
 
         return $this->buildSvg($barcodeData, $data, $width, $height, $longBarPositions, $marginLeft, $marginRight);
     }
@@ -100,44 +86,27 @@ class SvgRenderer implements RendererInterface
         return file_put_contents($filename, $svgData) !== false;
     }
 
-    public function getType(): string
+    /**
+     * 直接输出SVG到浏览器
+     */
+    public function outputToBrowser(array $barcodeData, string $data, array $config = []): void
     {
-        return self::TYPE;
+        $svgData = $this->render($barcodeData, $data, $config);
+
+        header('Content-Type: image/svg+xml');
+        header('Content-Length: ' . strlen($svgData));
+        header('Cache-Control: no-cache, must-revalidate');
+
+        echo $svgData;
     }
 
-    public function setBarcodeType(string $type): self
+    /**
+     * 获取Base64编码的SVG
+     */
+    public function toBase64(array $barcodeData, string $data, array $config = []): string
     {
-        $this->barcodeType = $type;
-        return $this;
-    }
-
-    public function setLongBarPositions(array $positions): self
-    {
-        $this->longBarPositions = $positions;
-        return $this;
-    }
-
-    public function enableGradient(string $startColor, string $endColor): self
-    {
-        $this->enableGradient = true;
-        $this->gradientStartColor = $startColor;
-        $this->gradientEndColor = $endColor;
-        return $this;
-    }
-
-    public function enableRoundedBars(int $radius = 2): self
-    {
-        $this->enableRoundedBars = true;
-        $this->cornerRadius = $radius;
-        return $this;
-    }
-
-    protected function calculateLongBarPositions(array $barcodeData): array
-    {
-        if (!empty($this->longBarPositions)) {
-            return $this->longBarPositions;
-        }
-        return [];
+        $svgData = $this->render($barcodeData, $data, $config);
+        return 'data:image/svg+xml;base64,' . base64_encode($svgData);
     }
 
     /**
@@ -148,14 +117,16 @@ class SvgRenderer implements RendererInterface
         $bgColor = $this->config->bgColor;
         $barColor = $this->config->barColor;
 
-        if (!$this->validateContrast($bgColor, $barColor)) {
+        $isTransparent = ($bgColor === 'transparent' || $bgColor === null);
+
+        if (!$isTransparent && !$this->validateContrast($bgColor, $barColor)) {
             $bgColor = '#FFFFFF';
             $barColor = '#000000';
         }
 
         $svg = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
         $svg .= '<svg xmlns="http://www.w3.org/2000/svg" width="' . $width . '" height="' . $height . '" viewBox="0 0 ' . $width . ' ' . $height . '">' . "\n";
-        
+
         if ($this->enableGradient) {
             $svg .= '  <defs>' . "\n";
             $svg .= '    <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">' . "\n";
@@ -164,8 +135,15 @@ class SvgRenderer implements RendererInterface
             $svg .= '    </linearGradient>' . "\n";
             $svg .= '  </defs>' . "\n";
         }
-        
-        $svg .= '  <rect width="100%" height="100%" fill="' . $bgColor . '"/>' . "\n";
+
+        if (!$isTransparent) {
+            $svg .= '  <rect width="100%" height="100%" fill="' . $bgColor . '"/>' . "\n";
+        }
+
+        if ($this->borderWidth > 0) {
+            $borderColor = htmlspecialchars($this->borderColor, ENT_XML1, 'UTF-8');
+            $svg .= '  <rect x="0" y="0" width="' . $width . '" height="' . $height . '" fill="none" stroke="' . $borderColor . '" stroke-width="' . ($this->borderWidth * 2) . '"/>' . "\n";
+        }
 
         // 绘制条码条并分析结构
         $x = $marginLeft;
@@ -176,7 +154,7 @@ class SvgRenderer implements RendererInterface
         
         foreach ($barcodeData as $elementIndex => $element) {
             $isBar = $element > 0;
-            $barWidth = abs($element) * $this->config->width;
+            $barWidth = abs($element) * $this->renderModuleSize;
 
             if ($isBar) {
                 $isLongBar = in_array($elementIndex, $longBarPositions, true) &&
@@ -205,9 +183,19 @@ class SvgRenderer implements RendererInterface
         // 分析条码结构
         $this->analyzeBarcodeStructure($bars, $x, $marginLeft);
 
+        // 绘制 Bearer Bar（ITF-14 标准框型）
+        if ($this->bearerBarEnabled) {
+            $svg .= $this->buildBearerBar($marginLeft, $width - $marginRight);
+        }
+
         // 绘制文字
         if ($this->config->showText) {
             $svg .= $this->buildTextElements($data, $marginLeft);
+        }
+
+        // 绘制水印
+        if ($this->watermarkText !== null) {
+            $svg .= $this->buildWatermark($width, $height);
         }
 
         $svg .= '</svg>';
@@ -216,84 +204,103 @@ class SvgRenderer implements RendererInterface
     }
 
     /**
-     * 分析条码结构
+     * 构建 Bearer Bar SVG 元素（ITF-14 标准框型）
      */
-    protected function analyzeBarcodeStructure(array $bars, int $totalWidth, int $marginLeft): void
+    protected function buildBearerBar(int $contentLeft, int $contentRight): string
     {
-        $longBars = array_filter($bars, fn($bar) => $bar['isLongBar']);
-        $longBars = array_values($longBars);
-        
-        $this->barcodeStructure = [
-            'totalWidth' => $totalWidth - $marginLeft,
-            'longBars' => $longBars,
-            'allBars' => $bars,
-            'hasLongBars' => !empty($longBars),
-            'marginLeft' => $marginLeft,
-        ];
-        
-        if (empty($longBars)) {
-            return;
-        }
-        
-        $longBarCount = count($longBars);
-        
-        if ($longBarCount >= 6) {
-            $this->analyzeEANStructure($longBars);
-        }
+        $thickness = $this->bearerBarWidth;
+        $barTop = $this->config->marginTop;
+        $barBottom = $barTop + $this->config->height - 1;
+        $barColor = htmlspecialchars($this->config->barColor, ENT_XML1, 'UTF-8');
+        $boxTop = max(0, $barTop - $thickness);
+        $boxBottom = $barBottom + $thickness;
+        $boxHeight = $boxBottom - $boxTop + 1;
+        $contentWidth = max(1, $contentRight - $contentLeft);
+
+        $svg = '';
+        // 顶部横线
+        $svg .= '  <rect x="' . $contentLeft . '" y="' . $boxTop . '" width="' . $contentWidth . '" height="' . $thickness . '" fill="' . $barColor . '"/>' . "\n";
+        // 底部横线
+        $svg .= '  <rect x="' . $contentLeft . '" y="' . ($barBottom + 1) . '" width="' . $contentWidth . '" height="' . $thickness . '" fill="' . $barColor . '"/>' . "\n";
+        // 左侧垂直条
+        $svg .= '  <rect x="' . $contentLeft . '" y="' . $boxTop . '" width="' . $thickness . '" height="' . $boxHeight . '" fill="' . $barColor . '"/>' . "\n";
+        // 右侧垂直条
+        $svg .= '  <rect x="' . ($contentRight - $thickness) . '" y="' . $boxTop . '" width="' . $thickness . '" height="' . $boxHeight . '" fill="' . $barColor . '"/>' . "\n";
+
+        return $svg;
     }
 
     /**
-     * 分析 EAN/UPC 系列条码结构
+     * 构建水印元素
      */
-    protected function analyzeEANStructure(array $longBars): void
+    protected function buildWatermark(int $width, int $height): string
     {
-        usort($longBars, fn($a, $b) => $a['x'] <=> $b['x']);
-        
-        $startGuardLeft = $longBars[0];
-        $startGuardRight = $longBars[1];
-        
-        $endGuardLeft = $longBars[count($longBars) - 2];
-        $endGuardRight = $longBars[count($longBars) - 1];
-        
-        $middleIdx = (int)(count($longBars) / 2);
-        $middleGuardLeft = $longBars[$middleIdx - 1];
-        $middleGuardRight = $longBars[$middleIdx];
-        
-        $marginLeft = $this->barcodeStructure['marginLeft'];
-        
-        $this->barcodeStructure['regions'] = [
-            'startGuard' => [
-                'left' => $startGuardLeft['x'],
-                'right' => $startGuardRight['x'] + $startGuardRight['width'],
-            ],
-            'middleGuard' => [
-                'left' => $middleGuardLeft['x'],
-                'right' => $middleGuardRight['x'] + $middleGuardRight['width'],
-            ],
-            'endGuard' => [
-                'left' => $endGuardLeft['x'],
-                'right' => $endGuardRight['x'] + $endGuardRight['width'],
-            ],
-            'leftData' => [
-                'left' => $startGuardRight['x'] + $startGuardRight['width'],
-                'right' => $middleGuardLeft['x'],
-            ],
-            'rightData' => [
-                'left' => $middleGuardRight['x'] + $middleGuardRight['width'],
-                'right' => $endGuardLeft['x'],
-            ],
-            'leftQuietZone' => [
-                'left' => $marginLeft,
-                'right' => $startGuardLeft['x'],
-                'center' => (int)(($marginLeft + $startGuardLeft['x']) / 2),
-            ],
-            'rightQuietZone' => [
-                'left' => $endGuardRight['x'] + $endGuardRight['width'],
-                'right' => $this->barcodeStructure['totalWidth'] + $marginLeft,
-                'center' => (int)((($endGuardRight['x'] + $endGuardRight['width']) + 
-                    ($this->barcodeStructure['totalWidth'] + $marginLeft)) / 2),
-            ],
-        ];
+        $opacity = round($this->watermarkOpacity / 100, 2);
+        $fontSize = $this->watermarkFontSize;
+        $text = htmlspecialchars($this->watermarkText ?? '', ENT_XML1, 'UTF-8');
+
+        // 估算文本宽度（按字符宽度为字号的0.6倍）
+        $textWidth = (int) (strlen($text) * $fontSize * 0.6);
+        $textHeight = $fontSize;
+
+        $x = (int) (($width - $textWidth) / 2);
+        $y = (int) (($height + $textHeight) / 2);
+
+        switch ($this->watermarkPosition) {
+            case 'top-left':
+                $x = 10;
+                $y = 10 + $fontSize;
+                break;
+            case 'top-right':
+                $x = $width - $textWidth - 10;
+                $y = 10 + $fontSize;
+                break;
+            case 'bottom-left':
+                $x = 10;
+                $y = $height - 10;
+                break;
+            case 'bottom-right':
+                $x = $width - $textWidth - 10;
+                $y = $height - 10;
+                break;
+            case 'top':
+                $x = (int) (($width - $textWidth) / 2);
+                $y = 10 + $fontSize;
+                break;
+            case 'bottom':
+                $x = (int) (($width - $textWidth) / 2);
+                $y = $height - 10;
+                break;
+            case 'left':
+                $x = 10;
+                $y = (int) (($height + $textHeight) / 2);
+                break;
+            case 'right':
+                $x = $width - $textWidth - 10;
+                $y = (int) (($height + $textHeight) / 2);
+                break;
+            case 'center':
+            default:
+                $x = (int) (($width - $textWidth) / 2);
+                $y = (int) (($height + $textHeight) / 2);
+                break;
+        }
+
+        $transform = '';
+        if ($this->watermarkAngle !== 0) {
+            $transform = sprintf(' transform="rotate(%d,%d,%d)"', $this->watermarkAngle, $x + (int)($textWidth / 2), $y - (int)($fontSize / 2));
+        }
+
+        return sprintf(
+            '  <text x="%d" y="%d" font-family="Arial, sans-serif" font-size="%d" fill="%s" opacity="%.2f" text-anchor="start"%s>%s</text>' . "\n",
+            $x,
+            $y,
+            $fontSize,
+            $this->watermarkColor,
+            $opacity,
+            $transform,
+            $text
+        );
     }
 
     /**
@@ -313,11 +320,34 @@ class SvgRenderer implements RendererInterface
      */
     protected function buildSimpleText(string $data, int $marginLeft): string
     {
-        $textY = $this->config->marginTop + $this->config->height + $this->config->textOffset + $this->config->fontSize;
         $barColor = $this->config->barColor;
         $fontSize = $this->config->fontSize;
-        
-        return '  <text x="' . $marginLeft . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '">' . htmlspecialchars($data) . '</text>' . "\n";
+        $imgWidth = $this->barcodeStructure['totalWidth'] + $marginLeft + $this->config->marginRight;
+
+        if ($this->config->textPosition === 'top') {
+            $textY = $this->config->marginTop - $this->config->textOffset;
+            $textY = max($fontSize, $textY);
+        } else {
+            $textY = $this->config->marginTop + $this->config->height + $this->config->textOffset + $fontSize;
+        }
+
+        switch ($this->textAlign) {
+            case 'left':
+                $x = $marginLeft;
+                $anchor = 'start';
+                break;
+            case 'right':
+                $x = $imgWidth - $this->config->marginRight;
+                $anchor = 'end';
+                break;
+            case 'center':
+            default:
+                $x = (int)($imgWidth / 2);
+                $anchor = 'middle';
+                break;
+        }
+
+        return '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="' . $anchor . '">' . htmlspecialchars($data) . '</text>' . "\n";
     }
 
     /**
@@ -491,54 +521,4 @@ class SvgRenderer implements RendererInterface
         return $textElements;
     }
 
-    /**
-     * 验证颜色对比度
-     */
-    protected function validateContrast(string $bgColor, string $barColor): bool
-    {
-        $bgLuminance = $this->getRelativeLuminance($bgColor);
-        $barLuminance = $this->getRelativeLuminance($barColor);
-        
-        $lightest = max($bgLuminance, $barLuminance);
-        $darkest = min($bgLuminance, $barLuminance);
-        $contrast = ($lightest + 0.05) / ($darkest + 0.05);
-        
-        return $contrast >= 3.0;
-    }
-
-    /**
-     * 获取颜色的相对亮度
-     */
-    protected function getRelativeLuminance(string $color): float
-    {
-        $rgb = $this->hexToRgb($color);
-        
-        $rsRGB = $rgb[0] / 255;
-        $gsRGB = $rgb[1] / 255;
-        $bsRGB = $rgb[2] / 255;
-        
-        $r = $rsRGB <= 0.03928 ? $rsRGB / 12.92 : pow(($rsRGB + 0.055) / 1.055, 2.4);
-        $g = $gsRGB <= 0.03928 ? $gsRGB / 12.92 : pow(($gsRGB + 0.055) / 1.055, 2.4);
-        $b = $bsRGB <= 0.03928 ? $bsRGB / 12.92 : pow(($bsRGB + 0.055) / 1.055, 2.4);
-        
-        return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
-    }
-
-    /**
-     * 十六进制颜色转换为RGB数组
-     */
-    protected function hexToRgb(string $hex): array
-    {
-        $hex = ltrim($hex, '#');
-        
-        if (strlen($hex) === 3) {
-            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
-        }
-
-        return [
-            (int) hexdec(substr($hex, 0, 2)),
-            (int) hexdec(substr($hex, 2, 2)),
-            (int) hexdec(substr($hex, 4, 2)),
-        ];
-    }
 }

@@ -104,9 +104,6 @@ class AdvancedFeatures
         imagealphablending($qrImage, true);
         imagecopy($qrImage, $resizedWatermark, $x, $y, 0, 0, $newWmWidth, $newWmHeight);
 
-        imagedestroy($watermark);
-        imagedestroy($resizedWatermark);
-
         return $qrImage;
     }
 
@@ -264,7 +261,6 @@ class AdvancedFeatures
 
         // 验证二维码位置参数
         if (count($qrPosition) !== 4) {
-            imagedestroy($template);
             throw new Exception('二维码位置参数必须包含4个元素: [x, y, width, height]');
         }
 
@@ -303,12 +299,8 @@ class AdvancedFeatures
                 default => throw new Exception('不支持的输出格式: ' . $extension)
             };
 
-            imagedestroy($template);
-            imagedestroy($qrImage);
-
             return $result !== false && $saveResult !== false;
         } catch (Exception $e) {
-            imagedestroy($template);
             throw new Exception('生成二维码失败: ' . $e->getMessage(), 0, $e);
         }
     }

@@ -550,7 +550,6 @@ class QrCodeHelper
 
             $svg .= '</svg>';
 
-            imagedestroy($image);
             return $svg;
         } catch (\Exception $e) {
             throw new Exception('生成SVG失败: ' . $e->getMessage());

@@ -90,6 +90,9 @@ class QrCode
     /** @var string|null 字符编码 */
     private ?string $encoding = 'UTF-8';
 
+    /** @var bool 是否在 Byte 模式下添加 ECI 前缀 */
+    private bool $prefixEci = true;
+
     /** @var string|null 背景图片路径 */
     private ?string $backgroundImagePath = null;
 
@@ -104,6 +107,27 @@ class QrCode
 
     /** @var float 圆点半径（0-1，相对于模块大小） */
     private float $roundedRadius = 0.5;
+
+    /** @var int 目标输出宽度（像素，0表示不强制缩放） */
+    private int $targetWidth = 0;
+
+    /** @var int 目标输出高度（像素，0表示不强制缩放） */
+    private int $targetHeight = 0;
+
+    /** @var string|null 水印文本 */
+    private ?string $watermarkText = null;
+
+    /** @var int 水印透明度（0-100，值越大越清晰） */
+    private int $watermarkOpacity = 50;
+
+    /** @var int 水印字号（像素） */
+    private int $watermarkFontSize = 16;
+
+    /** @var string 水印颜色（十六进制） */
+    private string $watermarkColor = '#CCCCCC';
+
+    /** @var string 水印位置（center/top-left/top-right/bottom-left/bottom-right/top/bottom/left/right） */
+    private string $watermarkPosition = 'center';
 
     /**
      * 构造函数
@@ -151,6 +175,84 @@ class QrCode
     public function size(int $size): self
     {
         $this->size = max(21, $size);
+        return $this;
+    }
+
+    /**
+     * 设置二维码宽度（size 的别名）
+     *
+     * @param int $width 宽度（像素）
+     * @return self
+     */
+    public function width(int $width): self
+    {
+        return $this->size($width);
+    }
+
+    /**
+     * 设置二维码高度（size 的别名）
+     *
+     * @param int $height 高度（像素）
+     * @return self
+     */
+    public function height(int $height): self
+    {
+        return $this->size($height);
+    }
+
+    /**
+     * 设置目标输出宽度（生成后强制缩放到该宽度）
+     *
+     * @param int $width 宽度（像素）
+     * @return self
+     */
+    public function totalWidth(int $width): self
+    {
+        $this->targetWidth = max(0, $width);
+        return $this;
+    }
+
+    /**
+     * 设置目标输出高度（生成后强制缩放到该高度）
+     *
+     * @param int $height 高度（像素）
+     * @return self
+     */
+    public function totalHeight(int $height): self
+    {
+        $this->targetHeight = max(0, $height);
+        return $this;
+    }
+
+    /**
+     * 设置水印
+     *
+     * @param string $text 水印文本
+     * @param int $opacity 透明度（0-100）
+     * @param int $fontSize 字号（像素）
+     * @param string $color 颜色（十六进制）
+     * @param string $position 位置
+     * @return self
+     */
+    public function watermark(string $text, int $opacity = 50, int $fontSize = 16, string $color = '#CCCCCC', string $position = 'center'): self
+    {
+        $this->watermarkText = $text;
+        $this->watermarkOpacity = max(0, min(100, $opacity));
+        $this->watermarkFontSize = max(8, $fontSize);
+        $this->watermarkColor = $color;
+        $this->watermarkPosition = in_array($position, ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'], true) ? $position : 'center';
+        return $this;
+    }
+
+    /**
+     * 设置水印位置
+     *
+     * @param string $position 位置
+     * @return self
+     */
+    public function watermarkPosition(string $position): self
+    {
+        $this->watermarkPosition = in_array($position, ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'], true) ? $position : 'center';
         return $this;
     }
 
@@ -647,10 +749,39 @@ class QrCode
     }
 
     /**
+     * 设置是否添加 ECI 前缀
+     *
+     * 注意：某些旧款扫码器可能无法识别带 UTF-8 ECI 前缀的二维码。
+     * 如果生成的二维码在特定设备上无法识别，可尝试关闭此选项。
+     *
+     * @param bool $enabled true=添加 ECI 前缀（默认），false=不添加
+     * @return self
+     */
+    public function prefixEci(bool $enabled): self
+    {
+        $this->prefixEci = $enabled;
+        return $this;
+    }
+
+    /**
      * 获取二维码信息（用于调试和验证）
      *
      * @return array 二维码详细信息
      */
+    /**
+     * 获取二维码原始矩阵（用于诊断或高级处理）
+     *
+     * @return array 二维码布尔矩阵
+     * @throws Exception
+     */
+    public function getMatrix(): array
+    {
+        if (empty($this->data)) {
+            throw new Exception('二维码数据不能为空');
+        }
+        return $this->encodeWithBacon();
+    }
+
     public function getInfo(): array
     {
         return [
@@ -666,6 +797,11 @@ class QrCode
             'roundedRadius' => $this->roundedRadius,
             'hasLabel' => $this->labelOptions !== null && $this->labelOptions->isEnabled(),
             'transparentBackground' => $this->transparentBackground,
+            'targetWidth' => $this->targetWidth,
+            'targetHeight' => $this->targetHeight,
+            'hasWatermark' => $this->watermarkText !== null,
+            'watermarkText' => $this->watermarkText,
+            'watermarkPosition' => $this->watermarkPosition,
         ];
     }
 
@@ -720,7 +856,7 @@ class QrCode
         $qrTotalWidth = $moduleSize * $totalModules;
 
         // 计算最终尺寸（包含标签和外边距）
-        [$finalSize, $qrHeight, $qrWidth] = $this->calculateFinalSize($moduleCount, $moduleSize, $qrContentWidth);
+        [$finalSize, $qrHeight, $qrWidth] = $this->calculateFinalSize($moduleCount, $moduleSize);
 
         // 创建图像 - 使用计算出的finalSize，确保完美适配
         // 如果启用透明背景且使用PNG格式，创建带alpha通道的图像
@@ -780,6 +916,16 @@ class QrCode
             $this->drawLabel($image, $qrX, $qrY, (int)$qrWidth, $qrHeight);
         }
 
+        // 绘制水印
+        if ($this->watermarkText !== null) {
+            $this->drawWatermark($image);
+        }
+
+        // 强制缩放到目标尺寸（如果设置了totalWidth/totalHeight）
+        if ($this->targetWidth > 0 || $this->targetHeight > 0) {
+            $image = $this->resizeImage($image);
+        }
+
         return $image;
     }
 
@@ -812,7 +958,7 @@ class QrCode
             }
 
             // 编码
-            $qrCode = $encoder->encode($this->data, $ecLevel, $this->encoding, $forcedVersion);
+            $qrCode = $encoder->encode($this->data, $ecLevel, $this->encoding, $forcedVersion, $this->prefixEci);
             $matrix = $qrCode->getMatrix();
 
             // 转换为数组格式
@@ -837,10 +983,9 @@ class QrCode
      *
      * @param int $moduleCount 模块数量
      * @param int $moduleSize 模块大小（像素）
-     * @param int $qrContentWidth 二维码内容宽度（像素）
      * @return array [最终图像尺寸, 二维码区域高度, 二维码区域宽度]
      */
-    private function calculateFinalSize(int $moduleCount, int $moduleSize, int $qrContentWidth): array
+    private function calculateFinalSize(int $moduleCount, int $moduleSize): array
     {
         // 计算二维码总区域（包含margin模块边距）
         $totalModules = $moduleCount + $this->margin * 2;
@@ -862,6 +1007,116 @@ class QrCode
         $finalSize = $qrAreaHeight + $labelHeight + $this->padding * 2;
 
         return [$finalSize, $qrAreaHeight, $qrAreaWidth];
+    }
+
+    /**
+     * 缩放图像到目标尺寸
+     */
+    private function resizeImage(GdImage $image): GdImage
+    {
+        $srcWidth = imagesx($image);
+        $srcHeight = imagesy($image);
+
+        $dstWidth = $this->targetWidth > 0 ? $this->targetWidth : $srcWidth;
+        $dstHeight = $this->targetHeight > 0 ? $this->targetHeight : $srcHeight;
+
+        if ($dstWidth === $srcWidth && $dstHeight === $srcHeight) {
+            return $image;
+        }
+
+        $resized = imagecreatetruecolor($dstWidth, $dstHeight);
+        if ($resized === false) {
+            return $image;
+        }
+
+        // 处理透明背景
+        if ($this->transparentBackground && strtolower($this->format) === 'png') {
+            imagealphablending($resized, false);
+            imagesavealpha($resized, true);
+            $transparent = imagecolorallocatealpha($resized, 255, 255, 255, 127);
+            imagefill($resized, 0, 0, $transparent);
+        } else {
+            $bgColor = $this->backgroundColor->toGdColor($resized);
+            imagefill($resized, 0, 0, $bgColor);
+        }
+
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, $dstWidth, $dstHeight, $srcWidth, $srcHeight);
+
+        return $resized;
+    }
+
+    /**
+     * 绘制水印
+     */
+    private function drawWatermark(GdImage $image): void
+    {
+        if ($this->watermarkText === null) {
+            return;
+        }
+
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $text = $this->watermarkText;
+        $fontSize = $this->watermarkFontSize;
+
+        $rgb = $this->hexToRgb($this->watermarkColor);
+        $alpha = (int)(127 * (1 - $this->watermarkOpacity / 100));
+        $color = imagecolorallocatealpha($image, $rgb[0], $rgb[1], $rgb[2], $alpha);
+
+        $textWidth = (int)(strlen($text) * $fontSize * 0.6);
+        $textHeight = $fontSize;
+
+        $x = (int)(($width - $textWidth) / 2);
+        $y = (int)(($height + $textHeight) / 2);
+
+        switch ($this->watermarkPosition) {
+            case 'top-left':
+                $x = 10; $y = 10 + $fontSize;
+                break;
+            case 'top-right':
+                $x = $width - $textWidth - 10; $y = 10 + $fontSize;
+                break;
+            case 'bottom-left':
+                $x = 10; $y = $height - 10;
+                break;
+            case 'bottom-right':
+                $x = $width - $textWidth - 10; $y = $height - 10;
+                break;
+            case 'top':
+                $x = (int)(($width - $textWidth) / 2); $y = 10 + $fontSize;
+                break;
+            case 'bottom':
+                $x = (int)(($width - $textWidth) / 2); $y = $height - 10;
+                break;
+            case 'left':
+                $x = 10; $y = (int)(($height + $textHeight) / 2);
+                break;
+            case 'right':
+                $x = $width - $textWidth - 10; $y = (int)(($height + $textHeight) / 2);
+                break;
+            case 'center':
+            default:
+                $x = (int)(($width - $textWidth) / 2); $y = (int)(($height + $textHeight) / 2);
+                break;
+        }
+
+        imagestring($image, min(5, max(1, (int)($fontSize / 4))), $x, $y - $fontSize, $text, $color);
+    }
+
+    /**
+     * 将十六进制颜色转换为RGB数组
+     */
+    private function hexToRgb(string $hex): array
+    {
+        $hex = ltrim($hex, '#');
+        if (strlen($hex) === 3) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+        return [
+            (int) hexdec(substr($hex, 0, 2)),
+            (int) hexdec(substr($hex, 2, 2)),
+            (int) hexdec(substr($hex, 4, 2)),
+        ];
     }
 
     /**
@@ -910,119 +1165,21 @@ class QrCode
     private function drawRoundedModule(GdImage $image, int $x, int $y, int $size, int $color): void
     {
         // 计算圆点半径
-        // 修复：直接使用用户设置的roundedRadius，不再乘以0.72系数
-        // 这确保了圆点半径完全符合用户期望，如roundedRadius(0.6)会生成60%大小的圆点
-        $radius = (int)($size * $this->roundedRadius);
+        // 修复：当模块较小时，纯圆点会导致模块间出现致命间隙，导致扫码器无法识别。
+        // 因此强制半径至少能覆盖模块的55%（向上取整），确保相邻圆点有适当重叠。
+        $radius = (int) ceil($size * max($this->roundedRadius, 0.55));
 
         // 确保半径至少为1像素，保证圆点可见
         $radius = max(1, $radius);
 
-        // 确保半径不超过模块大小的一半，防止过度重叠
-        $radius = min($radius, (int)($size / 2));
+        // 限制半径不超过模块大小的70%，既防止过度重叠导致糊成一团，又确保无间隙
+        $radius = min($radius, (int) ceil($size * 0.7));
 
         $cx = $x + (int)($size / 2);
         $cy = $y + (int)($size / 2);
 
         // 绘制纯色圆点，确保高对比度和清晰的边界
         imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
-    }
-
-    /**
-     * 绘制3D立体效果圆点模块
-     * 使用渐变和高光创造立体感，适用于大尺寸二维码
-     *
-     * @param GdImage $image 图像资源
-     * @param int $cx 圆心X坐标
-     * @param int $cy 圆心Y坐标
-     * @param int $radius 半径
-     * @param int $color 基础颜色
-     */
-    private function draw3DModule(GdImage $image, int $cx, int $cy, int $radius, int $color): void
-    {
-        // 主圆点
-        imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
-
-        // 主高光（左上）
-        $highlightColor1 = $this->lightenColor($color, 60);
-        $highlightRadius1 = (int)($radius * 0.5);
-        imagefilledellipse($image, $cx - (int)($radius * 0.3), $cy - (int)($radius * 0.3), $highlightRadius1 * 2, $highlightRadius1 * 2, $highlightColor1);
-
-        // 次高光（右上）
-        $highlightColor2 = $this->lightenColor($color, 40);
-        $highlightRadius2 = (int)($radius * 0.3);
-        imagefilledellipse($image, $cx + (int)($radius * 0.2), $cy - (int)($radius * 0.2), $highlightRadius2 * 2, $highlightRadius2 * 2, $highlightColor2);
-
-        // 阴影（右下）
-        $shadowColor = $this->darkenColor($color, 30);
-        $shadowRadius = (int)($radius * 0.4);
-        imagefilledellipse($image, $cx + (int)($radius * 0.25), $cy + (int)($radius * 0.25), $shadowRadius * 2, $shadowRadius * 2, $shadowColor);
-    }
-
-    /**
-     * 绘制高亮效果圆点模块
-     * 添加轻微高光提升视觉层次
-     *
-     * @param GdImage $image 图像资源
-     * @param int $cx 圆心X坐标
-     * @param int $cy 圆心Y坐标
-     * @param int $radius 半径
-     * @param int $color 基础颜色
-     */
-    private function drawHighlightedModule(GdImage $image, int $cx, int $cy, int $radius, int $color): void
-    {
-        // 主圆点
-        imagefilledellipse($image, $cx, $cy, $radius * 2, $radius * 2, $color);
-
-        // 添加高亮效果
-        $highlightColor = $this->lightenColor($color, 40);
-        $highlightRadius = (int)($radius * 0.35);
-        imagefilledellipse($image, $cx - (int)($radius * 0.25), $cy - (int)($radius * 0.25), $highlightRadius * 2, $highlightRadius * 2, $highlightColor);
-    }
-
-    /**
-     * 颜色变暗处理（用于阴影效果）
-     *
-     * @param int $color 原始颜色（GD颜色索引）
-     * @param int $amount 变暗程度（0-100）
-     * @return int 变暗后的颜色
-     */
-    private function darkenColor(int $color, int $amount): int
-    {
-        // 将GD颜色索引转换为RGB分量
-        $r = ($color >> 16) & 0xFF;
-        $g = ($color >> 8) & 0xFF;
-        $b = $color & 0xFF;
-
-        // 计算变暗后的RGB值
-        $r = max(0, $r - $amount);
-        $g = max(0, $g - $amount);
-        $b = max(0, $b - $amount);
-
-        // 重新组合为颜色值
-        return ($r << 16) | ($g << 8) | $b;
-    }
-
-    /**
-     * 颜色变亮处理（用于圆点高亮效果）
-     *
-     * @param int $color 原始颜色（GD颜色索引）
-     * @param int $amount 变亮程度（0-100）
-     * @return int 变亮后的颜色
-     */
-    private function lightenColor(int $color, int $amount): int
-    {
-        // 将GD颜色索引转换为RGB分量
-        $r = ($color >> 16) & 0xFF;
-        $g = ($color >> 8) & 0xFF;
-        $b = $color & 0xFF;
-
-        // 计算变亮后的RGB值
-        $r = min(255, $r + $amount);
-        $g = min(255, $g + $amount);
-        $b = min(255, $b + $amount);
-
-        // 重新组合为颜色值
-        return ($r << 16) | ($g << 8) | $b;
     }
 
     /**
@@ -1071,11 +1228,8 @@ class QrCode
             isset($newSrcHeight) ? $newSrcHeight : $srcHeight
         );
 
-        imagedestroy($bgImage);
-
         // 混合背景和底色
         imagecopy($image, $newBgImage, 0, 0, 0, 0, $size, $size);
-        imagedestroy($newBgImage);
     }
 
     /**
@@ -1180,7 +1334,7 @@ class QrCode
 
         // 如果设置了阴影，先绘制阴影
         if ($this->logoShadowColor !== null) {
-            $this->drawLogoShadow($image, $logoX, $logoY, $logoSize, $borderThickness);
+            $this->drawLogoShadow($image, $logoX, $logoY, $logoSize);
         }
 
         // 将处理后的Logo绘制到主图像
@@ -1195,7 +1349,6 @@ class QrCode
                 $rotatedY = $logoY + (int)(($logoSize - $rotatedHeight) / 2);
 
                 imagecopy($image, $rotatedLogo, $rotatedX, $rotatedY, 0, 0, $rotatedWidth, $rotatedHeight);
-                imagedestroy($rotatedLogo);
             } else {
                 // 旋转失败，直接绘制
                 imagecopy($image, $processedLogo, $logoX, $logoY, 0, 0, $logoSize, $logoSize);
@@ -1246,9 +1399,6 @@ class QrCode
             }
         }
 
-        // 清理资源
-        imagedestroy($logoImage);
-        imagedestroy($processedLogo);
     }
 
     /**
@@ -1258,9 +1408,8 @@ class QrCode
      * @param int $logoX Logo X坐标
      * @param int $logoY Logo Y坐标
      * @param int $logoSize Logo尺寸
-     * @param int $borderThickness 边框厚度
      */
-    private function drawLogoShadow(GdImage $image, int $logoX, int $logoY, int $logoSize, int $borderThickness): void
+    private function drawLogoShadow(GdImage $image, int $logoX, int $logoY, int $logoSize): void
     {
         if ($this->logoShadowColor === null) {
             return;
@@ -1273,14 +1422,11 @@ class QrCode
 
         // 根据Logo形状绘制阴影
         if ($this->logoCircular) {
-            imagefilledellipse($image, $shadowX + $shadowSize / 2, $shadowY + $shadowSize / 2, $shadowSize, $shadowSize, $shadowColor);
+            imagefilledellipse($image, (int)($shadowX + $shadowSize / 2), (int)($shadowY + $shadowSize / 2), $shadowSize, $shadowSize, $shadowColor);
+        } elseif ($this->logoRounded && $this->logoRadius > 0) {
+            $this->drawRoundedRectangle($image, $shadowX, $shadowY, $shadowSize, $shadowSize, $shadowColor, $this->logoRadius);
         } else {
-            if ($this->logoRounded && $this->logoRadius > 0) {
-                $r = (int)($shadowSize * $this->logoRadius);
-                $this->drawRoundedRectangle($image, $shadowX, $shadowY, $shadowSize, $shadowSize, $shadowColor, $this->logoRadius);
-            } else {
-                imagefilledrectangle($image, $shadowX, $shadowY, $shadowX + $shadowSize - 1, $shadowY + $shadowSize - 1, $shadowColor);
-            }
+            imagefilledrectangle($image, $shadowX, $shadowY, $shadowX + $shadowSize - 1, $shadowY + $shadowSize - 1, $shadowColor);
         }
     }
 
@@ -1604,13 +1750,11 @@ class QrCode
         };
 
         if ($result === false) {
-            imagedestroy($image);
             ob_end_clean();
             throw new Exception('生成二维码数据失败');
         }
 
         $data = ob_get_clean();
-        imagedestroy($image);
 
         if ($data === false) {
             throw new Exception('获取图像数据失败');
@@ -1655,8 +1799,6 @@ class QrCode
             'webp' => imagewebp($image, $filename, $this->quality),
             default => throw new Exception('不支持的格式: ' . $this->format)
         };
-
-        imagedestroy($image);
 
         if ($result === false) {
             throw new Exception('保存二维码失败: ' . $filename);
@@ -1805,6 +1947,16 @@ class QrCode
     }
 
     /**
+     * 获取 ECI 前缀开关状态
+     *
+     * @return bool
+     */
+    public function getPrefixEci(): bool
+    {
+        return $this->prefixEci;
+    }
+
+    /**
      * 获取输出格式
      *
      * @return string
@@ -1900,6 +2052,7 @@ class QrCode
         $cloned->format = $this->format;
         $cloned->quality = $this->quality;
         $cloned->encoding = $this->encoding;
+        $cloned->prefixEci = $this->prefixEci;
         $cloned->backgroundImagePath = $this->backgroundImagePath;
         $cloned->rounded = $this->rounded;
         $cloned->transparentBackground = $this->transparentBackground;
@@ -2192,6 +2345,8 @@ class QrCode
     public static function wechatWork(string $corpid, string $agentid): self
     {
         $wxWorkUrl = sprintf('https://work.weixin.qq.com/kfid/kfc%s', $corpid);
+        // 保留 agentid 参数以维持向后兼容，当前 URL 格式主要依赖 corpid
+        unset($agentid);
         return self::make($wxWorkUrl);
     }
 
@@ -2271,7 +2426,6 @@ class QrCode
         // 应用遮罩
         $resizedLogo = imagecreatetruecolor($size, $size);
         if ($resizedLogo === false) {
-            imagedestroy($mask);
             return;
         }
         imagealphablending($resizedLogo, false);
@@ -2297,9 +2451,6 @@ class QrCode
 
         // 复制到目标
         imagecopy($dest, $resizedLogo, 0, 0, 0, 0, $size, $size);
-
-        imagedestroy($mask);
-        imagedestroy($resizedLogo);
     }
 
     /**
@@ -2337,7 +2488,6 @@ class QrCode
         // 应用遮罩
         $resizedLogo = imagecreatetruecolor($size, $size);
         if ($resizedLogo === false) {
-            imagedestroy($mask);
             return;
         }
         imagealphablending($resizedLogo, false);
@@ -2363,9 +2513,6 @@ class QrCode
 
         // 复制到目标
         imagecopy($dest, $resizedLogo, 0, 0, 0, 0, $size, $size);
-
-        imagedestroy($mask);
-        imagedestroy($resizedLogo);
     }
 
     /**

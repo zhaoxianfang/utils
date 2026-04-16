@@ -4,65 +4,41 @@ declare(strict_types=1);
 
 namespace zxf\Utils\BarCode\Renderer;
 
-use zxf\Utils\BarCode\Contracts\RendererInterface;
 use zxf\Utils\BarCode\DTO\BarcodeConfig;
 use zxf\Utils\BarCode\Exceptions\RenderException;
 
 /**
  * PNG 渲染器（动态文字定位版）
- * 
+ *
  * 【核心特性】
  * - 动态检测长竖线（保护符）实际像素位置
  * - 根据条码内容和结构自动分段显示数字
  * - 动态计算字号大小适配条码宽度
  * - 动态计算上下偏移距离
  * - 每段数字在各自区域内均匀分布
- * 
+ *
  * 【支持的长竖线特征条码】
  * - EAN-13: 分段 1+6+6（第1位左静区，2-7位左数据区，8-13位右数据区）
  * - ISSN: 基于EAN-13，显示格式不同
  * - UPC-A: 分段 1+5+5+1（第1位左静区，2-6位左数据区，7-11位右数据区，12位右静区）
  * - EAN-8: 分段 4+4（1-4位左数据区，5-8位右数据区）
  */
-class PngRenderer implements RendererInterface
+class PngRenderer extends BaseRenderer
 {
     protected const TYPE = 'png';
-    
-    protected BarcodeConfig $config;
-    protected $image = null;
-    protected string $barcodeType = '';
-    
-    // 个性化配置
-    protected bool $enableGradient = false;
-    protected string $gradientStartColor = '#000000';
-    protected string $gradientEndColor = '#333333';
-    protected bool $enableRoundedBars = false;
-    protected int $cornerRadius = 2;
-    protected ?string $watermarkText = null;
-    protected int $watermarkOpacity = 50;
-    protected int $watermarkFontSize = 5;
-    protected string $watermarkColor = '#CCCCCC';
-    protected int $watermarkAngle = 0;
-    protected string $textAlign = 'center';
-    
-    /** @var array<int> 长竖线位置索引 */
-    protected array $longBarPositions = [];
-    
-    /** @var float 长竖线高度比例 */
-    protected float $longBarHeightRatio = 1.12;
-    
-    /** @var array<string, mixed> 条码结构分析结果 */
-    protected array $barcodeStructure = [];
-    
-    /** @var int 动态计算的字号 */
+
+    /** @var \GdImage|null GD图像资源 */
+    protected ?\GdImage $image = null;
+
+    /** @var int 动态计算的字号，用于长竖线条码的自动适配（GD 内置字体 1-5） */
     protected int $dynamicFontSize = 5;
-    
-    /** @var int 动态计算的文本Y偏移 */
+
+    /** @var int 动态计算的文本Y轴偏移量，确保文字与长竖线不重叠 */
     protected int $dynamicTextOffset = 3;
 
     public function __construct(?BarcodeConfig $config = null)
     {
-        $this->config = $config ?? new BarcodeConfig();
+        parent::__construct($config);
     }
 
     /**
@@ -72,16 +48,25 @@ class PngRenderer implements RendererInterface
     {
         $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), $config));
         $this->barcodeStructure = []; // 重置结构分析
-        
+        $this->renderModuleSize = $this->resolveModuleSize($barcodeData);
+
         $this->createImage($barcodeData);
         $this->drawBarcode($barcodeData);
         
+        if ($this->bearerBarEnabled) {
+            $this->drawBearerBar();
+        }
+        
         if ($this->config->showText) {
-            $this->drawText($data, $barcodeData);
+            $this->drawText($data);
         }
         
         if ($this->watermarkText !== null) {
             $this->drawWatermark();
+        }
+
+        if ($this->borderWidth > 0) {
+            $this->drawBorder();
         }
 
         return $this->outputPng();
@@ -118,80 +103,34 @@ class PngRenderer implements RendererInterface
         return self::TYPE;
     }
 
-    public function setBarcodeType(string $type): self
-    {
-        $this->barcodeType = $type;
-        return $this;
-    }
-
     /**
-     * 设置长竖线位置
-     */
-    public function setLongBarPositions(array $positions): self
-    {
-        $this->longBarPositions = $positions;
-        return $this;
-    }
-
-    /**
-     * 设置文本对齐方式
-     */
-    public function setTextAlign(string $align): self
-    {
-        $this->textAlign = in_array($align, ['left', 'center', 'right']) ? $align : 'center';
-        return $this;
-    }
-
-    /**
-     * 启用渐变效果
-     */
-    public function enableGradient(string $startColor, string $endColor): self
-    {
-        $this->enableGradient = true;
-        $this->gradientStartColor = $startColor;
-        $this->gradientEndColor = $endColor;
-        return $this;
-    }
-
-    /**
-     * 禁用渐变效果
-     */
-    public function disableGradient(): self
-    {
-        $this->enableGradient = false;
-        return $this;
-    }
-
-    /**
-     * 启用圆角条
-     */
-    public function enableRoundedBars(int $radius = 2): self
-    {
-        $this->enableRoundedBars = true;
-        $this->cornerRadius = $radius;
-        return $this;
-    }
-
-    /**
-     * 添加水印（增强版）
-     * 
+     * 添加水印（PNG 适配版）
+     *
+     * GD 内置字体仅支持 1-5 级字号，因此传入的字号会被映射到该范围。
+     *
      * @param string $text 水印文本
      * @param int $opacity 透明度（0-100，值越大越不透明）
-     * @param int $fontSize 字号（1-5）
+     * @param int $fontSize 字号（会被映射到 GD 内置字体 1-5）
      * @param string $color 颜色（十六进制格式）
      * @param int $angle 旋转角度（-180到180度）
      * @return self
      */
     public function setWatermark(
-        string $text, 
-        int $opacity = 70, 
-        int $fontSize = 5, 
+        string $text,
+        int $opacity = 70,
+        int $fontSize = 16,
         string $color = '#CCCCCC',
         int $angle = 0
     ): self {
         $this->watermarkText = $text;
         $this->watermarkOpacity = max(0, min(100, $opacity));
-        $this->watermarkFontSize = max(1, min(5, $fontSize));
+        // GD 内置字体有效范围为 1-5，超过此范围的值按 3 像素/级进行映射
+        if ($fontSize <= 5) {
+            $this->watermarkFontSize = max(1, min(5, $fontSize));
+        } else {
+            $mapped = (int) round($fontSize / 3);
+            $this->watermarkFontSize = max(1, min(5, $mapped));
+        }
         $this->watermarkColor = $color;
         $this->watermarkAngle = max(-180, min(180, $angle));
         return $this;
@@ -207,16 +146,20 @@ class PngRenderer implements RendererInterface
             $totalWidth += abs($element);
         }
         
-        $width = $totalWidth * $this->config->width + 
-                 $this->config->marginLeft + 
+        $width = $totalWidth * $this->renderModuleSize +
+                 $this->config->marginLeft +
                  $this->config->marginRight;
         
-        $height = $this->config->height + 
-                  $this->config->marginTop + 
+        $height = $this->config->height +
+                  $this->config->marginTop +
                   $this->config->marginBottom;
-        
+
         if ($this->config->showText) {
             $height += $this->config->fontSize + $this->config->textOffset;
+        }
+
+        if ($this->bearerBarEnabled) {
+            $height += $this->bearerBarWidth * 2;
         }
 
         $this->image = imagecreatetruecolor($width, $height);
@@ -227,14 +170,21 @@ class PngRenderer implements RendererInterface
 
         $bgColorHex = $this->config->bgColor;
         $barColorHex = $this->config->barColor;
-        
-        if (!$this->validateContrast($bgColorHex, $barColorHex)) {
+
+        if ($bgColorHex !== 'transparent' && $bgColorHex !== null && !$this->validateContrast($bgColorHex, $barColorHex)) {
             $bgColorHex = '#FFFFFF';
             $barColorHex = '#000000';
         }
 
-        $bgColor = $this->hexToColor($bgColorHex);
-        imagefill($this->image, 0, 0, $bgColor);
+        if ($bgColorHex === 'transparent' || $bgColorHex === null) {
+            imagealphablending($this->image, false);
+            imagesavealpha($this->image, true);
+            $transparent = imagecolorallocatealpha($this->image, 255, 255, 255, 127);
+            imagefill($this->image, 0, 0, $transparent);
+        } else {
+            $bgColor = $this->hexToColor($bgColorHex);
+            imagefill($this->image, 0, 0, $bgColor);
+        }
     }
 
     /**
@@ -252,7 +202,7 @@ class PngRenderer implements RendererInterface
         $x = $this->config->marginLeft;
         
         // 计算长竖线位置
-        $longBarPositions = $this->calculateLongBarPositions($barcodeData);
+        $longBarPositions = $this->calculateLongBarPositions();
         
         $barY = $this->config->marginTop;
         
@@ -262,8 +212,8 @@ class PngRenderer implements RendererInterface
         
         foreach ($barcodeData as $elementIndex => $element) {
             $isBar = $element > 0;
-            $width = abs($element) * $this->config->width;
-            
+            $width = abs($element) * $this->renderModuleSize;
+
             if ($isBar) {
                 $isLongBar = in_array($elementIndex, $longBarPositions, true) && 
                              $this->config->rotateLongBars;
@@ -302,117 +252,14 @@ class PngRenderer implements RendererInterface
         }
         
         // 分析条码结构
-        $this->analyzeBarcodeStructure($bars, $x);
+        $this->analyzeBarcodeStructure($bars, $x, $this->config->marginLeft);
     }
 
-    /**
-     * 分析条码结构，识别保护符位置和数据区域
-     * 
-     * 【分析逻辑】
-     * 1. 识别所有长竖线（保护符）
-     * 2. 根据长竖线数量和分布判断条码类型
-     * 3. 计算各数据区域的边界
-     */
-    protected function analyzeBarcodeStructure(array $bars, int $totalWidth): void
-    {
-        // 提取长竖线
-        $longBars = array_filter($bars, fn($bar) => $bar['isLongBar']);
-        $longBars = array_values($longBars); // 重新索引
-        
-        $this->barcodeStructure = [
-            'totalWidth' => $totalWidth - $this->config->marginLeft,
-            'longBars' => $longBars,
-            'allBars' => $bars,
-            'hasLongBars' => !empty($longBars),
-        ];
-        
-        if (empty($longBars)) {
-            return;
-        }
-        
-        // 根据长竖线数量和分布判断条码结构
-        $longBarCount = count($longBars);
-        
-        if ($longBarCount >= 6) {
-            // 典型的 EAN/UPC 结构：起始符(2条) + 分隔符(2条) + 终止符(2条)
-            $this->analyzeEANStructure($longBars);
-        }
-    }
-
-    /**
-     * 分析 EAN/UPC 系列条码结构
-     */
-    protected function analyzeEANStructure(array $longBars): void
-    {
-        // 按位置排序
-        usort($longBars, fn($a, $b) => $a['x'] <=> $b['x']);
-        
-        // 提取保护符组
-        // 起始符：前2条长竖线
-        $startGuardLeft = $longBars[0];
-        $startGuardRight = $longBars[1];
-        
-        // 终止符：后2条长竖线
-        $endGuardLeft = $longBars[count($longBars) - 2];
-        $endGuardRight = $longBars[count($longBars) - 1];
-        
-        // 分隔符：中间2条长竖线
-        $middleIdx = (int)(count($longBars) / 2);
-        $middleGuardLeft = $longBars[$middleIdx - 1];
-        $middleGuardRight = $longBars[$middleIdx];
-        
-        // 计算数据区域
-        $this->barcodeStructure['regions'] = [
-            'startGuard' => [
-                'left' => $startGuardLeft['x'],
-                'right' => $startGuardRight['x'] + $startGuardRight['width'],
-            ],
-            'middleGuard' => [
-                'left' => $middleGuardLeft['x'],
-                'right' => $middleGuardRight['x'] + $middleGuardRight['width'],
-            ],
-            'endGuard' => [
-                'left' => $endGuardLeft['x'],
-                'right' => $endGuardRight['x'] + $endGuardRight['width'],
-            ],
-            'leftData' => [
-                'left' => $startGuardRight['x'] + $startGuardRight['width'],
-                'right' => $middleGuardLeft['x'],
-            ],
-            'rightData' => [
-                'left' => $middleGuardRight['x'] + $middleGuardRight['width'],
-                'right' => $endGuardLeft['x'],
-            ],
-            'leftQuietZone' => [
-                'left' => $this->config->marginLeft,
-                'right' => $startGuardLeft['x'],
-                'center' => (int)(($this->config->marginLeft + $startGuardLeft['x']) / 2),
-            ],
-            'rightQuietZone' => [
-                'left' => $endGuardRight['x'] + $endGuardRight['width'],
-                'right' => $this->barcodeStructure['totalWidth'] + $this->config->marginLeft,
-                'center' => (int)((($endGuardRight['x'] + $endGuardRight['width']) + 
-                    ($this->barcodeStructure['totalWidth'] + $this->config->marginLeft)) / 2),
-            ],
-        ];
-    }
-
-    /**
-     * 计算长竖线位置
-     */
-    protected function calculateLongBarPositions(array $barcodeData): array
-    {
-        if (!empty($this->longBarPositions)) {
-            return $this->longBarPositions;
-        }
-        
-        return [];
-    }
 
     /**
      * 绘制文字（动态定位）
      */
-    protected function drawText(string $data, array $barcodeData): void
+    protected function drawText(string $data): void
     {
         if ($this->image === null) {
             return;
@@ -727,23 +574,51 @@ class PngRenderer implements RendererInterface
     }
 
     /**
-     * 启用Bearer Bar（ITF-14上下边框）- 已禁用
+     * 绘制 Bearer Bar（ITF-14 标准框型）
+     *
+     * 绘制完整的矩形框，四边紧贴条码内容区域（含静区），
+     * 避免水平横条覆盖整个图像导致的“超长”视觉异常。
      */
-    public function enableBearerBar(int $width = 2): self
+    protected function drawBearerBar(): void
     {
-        return $this;
+        if ($this->image === null) {
+            return;
+        }
+
+        $barColor = $this->hexToColor($this->config->barColor);
+        $thickness = $this->bearerBarWidth;
+        $barTop = $this->config->marginTop;
+        $barBottom = $barTop + $this->config->height - 1;
+
+        // 内容区域左右边界（与条码静区对齐，不覆盖图像边缘额外 padding）
+        $contentLeft = $this->config->marginLeft;
+        $contentRight = imagesx($this->image) - $this->config->marginRight - 1;
+        if ($contentLeft >= $contentRight) {
+            $contentLeft = 0;
+            $contentRight = imagesx($this->image) - 1;
+        }
+
+        // 顶部横线
+        $topY1 = max(0, $barTop - $thickness);
+        $topY2 = $barTop - 1;
+        if ($topY2 >= 0) {
+            imagefilledrectangle($this->image, $contentLeft, $topY1, $contentRight, $topY2, $barColor);
+        }
+
+        // 底部横线
+        $bottomY1 = $barBottom + 1;
+        $bottomY2 = $barBottom + $thickness;
+        imagefilledrectangle($this->image, $contentLeft, $bottomY1, $contentRight, $bottomY2, $barColor);
+
+        // 左右垂直条（连接顶部和底部，形成完整框型 Bearer Bar）
+        $boxTop = $topY1;
+        $boxBottom = $bottomY2;
+        imagefilledrectangle($this->image, $contentLeft, $boxTop, $contentLeft + $thickness - 1, $boxBottom, $barColor);
+        imagefilledrectangle($this->image, $contentRight - $thickness + 1, $boxTop, $contentRight, $boxBottom, $barColor);
     }
 
     /**
-     * 禁用Bearer Bar
-     */
-    public function disableBearerBar(): self
-    {
-        return $this;
-    }
-
-    /**
-     * 绘制水印（增强版，支持旋转和斜向平铺）
+     * 绘制水印（增强版，支持旋转、斜向平铺、位置定位和TTF字体）
      */
     protected function drawWatermark(): void
     {
@@ -753,27 +628,118 @@ class PngRenderer implements RendererInterface
 
         $width = imagesx($this->image);
         $height = imagesy($this->image);
-        
+
         // 解析水印颜色
         $rgb = $this->parseColor($this->watermarkColor);
-        
+
         // 计算透明度（GD库alpha值：0不透明，127完全透明）
         $alpha = (int)(127 * (1 - $this->watermarkOpacity / 100));
         $watermarkColor = imagecolorallocatealpha($this->image, $rgb['r'], $rgb['g'], $rgb['b'], $alpha);
-        
+
+        // 使用TTF字体或内置GD字体
+        if ($this->watermarkFontPath !== null && $this->watermarkAngle === 0) {
+            $this->drawTtfWatermark($width, $height, $watermarkColor);
+            return;
+        }
+
         $fontSize = $this->watermarkFontSize;
         $textWidth = imagefontwidth($fontSize) * strlen($this->watermarkText);
         $textHeight = imagefontheight($fontSize);
-        
-        // 如果角度为0，直接绘制在中心
+
+        // 如果角度为0，根据位置定位绘制
         if ($this->watermarkAngle === 0) {
-            $x = (int)(($width - $textWidth) / 2);
-            $y = (int)(($height - $textHeight) / 2);
+            [$x, $y] = $this->resolveWatermarkPosition($width, $height, $textWidth, $textHeight, 0);
             imagestring($this->image, $fontSize, $x, $y, $this->watermarkText, $watermarkColor);
         } else {
             // 有旋转角度，绘制斜向平铺的水印
             $this->drawRotatedWatermark($width, $height, $watermarkColor);
         }
+    }
+
+    /**
+     * 使用TTF字体绘制水印
+     */
+    protected function drawTtfWatermark(int $imgWidth, int $imgHeight, int $color): void
+    {
+        if ($this->watermarkFontPath === null) {
+            return;
+        }
+
+        $fontSize = max(8, $this->watermarkFontSize * 4);
+        $bbox = imagettfbbox($fontSize, 0, $this->watermarkFontPath, $this->watermarkText);
+        if ($bbox === false) {
+            return;
+        }
+
+        $textWidth = (int) abs($bbox[4] - $bbox[0]);
+        $textHeight = (int) abs($bbox[1] - $bbox[5]);
+
+        [$x, $y] = $this->resolveWatermarkPosition($imgWidth, $imgHeight, $textWidth, $textHeight, $textHeight);
+
+        imagettftext(
+            $this->image,
+            $fontSize,
+            0,
+            $x,
+            $y,
+            $color,
+            $this->watermarkFontPath,
+            $this->watermarkText
+        );
+    }
+
+    /**
+     * 根据位置解析水印坐标
+     *
+     * @return array{0:int,1:int} [x, y]
+     */
+    protected function resolveWatermarkPosition(int $imgWidth, int $imgHeight, int $textWidth, int $textHeight, int $baselineOffset): array
+    {
+        $margin = 10;
+        $x = (int)(($imgWidth - $textWidth) / 2);
+        $y = (int)(($imgHeight - $textHeight) / 2) + $baselineOffset;
+
+        switch ($this->watermarkPosition) {
+            case 'top-left':
+                $x = $margin;
+                $y = $margin + $baselineOffset;
+                break;
+            case 'top-right':
+                $x = $imgWidth - $textWidth - $margin;
+                $y = $margin + $baselineOffset;
+                break;
+            case 'bottom-left':
+                $x = $margin;
+                $y = $imgHeight - $textHeight - $margin + $baselineOffset;
+                break;
+            case 'bottom-right':
+                $x = $imgWidth - $textWidth - $margin;
+                $y = $imgHeight - $textHeight - $margin + $baselineOffset;
+                break;
+            case 'top':
+                $x = (int)(($imgWidth - $textWidth) / 2);
+                $y = $margin + $baselineOffset;
+                break;
+            case 'bottom':
+                $x = (int)(($imgWidth - $textWidth) / 2);
+                $y = $imgHeight - $textHeight - $margin + $baselineOffset;
+                break;
+            case 'left':
+                $x = $margin;
+                $y = (int)(($imgHeight - $textHeight) / 2) + $baselineOffset;
+                break;
+            case 'right':
+                $x = $imgWidth - $textWidth - $margin;
+                $y = (int)(($imgHeight - $textHeight) / 2) + $baselineOffset;
+                break;
+            case 'center':
+            default:
+                $x = (int)(($imgWidth - $textWidth) / 2);
+                $y = (int)(($imgHeight - $textHeight) / 2) + $baselineOffset;
+                break;
+        }
+
+        return [max(0, $x), max(0, $y)];
     }
     
     /**
@@ -839,10 +805,6 @@ class PngRenderer implements RendererInterface
                     $destY = $y - (int)($rotatedHeight / 2);
                     
                     imagecopy($this->image, $rotatedImg, $destX, $destY, 0, 0, $rotatedWidth, $rotatedHeight);
-                    
-                    // 释放临时资源
-                    imagedestroy($tempImg);
-                    imagedestroy($rotatedImg);
                 }
             }
         }
@@ -868,6 +830,30 @@ class PngRenderer implements RendererInterface
     }
 
     /**
+     * 绘制边框
+     */
+    protected function drawBorder(): void
+    {
+        if ($this->image === null || $this->borderWidth <= 0) {
+            return;
+        }
+
+        $color = $this->hexToColor($this->borderColor);
+        $imgWidth = imagesx($this->image);
+        $imgHeight = imagesy($this->image);
+        $w = $this->borderWidth;
+
+        // 上边框
+        imagefilledrectangle($this->image, 0, 0, $imgWidth - 1, $w - 1, $color);
+        // 下边框
+        imagefilledrectangle($this->image, 0, $imgHeight - $w, $imgWidth - 1, $imgHeight - 1, $color);
+        // 左边框
+        imagefilledrectangle($this->image, 0, 0, $w - 1, $imgHeight - 1, $color);
+        // 右边框
+        imagefilledrectangle($this->image, $imgWidth - $w, 0, $imgWidth - 1, $imgHeight - 1, $color);
+    }
+
+    /**
      * 输出PNG数据
      */
     protected function outputPng(): string
@@ -879,8 +865,7 @@ class PngRenderer implements RendererInterface
         ob_start();
         imagepng($this->image);
         $data = ob_get_clean();
-        
-        imagedestroy($this->image);
+
         $this->image = null;
 
         if ($data === false) {
@@ -912,54 +897,4 @@ class PngRenderer implements RendererInterface
         return imagecolorallocate($this->image, $r, $g, $b);
     }
 
-    /**
-     * 十六进制颜色转RGB数组
-     */
-    protected function hexToRgb(string $hex): array
-    {
-        $hex = ltrim($hex, '#');
-        
-        if (strlen($hex) === 3) {
-            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
-        }
-
-        return [
-            (int) hexdec(substr($hex, 0, 2)),
-            (int) hexdec(substr($hex, 2, 2)),
-            (int) hexdec(substr($hex, 4, 2)),
-        ];
-    }
-
-    /**
-     * 验证颜色对比度
-     */
-    protected function validateContrast(string $bgColor, string $barColor): bool
-    {
-        $bgLuminance = $this->getRelativeLuminance($bgColor);
-        $barLuminance = $this->getRelativeLuminance($barColor);
-        
-        $lightest = max($bgLuminance, $barLuminance);
-        $darkest = min($bgLuminance, $barLuminance);
-        $contrast = ($lightest + 0.05) / ($darkest + 0.05);
-        
-        return $contrast >= 3.0;
-    }
-
-    /**
-     * 获取颜色的相对亮度
-     */
-    protected function getRelativeLuminance(string $color): float
-    {
-        $rgb = $this->hexToRgb($color);
-        
-        $rsRGB = $rgb[0] / 255;
-        $gsRGB = $rgb[1] / 255;
-        $bsRGB = $rgb[2] / 255;
-        
-        $r = $rsRGB <= 0.03928 ? $rsRGB / 12.92 : pow(($rsRGB + 0.055) / 1.055, 2.4);
-        $g = $gsRGB <= 0.03928 ? $gsRGB / 12.92 : pow(($gsRGB + 0.055) / 1.055, 2.4);
-        $b = $bsRGB <= 0.03928 ? $bsRGB / 12.92 : pow(($bsRGB + 0.055) / 1.055, 2.4);
-        
-        return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
-    }
 }

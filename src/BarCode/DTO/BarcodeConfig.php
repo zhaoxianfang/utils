@@ -15,8 +15,8 @@ class BarcodeConfig
     /**
      * 构造函数
      * 
-     * @param int    $width           单个窄条宽度（像素）
-     * @param int    $height          条码高度（像素）
+     * @param int    $width           条码内容总宽度（像素），0表示由渲染器根据模块数自动计算
+     * @param int    $height          条码内容高度（像素，即条的高度）
      * @param int    $marginTop       上边距（像素）
      * @param int    $marginBottom    下边距（像素）
      * @param int    $marginLeft      左边距（像素）
@@ -34,10 +34,10 @@ class BarcodeConfig
      * @param int    $textOffset      文字与条码间距（像素）
      * @param bool   $rotateLongBars  是否将保护符设为长竖线
      * @param int    $longBarHeight   长竖线额外高度（像素）
-     * @param int    $moduleWidth     模块宽度（用于某些条码类型）
+     * @param int    $moduleSize      单个模块宽度（像素），内部计算，一般不需要手动设置
      */
     public function __construct(
-        public readonly int $width = 2,
+        public readonly int $width = 0,
         public readonly int $height = 80,
         public readonly int $marginTop = 10,
         public readonly int $marginBottom = 10,
@@ -56,7 +56,7 @@ class BarcodeConfig
         public readonly int $textOffset = 5,
         public readonly bool $rotateLongBars = true,
         public readonly int $longBarHeight = 15,
-        public readonly int $moduleWidth = 2
+        public readonly int $moduleSize = 0
     ) {}
 
     /**
@@ -68,7 +68,7 @@ class BarcodeConfig
     public static function fromArray(array $config): self
     {
         return new self(
-            width: $config['width'] ?? 2,
+            width: $config['width'] ?? 0,
             height: $config['height'] ?? 80,
             marginTop: $config['marginTop'] ?? 10,
             marginBottom: $config['marginBottom'] ?? 10,
@@ -87,7 +87,7 @@ class BarcodeConfig
             textOffset: $config['textOffset'] ?? 5,
             rotateLongBars: $config['rotateLongBars'] ?? true,
             longBarHeight: $config['longBarHeight'] ?? 15,
-            moduleWidth: $config['moduleWidth'] ?? 2
+            moduleSize: $config['moduleSize'] ?? 0
         );
     }
 
@@ -118,7 +118,7 @@ class BarcodeConfig
             'textOffset' => $this->textOffset,
             'rotateLongBars' => $this->rotateLongBars,
             'longBarHeight' => $this->longBarHeight,
-            'moduleWidth' => $this->moduleWidth,
+            'moduleSize' => $this->moduleSize,
         ];
     }
 }

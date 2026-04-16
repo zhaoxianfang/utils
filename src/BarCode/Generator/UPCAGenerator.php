@@ -18,6 +18,7 @@ class UPCAGenerator extends BaseGenerator
     protected const START_GUARD = '101';
     protected const MIDDLE_GUARD = '01010';
     protected const END_GUARD = '101';
+    protected const MODULE_WIDTH = 2;
 
     protected array $encodingA = [
         '0001101', '0011001', '0010011', '0111101', '0100011',
@@ -39,12 +40,9 @@ class UPCAGenerator extends BaseGenerator
             throw new InvalidDataException('UPC-A 数据必须是11或12位纯数字');
         }
 
-        // 处理校验位 - 移除校验位验证，保证条码内容与传入内容完全一致
         if (strlen($data) === 12) {
-            // 直接使用传入的12位数据，不再验证校验位
             $this->rawData = $data;
         } else {
-            // 11位数据，自动计算校验位
             $checksum = $this->calculateChecksum($data);
             $this->rawData = $data . $checksum;
         }
@@ -55,78 +53,70 @@ class UPCAGenerator extends BaseGenerator
         $leftData = substr($this->rawData, 0, 6);
         $rightData = substr($this->rawData, 6, 6);
 
-        // 构建编码
-        $binaryString = '';
-        
+        $binary = '';
+
         // 左侧静区
-        $binaryString .= str_repeat('0', $this->quietZoneModules);
-        
+        $binary .= str_repeat('0', $this->quietZoneModules * self::MODULE_WIDTH);
+
         // 起始保护符
-        $binaryString .= self::START_GUARD;
-        
+        $startGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::START_GUARD);
+
         // 左侧6位（A模式）
+        $leftBinary = '';
         for ($i = 0; $i < 6; $i++) {
             $digit = (int) $leftData[$i];
-            $binaryString .= $this->encodingA[$digit];
+            $leftBinary .= $this->expandPattern($this->encodingA[$digit]);
         }
-        
+        $binary .= $leftBinary;
+
         // 中间分隔符
-        $binaryString .= self::MIDDLE_GUARD;
-        
+        $middleGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::MIDDLE_GUARD);
+
         // 右侧6位（C模式）
+        $rightBinary = '';
         for ($i = 0; $i < 6; $i++) {
             $digit = (int) $rightData[$i];
-            $binaryString .= $this->encodingC[$digit];
+            $rightBinary .= $this->expandPattern($this->encodingC[$digit]);
         }
-        
-        // 终止保护符
-        $binaryString .= self::END_GUARD;
-        
-        // 右侧静区
-        $binaryString .= str_repeat('0', $this->quietZoneModules);
+        $binary .= $rightBinary;
 
-        $this->barcodeArray = $this->binaryToBars($binaryString);
-        $this->calculateLongBarPositions();
+        // 终止保护符
+        $endGuardOffset = strlen($binary);
+        $binary .= $this->expandPattern(self::END_GUARD);
+
+        // 右侧静区
+        $binary .= str_repeat('0', $this->quietZoneModules * self::MODULE_WIDTH);
+
+        $this->barcodeArray = $this->binaryToBars($binary);
+        $this->calculateLongBarPositionsFromBinary($binary, $startGuardOffset, $middleGuardOffset, $endGuardOffset);
 
         return $this->barcodeArray;
     }
 
     /**
-     * 计算长竖线位置（基于条空模式数组索引）
-     *
-     * UPC-A 结构：静区9 + 起始符3 + 左侧42 + 分隔符5 + 右侧42 + 终止符3 + 静区9
-     * 长竖线在：起始符(2条)、中间分隔符(2条)、终止符(2条)
+     * 基于二进制偏移量精确计算长竖线位置
      */
-    protected function calculateLongBarPositions(): void
-    {
+    protected function calculateLongBarPositionsFromBinary(
+        string $binary,
+        int $startGuardOffset,
+        int $middleGuardOffset,
+        int $endGuardOffset
+    ): void {
         $this->longBarPositions = [];
 
-        // 分析条空模式数组，找到所有条（正数元素）
-        $barIndices = [];
-        foreach ($this->barcodeArray as $i => $element) {
-            if ($element > 0) {
-                $barIndices[] = $i;
-            }
-        }
+        // 起始符 '101' -> 条在偏移 +0 和 +2
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset + 2 * self::MODULE_WIDTH);
 
-        // UPC-A 有3组保护符，每组2条长竖线，共6条
-        // 条在数组中的大致分布：起始符(2条) + 数据中的条 + 分隔符(2条) + 数据中的条 + 终止符(2条)
-        // 简单策略：取前2条、中间2条、后2条作为长竖线
-        $totalBars = count($barIndices);
-        if ($totalBars >= 6) {
-            // 前2条（起始符）
-            $this->longBarPositions[] = $barIndices[0];
-            $this->longBarPositions[] = $barIndices[1];
+        // 中间分隔符 '01010' -> 条在偏移 +1 和 +3
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 1 * self::MODULE_WIDTH);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 3 * self::MODULE_WIDTH);
 
-            // 后2条（终止符）
-            $this->longBarPositions[] = $barIndices[$totalBars - 2];
-            $this->longBarPositions[] = $barIndices[$totalBars - 1];
-
-            // 中间2条（分隔符）- 大致在中间位置
-            $middleIdx = (int)($totalBars / 2);
-            $this->longBarPositions[] = $barIndices[$middleIdx - 1];
-            $this->longBarPositions[] = $barIndices[$middleIdx];
-        }
+        // 终止符 '101' -> 条在偏移 +0 和 +2
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset + 2 * self::MODULE_WIDTH);
 
         sort($this->longBarPositions);
     }
@@ -155,6 +145,18 @@ class UPCAGenerator extends BaseGenerator
         }
 
         return $this->calculateMod10Checksum($data);
+    }
+
+    /**
+     * 将模式按 MODULE_WIDTH 展开（保持像素尺寸兼容）
+     */
+    protected function expandPattern(string $pattern): string
+    {
+        $expanded = '';
+        for ($i = 0; $i < strlen($pattern); $i++) {
+            $expanded .= str_repeat($pattern[$i], self::MODULE_WIDTH);
+        }
+        return $expanded;
     }
 
     public function getType(): string

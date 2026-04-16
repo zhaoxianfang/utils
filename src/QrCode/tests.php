@@ -94,7 +94,7 @@ function test($name, $callable) {
 }
 
 // 创建输出目录
-$outputDir = __DIR__ . '/test_output';
+$outputDir = __DIR__ . '/test_output_'.date('Ymd_Hi');
 if (!is_dir($outputDir)) {
     mkdir($outputDir, 0755, true);
 }
@@ -381,6 +381,44 @@ test('Base64 输出', function() {
     return str_starts_with($base64, 'data:image/png;base64,') ? true : 'Base64格式错误';
 });
 
+test('width() 别名', function() use ($outputDir) {
+    QrCode::make('Width Alias')
+        ->width(250)
+        ->save($outputDir . '/width_alias.png');
+    return file_exists($outputDir . '/width_alias.png') ? true : '文件未生成';
+});
+
+test('height() 别名', function() use ($outputDir) {
+    QrCode::make('Height Alias')
+        ->height(250)
+        ->save($outputDir . '/height_alias.png');
+    return file_exists($outputDir . '/height_alias.png') ? true : '文件未生成';
+});
+
+test('totalWidth/totalHeight 强制缩放', function() use ($outputDir) {
+    QrCode::make('Scaled Output')
+        ->size(200)
+        ->totalWidth(400)
+        ->totalHeight(400)
+        ->save($outputDir . '/scaled_400.png');
+    return file_exists($outputDir . '/scaled_400.png') ? true : '文件未生成';
+});
+
+test('margin 和 padding 组合', function() use ($outputDir) {
+    QrCode::make('Margin Padding')
+        ->size(200)
+        ->margin(2)
+        ->padding(20)
+        ->save($outputDir . '/margin_padding.png');
+    return file_exists($outputDir . '/margin_padding.png') ? true : '文件未生成';
+});
+
+test('直接获取二进制 PNG 数据', function() use ($outputDir) {
+    $data = QrCode::make('Raw PNG')->size(150)->toString();
+    file_put_contents($outputDir . '/raw_png.png', $data);
+    return file_exists($outputDir . '/raw_png.png') && strlen($data) > 100 ? true : '数据异常';
+});
+
 echo "\n【边界情况测试】\n";
 echo "----------------\n";
 
@@ -402,6 +440,20 @@ test('长文本二维码 (500字符)', function() use ($outputDir) {
 test('中文内容二维码', function() use ($outputDir) {
     QrCode::make('这是一段中文测试内容')->save($outputDir . '/chinese.png');
     return file_exists($outputDir . '/chinese.png') ? true : '文件未生成';
+});
+
+test('关闭 ECI 前缀（提升旧设备兼容性）', function() use ($outputDir) {
+    QrCode::make('关闭ECI测试')
+        ->prefixEci(false)
+        ->save($outputDir . '/no_eci_prefix.png');
+    return file_exists($outputDir . '/no_eci_prefix.png') ? true : '文件未生成';
+});
+
+test('开启 ECI 前缀（默认行为）', function() use ($outputDir) {
+    QrCode::make('开启ECI测试')
+        ->prefixEci(true)
+        ->save($outputDir . '/with_eci_prefix.png');
+    return file_exists($outputDir . '/with_eci_prefix.png') ? true : '文件未生成';
 });
 
 test('混合内容二维码', function() use ($outputDir) {
@@ -431,8 +483,7 @@ test('带背景的渐变效果', function() use ($outputDir) {
     // 创建渐变背景
     $gradient = AdvancedFeatures::createGradientBackground(400, 400, '#FF6B6B', '#4ECDC4', 'diagonal');
     imagepng($gradient, $outputDir . '/gradient_bg.png');
-    imagedestroy($gradient);
-    
+
     // 使用背景
     QrCode::make('Gradient BG')
         ->backgroundImage($outputDir . '/gradient_bg.png')

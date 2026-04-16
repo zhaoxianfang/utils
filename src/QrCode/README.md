@@ -23,10 +23,13 @@
 - ✅ **背景图片**：支持设置背景图片
 - ✅ **多种格式**：支持 PNG、JPEG、GIF 输出
 - ✅ **透明背景**：支持生成透明背景的二维码（仅PNG格式）
+- ✅ **指定宽高**：支持设置生成图片的最终宽度和高度
+- ✅ **水印支持**：支持添加文字水印（9种位置、透明度、TTF字体）
 - ✅ **边距控制**：支持模块边距（margin）和图片外边距（padding）
 - ✅ **链式调用**：简洁优雅的 API 设计
 - ✅ **中文文档**：完善的中文注释和文档
 - ✅ **辅助工具**：提供便捷的静态方法和工具函数
+- ✅ **原始矩阵**：支持获取二维码原始布尔矩阵
 
 ## 📦 安装
 
@@ -113,12 +116,18 @@ $base64 = QrCode::make('Test')
 |------|---------|---------|--------|---------|------|
 | `data()` | string | 要编码的数据内容 | '' | 无 | `->data('Hello')` |
 | `size()` | int | 二维码尺寸（像素） | 300 | 50-5000 | `->size(300)` |
+| `width()` | int | 二维码宽度（`size()` 的别名） | 300 | 50-5000 | `->width(300)` |
+| `height()` | int | 二维码高度（`size()` 的别名） | 300 | 50-5000 | `->height(300)` |
 | `margin()` | int | 二维码边距（模块数量） | 4 | 0-32 | `->margin(4)` |
 | `padding()` | int | 二维码外边距（像素） | 0 | 0-200 | `->padding(10)` |
+| `totalWidth()` | int | 生成图片的最终宽度（像素） | 0 | ≥0 | `->totalWidth(400)` |
+| `totalHeight()` | int | 生成图片的最终高度（像素） | 0 | ≥0 | `->totalHeight(400)` |
 | `setMargins()` | int, int | 同时设置 margin 和 padding | - | - | `->setMargins(4, 10)` |
 | `errorCorrectionLevel()` | string/对象 | 纠错级别（L/M/Q/H） | M | L/M/Q/H | `->errorCorrectionLevel('H')` |
 | `version()` | int | 二维码版本（0=自动） | 0 | 0-40 | `->version(10)` |
 | `encoding()` | string | 字符编码 | UTF-8 | - | `->encoding('UTF-8')` |
+| `watermark()` | string, int, int, string, string | 文字水印（文本/透明度/字号/颜色/位置） | - | - | `->watermark('Sample', 50, 16, '#CCCCCC', 'center')` |
+| `watermarkPosition()` | string | 水印位置（9种） | center | - | `->watermarkPosition('bottom-right')` |
 | `optimizeForLongText()` | string | 优化长文本 | - | - | `->optimizeForLongText($text)` |
 | `skipContrastValidation()` | void | 跳过对比度验证 | false | - | `->skipContrastValidation()` |
 
@@ -477,6 +486,39 @@ QrCode::make('Full Label')
     ->save('label_full.png');
 ```
 
+### 指定宽高示例
+
+```php
+// 强制生成 400x400 像素的二维码
+QrCode::make('Fixed Size')
+    ->size(300)
+    ->totalWidth(400)
+    ->totalHeight(400)
+    ->save('fixed_size.png');
+```
+
+### 水印示例
+
+```php
+// 基础水印（居中）
+QrCode::make('Watermark')
+    ->size(300)
+    ->watermark('SAMPLE', 50, 16, '#CCCCCC', 'center')
+    ->save('watermark_center.png');
+
+// 右下角水印
+QrCode::make('Watermark')
+    ->size(300)
+    ->watermark('© 2024', 60, 14, '#888888', 'bottom-right')
+    ->save('watermark_br.png');
+
+// 顶部水印
+QrCode::make('Watermark')
+    ->size(300)
+    ->watermark('CONFIDENTIAL', 40, 12, '#AAAAAA', 'top')
+    ->save('watermark_top.png');
+```
+
 ### 6. 输出配置方法
 
 | 方法 | 参数类型 | 参数说明 | 默认值/范围 | 示例 |
@@ -556,6 +598,7 @@ $image = QrCode::make('Output Test')
 | `getRoundedRadius()` | float | 获取圆点半径 |
 | `isTransparentBackground()` | bool | 检查是否启用透明背景 |
 | `getInfo()` | array | 获取完整配置信息 |
+| `getMatrix()` | array | 获取二维码原始布尔矩阵 |
 | `cloneWithData(string $newData)` | QrCode | 克隆配置并修改数据 |
 
 **示例：**
@@ -582,6 +625,13 @@ Array (
     [transparentBackground] => false
 )
 */
+
+// 获取原始矩阵（用于诊断或自定义渲染）
+$matrix = QrCode::make('Matrix Test')
+    ->size(300)
+    ->getMatrix();
+
+echo "矩阵尺寸: " . count($matrix) . " x " . count($matrix[0]) . "\n";
 ```
 
 ---
@@ -1064,6 +1114,22 @@ foreach ($batches as $batch) {
 ---
 
 ## 📝 更新日志
+
+### v2.7.0 (2026-04-15)
+- ✅ **【新增】支持设置生成图片的最终宽高**
+  - 新增 `totalWidth()` / `totalHeight()` 方法
+  - 生成后可自动缩放至指定尺寸
+- ✅ **【新增】支持文字水印**
+  - 新增 `watermark()` / `watermarkPosition()` 方法
+  - 支持 9 种位置（center/top/bottom/left/right/top-left/top-right/bottom-left/bottom-right）
+  - 支持透明度、字号、颜色自定义
+- ✅ **【新增】支持获取原始矩阵**
+  - 新增 `getMatrix()` 方法，返回二维码布尔矩阵
+- ✅ **【修复】圆点风格二维码扫描失败问题**
+  - 修复 `drawRoundedModule()` 在较小尺寸下产生模块间隙的 bug
+  - 确保圆角模块之间有足够的重叠区域，避免扫描失败
+- ✅ 清理临时诊断文件，保持代码库整洁
+- ✅ 完善文档，覆盖所有新增功能
 
 ### v2.6.0 (2026-04-07)
 - ✅ 优化二维码下方标签/文本位置，更靠近二维码内容
