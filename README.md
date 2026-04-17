@@ -8,6 +8,12 @@
 ```bash
 composer require zxf/utils
 ```
+### 配置
+
+```bash
+# laravel 中发布配置文件
+php artisan vendor:publish --tag=utils-config
+```
 
 ## 函数
 

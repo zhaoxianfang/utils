@@ -18,6 +18,11 @@ class UtilsServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // 发布配置文件到项目配置目录
+        $this->publishes([
+            __DIR__ . '/../../config/oauth2.php' => config_path('oauth2.php'),
+        ], ['utils-config']);
+
         // 把 zxf/utils 添加到 about 命令中
         AboutCommand::add('Extend', [
             'zxf/utils' => fn () => InstalledVersions::getPrettyVersion('zxf/utils'),

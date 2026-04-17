@@ -14,16 +14,18 @@ use InvalidArgumentException;
  *          ['id' => 2, 'pid' => 1, 'name' => 'Node 2', 'weight' => 10,...],
  *      ];
  *  用法：
- *      // 使用默认配置 初始化数据
- *      $tree = Tree::instance($data);
+ *      // 使用默认配置 初始化数据（非单例推荐直接使用 new）
+ *      $tree = new Tree($data);
  *      OR
- *      $tree = Tree::instance()->setData($data);
+ *      $tree = Tree::instance($data);
+ *      $tree->setData($data);
  *      // 自定义id、pid、children配置
- *      Tree::instance($data)->setId('id')->setPid('pid')->setChildlist('children')->toTree();
+ *      $tree->setId('id')->setPid('pid')->setChildlist('children')->toTree();
  *      // 自定义权重字段和排序方式
- *      Tree::instance($data)->setWeight('weight')->setSortType('desc')->toTree();
+ *      $tree->setWeight('weight')->setSortType('desc')->toTree();
  *      // 自定义根节点id，默认为0
- *      Tree::instance($data)->setRootId(1)->toTree();
+ *      $tree->setRootId(1)->toTree();
+ *      // 注意：instance() 为单例模式，重复传入新数据会自动更新 data
  *  接口:
  *      // 获取结构树
  *      $nodes = $tree->toTree();
@@ -61,8 +63,13 @@ use InvalidArgumentException;
  *      $ages = $tree->pluck('age');  // 获取所有age值
  *      // 将树形结构扁平化
  *      $treeData = $tree->toTree(); // 带children 的 tree 树形数组数据
- *      $arrayData = $tree->toArray(); // 转换为Tree 树形结构，再展开为二维码数组结构
+ *      $arrayData = $tree->toArray(); // 转换为Tree 树形结构，再展开为一维数组结构
  *      $flattened = $tree->flatten($treeData);
+ *  前缀与图标：
+ *      // 为输出结果中指定字段统一添加前缀（延迟到 toTree/toArray 时生效）
+ *      $tree->setPrefix('name', '【部门】')->toTree();
+ *      // 为 toArray/toTree 输出中的 title 字段添加层级图标前缀
+ *      $tree->withIcon(true)->toArray();
  *  条件查询：
  *      // 基础形式
  *      $tree->where('age', 18)->where('score', '>', 60)->where('name', 'like', '%张%');
@@ -125,6 +132,10 @@ class Tree
      */
     protected array $iconStyle = [' ︱', ' ├', ' └'];
 
+    private bool $withIcon = false; // toTree/toArray 是否携带层级前缀
+
+    private ?array $prefixConfig = null; // setPrefix 记录的配置 ['field' => ..., 'prefix' => ...]
+
     /**
      * 构造函数，接受原始数据数组
      */
@@ -136,10 +147,12 @@ class Tree
     /**
      * 初始化实例
      */
-    public static function instance(array $data = [])
+    public static function instance(array $data = []): self
     {
         if (! isset(self::$instance) || is_null(self::$instance)) {
             self::$instance = new static($data);
+        } elseif (! empty($data)) {
+            self::$instance->setData($data);
         }
 
         return self::$instance;
@@ -213,12 +226,11 @@ class Tree
     /**
      * 设置排序字段
      *
-     *
      * @return $this
      */
-    public function setWeight(string $weight = 'weight')
+    public function setWeight(string $field = 'weight')
     {
-        $this->weight = $weight;
+        $this->weight = $field;
 
         return $this;
     }
@@ -244,19 +256,64 @@ class Tree
     }
 
     /**
+     * 设置是否在为 toArray 输出时添加层级图标前缀
+     *
+     * @param bool $withIcon true=添加前缀，false=不添加
+     * @return $this
+     */
+    public function withIcon(bool $withIcon = true): self
+    {
+        $this->withIcon = $withIcon;
+
+        return $this;
+    }
+
+    /**
+     * 记录为指定字段添加统一前缀的配置
+     *
+     * 实际的前缀添加会延迟到 toTree() 或 toArray() 输出时执行，
+     * 避免在调用本方法后新增/修改的数据遗漏前缀处理。
+     *
+     * @param string $field 要修改的字段名
+     * @param string $prefix 前缀字符串
+     * @return $this
+     */
+    public function setPrefix(string $field, string $prefix): self
+    {
+        $this->prefixConfig = ['field' => $field, 'prefix' => $prefix];
+
+        return $this;
+    }
+
+    /**
      * 将原始数据转换为树形结构
+     *
+     * 如果之前调用了 setPrefix() 或 withIcon(true)，
+     * 输出结果会自动应用对应的前缀和层级图标。
      */
     public function toTree(): array
     {
         $treeMap = array_to_tree($this->data, $this->rootId, $this->id, $this->pid, $this->childlist);
 
-        // $rootNodes = array_filter($treeMap, fn($item) => !$item[$this->pid]); // 找出根节点（父节点为空）
-        $rootNodes = array_filter($treeMap, fn ($item) => $item[$this->pid] == $this->rootId); // 找出根节点（指定根节点id）
+        // 找出根节点（指定根节点id），使用严格比较避免 null/空字符串被误判
+        $rootNodes = array_filter($treeMap, fn ($item) => (int) $item[$this->pid] === $this->rootId);
 
         // 使用传统方法对根节点进行排序
         $rootNodes && $this->sortNodesByWeight($rootNodes);
 
-        return array_values($rootNodes);
+        $tree = array_values($rootNodes);
+
+        // 延迟应用前缀配置
+        if ($this->prefixConfig !== null) {
+            $tree = $this->applyPrefixToTreeNodes($tree, $this->prefixConfig['field'], $this->prefixConfig['prefix']);
+        }
+
+        // 延迟应用层级图标前缀
+        if ($this->withIcon) {
+            $tree = $this->processTreeWithPrefix($tree);
+        }
+
+        return $tree;
     }
 
     /**
@@ -267,15 +324,18 @@ class Tree
     private function sortNodesByWeight(array &$nodes): array
     {
         $sortType = $this->sortType;
-        // 根据权重字段对节点进行降序排序
-        usort($nodes, function ($a, $b) use ($sortType) {
+        $weightField = $this->weight;
+
+        // 根据权重字段对节点进行排序，使用 ?? 正确处理 0 值
+        usort($nodes, function ($a, $b) use ($sortType, $weightField) {
+            $weightA = $a[$weightField] ?? 0;
+            $weightB = $b[$weightField] ?? 0;
+
             if ($sortType === 'desc') {
-                // 降序排序
-                return (! empty($b[$this->weight]) ? $b[$this->weight] : 0) <=> (! empty($a[$this->weight]) ? $a[$this->weight] : 0);
+                return $weightB <=> $weightA;
             }
 
-            // 升序排序
-            return (! empty($a[$this->weight]) ? $a[$this->weight] : 0) <=> (! empty($b[$this->weight]) ? $b[$this->weight] : 0);
+            return $weightA <=> $weightB;
         });
 
         $nodes && $this->sortChildrenByWeight($nodes); // 递归调用对子节点的子节点进行排序
@@ -371,8 +431,13 @@ class Tree
      * @param  int  $parentId  要查询的父节点id
      * @param  bool  $includeSelf  是否包含自己
      */
-    private function isDescendant(int $itemId, int $parentId, bool $includeSelf = true): bool
+    private function isDescendant(int $itemId, int $parentId, bool $includeSelf = true, array &$visited = []): bool
     {
+        if (isset($visited[$itemId])) {
+            return false; // 检测到循环引用，防止栈溢出
+        }
+        $visited[$itemId] = true;
+
         foreach ($this->data as $item) {
             if ($item[$this->id] === $itemId) {// 先找到要查询的那个节点
 
@@ -381,7 +446,7 @@ class Tree
                 }
 
                 // 一直向上找父节点，判断父节点是否存在要查询的指定 id父节点
-                if ($this->isDescendant($item[$this->pid], $parentId, $includeSelf)) {
+                if ($this->isDescendant($item[$this->pid], $parentId, $includeSelf, $visited)) {
                     return true;
                 }
             }
@@ -397,15 +462,27 @@ class Tree
     {
         $parents = [];
         $currentId = $id;
+        $visited = [];
 
         while ($currentId !== 0) {
+            if (isset($visited[$currentId])) {
+                break; // 检测到循环引用，终止查找
+            }
+            $visited[$currentId] = true;
+
+            $found = false;
             foreach ($this->data as $item) {
                 // 找到当前节点
                 if ($item[$this->id] === $currentId) {
                     $parents[] = $currentId;
                     $currentId = $item[$this->pid];
+                    $found = true;
                     break;
                 }
+            }
+
+            if (! $found) {
+                break; // 找不到对应节点，终止查找
             }
         }
 
@@ -419,15 +496,27 @@ class Tree
     {
         $parents = [];
         $currentId = $id;
+        $visited = [];
 
         while ($currentId !== 0) {
+            if (isset($visited[$currentId])) {
+                break;
+            }
+            $visited[$currentId] = true;
+
+            $found = false;
             foreach ($this->data as $item) {
                 // 找到当前节点
                 if ($item[$this->id] === $currentId) {
                     $parents[] = $item;
                     $currentId = $item[$this->pid];
+                    $found = true;
                     break;
                 }
+            }
+
+            if (! $found) {
+                break;
             }
         }
 
@@ -441,8 +530,15 @@ class Tree
     {
         $parents = [];
         $currentId = $id;
+        $visited = [];
 
         while ($currentId !== 0) {
+            if (isset($visited[$currentId])) {
+                break;
+            }
+            $visited[$currentId] = true;
+
+            $found = false;
             foreach ($this->data as $item) {
                 // 找到当前节点
                 if ($item[$this->id] === $currentId) {
@@ -450,8 +546,13 @@ class Tree
                         $parents[] = $currentId;
                     }
                     $currentId = $item[$this->pid];
+                    $found = true;
                     break;
                 }
+            }
+
+            if (! $found) {
+                break;
             }
         }
 
@@ -465,8 +566,15 @@ class Tree
     {
         $parents = [];
         $currentId = $id;
+        $visited = [];
 
         while ($currentId !== 0) {
+            if (isset($visited[$currentId])) {
+                break;
+            }
+            $visited[$currentId] = true;
+
+            $found = false;
             foreach ($this->data as $item) {
                 // 找到当前节点
                 if ($item[$this->id] === $currentId) {
@@ -474,8 +582,13 @@ class Tree
                         $parents[] = $item;
                     }
                     $currentId = $item[$this->pid];
+                    $found = true;
                     break;
                 }
+            }
+
+            if (! $found) {
+                break;
             }
         }
 
@@ -1023,10 +1136,13 @@ class Tree
         $clone = new self($this->data);
         $clone->id = $this->id;
         $clone->pid = $this->pid;
+        $clone->title = $this->title;
         $clone->weight = $this->weight;
         $clone->sortType = $this->sortType;
         $clone->childlist = $this->childlist;
         $clone->rootId = $this->rootId;
+        $clone->withIcon = $this->withIcon;
+        $clone->prefixConfig = $this->prefixConfig;
 
         return $clone;
     }
@@ -1074,20 +1190,51 @@ class Tree
     }
 
     /**
-     * 转换为Tree 树形结构，再展开为二维码数组结构
-     * @param bool $withPrefix 是否携带前缀
+     * 转换为Tree 树形结构，再展开为一维数组结构
+     *
+     * 注意：展开后会自动移除 children 字段。
+     *
      * @return array
      */
-    public function toArray(bool $withPrefix = false): array
+    public function toArray(): array
     {
         $tree = $this->toTree();
-        
-        if ($withPrefix) {
-            $processedTree = $this->processTreeWithPrefix($tree);
-            return $this->flatten($processedTree);
+        $flat = $this->flatten($tree);
+
+        // 展开为一维数组时应移除 children 字段
+        foreach ($flat as &$node) {
+            unset($node[$this->childlist]);
+            unset($node['_level']);
         }
-        
-        return $this->flatten($tree);
+
+        return $flat;
+    }
+
+    /**
+     * 递归为树节点指定字段添加统一前缀
+     *
+     * @param array $tree 树形数据
+     * @param string $field 要添加前缀的字段
+     * @param string $prefix 前缀字符串
+     * @return array 处理后的树形数据
+     */
+    private function applyPrefixToTreeNodes(array $tree, string $field, string $prefix): array
+    {
+        $result = [];
+
+        foreach ($tree as $node) {
+            if (array_key_exists($field, $node)) {
+                $node[$field] = $prefix . $node[$field];
+            }
+
+            if (! empty($node[$this->childlist])) {
+                $node[$this->childlist] = $this->applyPrefixToTreeNodes($node[$this->childlist], $field, $prefix);
+            }
+
+            $result[] = $node;
+        }
+
+        return $result;
     }
 
     /**
@@ -1145,14 +1292,17 @@ class Tree
      *
      * @return $this
      */
-    public function reset()
+    public function reset(): self
     {
         $this->id = 'id';
         $this->pid = 'pid';
+        $this->title = 'title';
         $this->weight = 'weight';
         $this->sortType = 'desc';
         $this->rootId = 0;
         $this->childlist = 'children';
+        $this->withIcon = false;
+        $this->prefixConfig = null;
         // $this->data      = [];
 
         return $this;
