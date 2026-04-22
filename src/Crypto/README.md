@@ -1,5 +1,82 @@
 # Crypto 常见的加密解密类
 
+本目录提供完整的 PHP 8.2+ 加密解密工具集，包含对称加密、非对称加密、哈希、JWT、密码处理、随机数生成等模块。
+
+## 快速参考
+
+| 类 | 用途 | 核心方法 |
+|---|---|---|
+| `AES` | 对称加密（AES-CBC/GCM/CTR等） | `encrypt()`, `decrypt()`, `encryptFile()` |
+| `RSA` | 非对称加密（RSA-OAEP/PKCS1） | `encrypt()`, `sign()`, `createKeyPair()` |
+| `ECC` | 椭圆曲线（ECDSA/ECDH） | `sign()`, `verify()`, `computeSharedSecret()` |
+| `Hash` | 哈希与HMAC | `calculate()`, `hmac()`, `pbkdf2()`, `hkdf()` |
+| `Base64` | 安全Base64编解码 | `encode()`, `urlSafeEncode()`, `decode()` |
+| `Password` | 密码哈希与强度评估 | `bcrypt()`, `verify()`, `strength()`, `generate()` |
+| `JWT` | JSON Web Token | `encode()`, `decode()`, `refresh()` |
+| `Random` | 密码学安全随机数 | `bytes()`, `uuid()`, `token()`, `string()` |
+| `Crypto` | 统一门面/快捷方法 | `aesEncrypt()`, `jwtEncode()`, `hash()` 等 |
+
+### Hash 示例
+```php
+use zxf\Utils\Crypto\Hash;
+
+$hash = Hash::calculate('data', 'sha256');
+$hmac = Hash::hmac('data', 'secret_key', 'sha256');
+$fileHash = Hash::file('/path/to/file', 'sha256');
+$key = Hash::pbkdf2('password', $salt, 100000, 32);
+$okm = Hash::hkdf($ikm, $salt, 'info', 32);
+```
+
+### Base64 示例
+```php
+use zxf\Utils\Crypto\Base64;
+
+$encoded = Base64::urlSafeEncode($binary);
+$decoded = Base64::urlSafeDecode($encoded);
+$dataUri = Base64::toDataUri($imageData, 'image/png');
+```
+
+### Password 示例
+```php
+use zxf\Utils\Crypto\Password;
+
+$hash = Password::bcrypt('user_password');
+$ok = Password::verify('user_password', $hash);
+$strength = Password::strength('MyP@ssw0rd!');
+$strongPwd = Password::generate(20);
+```
+
+### JWT 示例
+```php
+use zxf\Utils\Crypto\JWT;
+
+$payload = JWT::buildPayload(['user_id' => 123], 'issuer', 'audience', 'subject', 3600);
+$jwt = JWT::encode($payload, $secret, 'HS256');
+$data = JWT::decode($jwt, $secret, 'HS256');
+```
+
+### Random 示例
+```php
+use zxf\Utils\Crypto\Random;
+
+$bytes = Random::bytes(32);
+$uuid = Random::uuid();
+$token = Random::token(32);
+$otp = Random::otp(6);
+```
+
+### Crypto 门面示例
+```php
+use zxf\Utils\Crypto\Crypto;
+
+$encrypted = Crypto::aesEncrypt('data', $key);
+$hash = Crypto::hash('data');
+$jwt = Crypto::jwtEncode($payload, $secret);
+$uuid = Crypto::uuid();
+```
+
+---
+
 测试文件
 
 ```php

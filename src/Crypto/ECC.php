@@ -642,30 +642,6 @@ class ECC
     }
 
     /**
-     * 确定性ECDSA签名（RFC 6979）
-     *
-     * @param string $data 要签名的数据
-     * @param string $signatureAlg 签名算法
-     * @return string 签名结果
-     * @access private
-     */
-    private function signDeterministic(string $data, string $signatureAlg): string
-    {
-        // 这里简化实现，实际应该按照RFC 6979实现确定性k值生成
-        // 目前使用OpenSSL的默认实现，在支持的情况下会自动使用确定性ECDSA
-
-        $signature = '';
-        $success = openssl_sign($data, $signature, $this->privateKey, $signatureAlg);
-
-        if (!$success) {
-            $error = openssl_error_string();
-            throw new RuntimeException('确定性签名失败: ' . ($error ?: '未知错误'));
-        }
-
-        return $signature;
-    }
-
-    /**
      * 实现确定性ECDSA签名 (RFC 6979)
      *
      * @param string $data 要签名的数据

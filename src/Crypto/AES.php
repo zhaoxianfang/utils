@@ -2310,7 +2310,7 @@ class AES
     public function __destruct()
     {
         // 在析构时安全擦除敏感数据
-        if ($this->key !== null) {
+        if (isset($this->key)) {
             $this->secureWipe();
         }
     }
