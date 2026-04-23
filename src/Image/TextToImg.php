@@ -421,14 +421,8 @@ class TextToImg
     /** @var array|null 文字尺寸计算结果缓存，避免重复调用 imagettfbbox */
     private ?array $textDimensionsCache = null;
 
-    /** @var float|null 上次计算使用的字号（用于缓存失效判断） */
-    private ?float $cachedSize = null;
-
-    /** @var int|null 上次计算使用的角度（用于缓存失效判断） */
-    private ?int $cachedAngle = null;
-
-    /** @var array|null 上次处理后的文字行数组（用于缓存失效判断） */
-    private ?array $cachedLines = null;
+    /** @var string|null 缓存键（由 size + angle + lines 哈希 + scale + lineHeight 组成） */
+    private ?string $textDimensionsCacheKey = null;
 
     // ==================== 单例属性 ====================
 
@@ -572,10 +566,8 @@ class TextToImg
         $this->textHighlightRadius  = 4;
 
         // 清空性能缓存，避免脏数据
-        $this->textDimensionsCache = null;
-        $this->cachedSize          = null;
-        $this->cachedAngle         = null;
-        $this->cachedLines         = null;
+        $this->textDimensionsCache    = null;
+        $this->textDimensionsCacheKey = null;
 
         // 释放已有的 GD 资源，避免内存泄漏
         if ($this->image !== null) {
@@ -1603,23 +1595,25 @@ class TextToImg
      */
     private function splitTextIntoLines(string $text): array
     {
-        $text = str_replace(['\r\n', '\r', '<br>', '<br/>', '<br />'], "\n", $text);
+        $text = str_replace(["\r\n", "\r", '<br>', '<br/>', '<br />'], "\n", $text);
         $lines = explode("\n", $text);
 
-        return array_map('trim', $lines);
+        // 只去除右侧空白，保留用户有意输入的前导空格
+        return array_map(static fn (string $line): string => rtrim($line), $lines);
     }
 
     /**
      * 按画布宽度自动换行
      *
      * 根据当前字号和画布可用宽度，将长行文字自动折行。
+     * 注意：换行宽度始终按水平排版（angle=0）测量，因为换行是基于画布水平可用宽度的概念，
+     * 与最终渲染时的旋转角度无关。若使用旋转后的 bounding box 宽度测量，会导致严重过度换行。
      *
      * @param  string  $text  原始文字
      * @param  float   $size  字号
-     * @param  int     $angle  旋转角度
      * @return array<string>  换行后的文字数组
      */
-    private function wrapText(string $text, float $size, int $angle = 0): array
+    private function wrapText(string $text, float $size): array
     {
         $lines = $this->splitTextIntoLines($text);
         $maxWidth = ($this->width - $this->padding * 2) * $this->scale;
@@ -1631,7 +1625,8 @@ class TextToImg
                 continue;
             }
 
-            $bbox = imagettfbbox($size, $angle, $this->fontFile, $line);
+            // 始终使用 angle=0 测量文字宽度，避免旋转导致测量值失真
+            $bbox = imagettfbbox($size, 0, $this->fontFile, $line);
             $lineWidth = abs($bbox[4] - $bbox[0]);
 
             if ($lineWidth <= $maxWidth) {
@@ -1655,7 +1650,8 @@ class TextToImg
                 while ($low <= $high) {
                     $mid = (int) floor(($low + $high) / 2);
                     $sub = mb_substr($remaining, 0, $mid, 'UTF-8');
-                    $subBbox = imagettfbbox($size, $angle, $this->fontFile, $sub);
+                    // 同样使用 angle=0 测量子串宽度
+                    $subBbox = imagettfbbox($size, 0, $this->fontFile, $sub);
                     $subWidth = abs($subBbox[4] - $subBbox[0]);
 
                     if ($subWidth <= $maxWidth) {
@@ -1691,13 +1687,16 @@ class TextToImg
      */
     private function getTextDimensions(array $lines, float $size, int $angle = 0): array
     {
-        // 缓存命中检查：若输入参数与上次完全一致，直接返回缓存结果
-        if (
-            $this->textDimensionsCache !== null
-            && $this->cachedSize === $size
-            && $this->cachedAngle === $angle
-            && $this->cachedLines === $lines
-        ) {
+        // 构建缓存键：包含所有影响尺寸计算的参数
+        $cacheKey = implode('|', [
+            (string) $size,
+            (string) $angle,
+            (string) $this->scale,
+            (string) $this->lineHeight,
+            md5(implode("\n", $lines)),
+        ]);
+
+        if ($this->textDimensionsCache !== null && $this->textDimensionsCacheKey === $cacheKey) {
             return $this->textDimensionsCache;
         }
 
@@ -1752,12 +1751,42 @@ class TextToImg
         ];
 
         // 写入缓存
-        $this->textDimensionsCache = $result;
-        $this->cachedSize          = $size;
-        $this->cachedAngle         = $angle;
-        $this->cachedLines         = $lines;
+        $this->textDimensionsCache    = $result;
+        $this->textDimensionsCacheKey = $cacheKey;
 
         return $result;
+    }
+
+    /**
+     * 估算一个合理的初始字号（用于 autoWrap 预换行）
+     *
+     * 根据画布尺寸和文字行数，快速估算一个比 minSize 更合理的初始字号，
+     * 避免用 minSize 预换行导致行数爆炸。
+     *
+     * @param  array<string>  $lines  多行文字
+     * @return float
+     */
+    private function estimateFontSize(array $lines): float
+    {
+        $availableWidth  = ($this->width - $this->padding * 2) * $this->scale;
+        $availableHeight = ($this->height - $this->padding * 2) * $this->scale;
+        $lineCount = count($lines);
+
+        // 按可用高度估算：假设每行占 1.5 倍字号
+        $estimatedByHeight = $availableHeight / max(1, $lineCount * 1.5);
+
+        // 按可用宽度估算：取最长行的字符数做粗略估算（中文字宽约 1.0x 字号，英文约 0.5x）
+        $maxChars = 0;
+        foreach ($lines as $line) {
+            $len = mb_strlen($line, 'UTF-8');
+            if ($len > $maxChars) {
+                $maxChars = $len;
+            }
+        }
+        $estimatedByWidth = $maxChars > 0 ? $availableWidth / ($maxChars * 0.8) : $this->maxSize;
+
+        $estimated = min($estimatedByHeight, $estimatedByWidth);
+        return max($this->minSize, min($this->maxSize, $estimated));
     }
 
     /**
@@ -2045,10 +2074,9 @@ class TextToImg
      * @param  float  $y       文字基准 Y
      * @param  float  $width   文字宽度
      * @param  float  $height  文字高度
-     * @param  float  $size    字号
      * @param  int    $angle   旋转角度
      */
-    private function drawTextHighlight(float $x, float $y, float $width, float $height, float $size, int $angle): void
+    private function drawTextHighlight(float $x, float $y, float $width, float $height, int $angle): void
     {
         if (empty($this->textHighlight)) {
             return;
@@ -2223,9 +2251,141 @@ class TextToImg
     }
 
     /**
+     * 计算文字特效可能产生的最大溢出边距（像素）
+     *
+     * 用于旋转多行文字时创建足够大的临时画布，防止特效被裁剪。
+     *
+     * @return int
+     */
+    private function calculateEffectOverflow(): int
+    {
+        $extra = 0;
+        if (! empty($this->textShadow)) {
+            $extra = max($extra,
+                abs($this->textShadow['offsetX']) + $this->textShadow['blur'],
+                abs($this->textShadow['offsetY']) + $this->textShadow['blur']
+            );
+        }
+        if (! empty($this->textStroke)) {
+            $extra = max($extra, $this->textStroke['width']);
+        }
+        if (! empty($this->textGlow)) {
+            $extra = max($extra, $this->textGlow['radius']);
+        }
+        if (! empty($this->textHighlight)) {
+            $extra = max($extra, $this->textHighlightPadding);
+        }
+
+        return (int) round($extra * $this->scale);
+    }
+
+    /**
+     * 绘制旋转的多行文字块
+     *
+     * 核心策略：先在一个临时透明画布上按 angle=0 水平排版绘制（含所有特效），
+     * 再将整个临时画布旋转后合并到主画布。这样彻底避免逐行旋转导致的坐标重叠问题。
+     *
+     * @param  array<string>  $lines  多行文字
+     * @param  float          $size   字号
+     * @param  int            $angle  旋转角度
+     */
+    private function drawRotatedTextBlock(array $lines, float $size, int $angle): void
+    {
+        // 1. 计算水平排版时的文字块尺寸（angle=0）
+        $dims = $this->getTextDimensions($lines, $size, 0);
+        $padPx = (int) round($this->padding * $this->scale);
+        $extra = $this->calculateEffectOverflow();
+
+        // 2. 创建临时画布：文字块 + padding + 特效溢出边距
+        $blockW = max(1, (int) ceil($dims['width'] + $padPx * 2 + $extra * 2));
+        $blockH = max(1, (int) ceil($dims['height'] + $padPx * 2 + $extra * 2));
+
+        $tmp = imagecreatetruecolor($blockW, $blockH);
+        imagealphablending($tmp, false);
+        imagesavealpha($tmp, true);
+        $transparent = imagecolorallocatealpha($tmp, 0, 0, 0, 127);
+        imagefill($tmp, 0, 0, $transparent);
+
+        // 3. 保存主画布状态，临时替换为临时画布
+        $originalImage  = $this->image;
+        $originalWidth  = $this->width;
+        $originalHeight = $this->height;
+
+        $this->image  = $tmp;
+        $this->width  = (int) round($blockW / $this->scale);
+        $this->height = (int) round($blockH / $this->scale);
+
+        // 4. 在临时画布上按 angle=0 完整绘制文字与特效
+        $this->drawTextLines($lines, $size, 0);
+
+        // 5. 恢复主画布状态（临时画布引用单独保留）
+        $tmp = $this->image;
+        $this->image  = $originalImage;
+        $this->width  = $originalWidth;
+        $this->height = $originalHeight;
+
+        // 6. 旋转临时画布
+        $bg = imagecolorallocatealpha($tmp, 0, 0, 0, 127);
+        $rotated = imagerotate($tmp, $angle, $bg);
+        imagedestroy($tmp);
+
+        if ($rotated === false) {
+            throw new Exception('文字旋转处理失败。');
+        }
+
+        // 7. 计算旋转后文字块在主画布上的放置位置（含安全区保护）
+        $rotW = imagesx($rotated);
+        $rotH = imagesy($rotated);
+        $cw   = (int) round($this->width * $this->scale);
+        $ch   = (int) round($this->height * $this->scale);
+
+        // 8. 安全区溢出检测与自适应缩放
+        // 旋转后的文字块尺寸可能超过主画布可用区域，导致 imagecopy 时溢出被裁剪。
+        // 若发生溢出，通过等比例缩放确保文字完整显示在安全区内。
+        $availW = max(1, $cw - $padPx * 2);
+        $availH = max(1, $ch - $padPx * 2);
+
+        if ($rotW > $availW || $rotH > $availH) {
+            $fitScale = min($availW / $rotW, $availH / $rotH, 1.0);
+            $newW     = (int) max(1, round($rotW * $fitScale));
+            $newH     = (int) max(1, round($rotH * $fitScale));
+
+            $scaled = imagecreatetruecolor($newW, $newH);
+            imagealphablending($scaled, false);
+            imagesavealpha($scaled, true);
+            $transparent = imagecolorallocatealpha($scaled, 0, 0, 0, 127);
+            imagefill($scaled, 0, 0, $transparent);
+            imagecopyresampled($scaled, $rotated, 0, 0, 0, 0, $newW, $newH, $rotW, $rotH);
+
+            imagedestroy($rotated);
+            $rotated = $scaled;
+            $rotW    = $newW;
+            $rotH    = $newH;
+        }
+
+        // 9. 计算放置位置：确保不会超出安全区
+        $x = match ($this->hAlign) {
+            self::ALIGN_LEFT   => $padPx,
+            self::ALIGN_RIGHT  => max($padPx, $cw - $padPx - $rotW),
+            default            => max($padPx, ($cw - $rotW) / 2),
+        };
+
+        $y = match ($this->vAlign) {
+            self::VALIGN_TOP    => $padPx,
+            self::VALIGN_BOTTOM => max($padPx, $ch - $padPx - $rotH),
+            default             => max($padPx, ($ch - $rotH) / 2),
+        };
+
+        // 10. 将旋转后的文字块合并到主画布
+        imagecopy($this->image, $rotated, (int) $x, (int) $y, 0, 0, $rotW, $rotH);
+        imagedestroy($rotated);
+    }
+
+    /**
      * 绘制多行文字
      *
      * 支持阴影、描边、发光、高亮等特效，支持水平和垂直对齐。
+     * 当 angle != 0 且为多行时，自动使用 drawRotatedTextBlock 避免重叠。
      *
      * @param  array<string>  $lines  多行文字
      * @param  float          $size   字号
@@ -2233,15 +2393,22 @@ class TextToImg
      */
     private function drawTextLines(array $lines, float $size, int $angle = 0): void
     {
-        $dims = $this->getTextDimensions($lines, $size, $angle);
+        // 多行文字且存在旋转时：使用临时画布整体旋转策略，避免逐行旋转重叠
+        if ($angle !== 0 && count($lines) > 1) {
+            $this->drawRotatedTextBlock($lines, $size, $angle);
+            return;
+        }
+
+        $dims = $this->getTextDimensions($lines, $size, 0);
         $w = (int) round($this->width * $this->scale);
         $h = (int) round($this->height * $this->scale);
         $pad = (int) round($this->padding * $this->scale);
 
+        // 计算文字块起始 Y：确保不会为负，避免文字被画布顶部截断
         $blockY = match ($this->vAlign) {
             self::VALIGN_TOP    => $pad,
-            self::VALIGN_BOTTOM => $h - $pad - $dims['height'],
-            default             => ($h - $dims['height']) / 2,
+            self::VALIGN_BOTTOM => max($pad, $h - $pad - $dims['height']),
+            default             => max($pad, ($h - $dims['height']) / 2),
         };
 
         $textColor = imagecolorallocatealpha(
@@ -2253,26 +2420,32 @@ class TextToImg
         );
 
         foreach ($dims['linesInfo'] as $index => $lineInfo) {
-            if ($lineInfo['text'] === '') {
-                continue;
-            }
+            // 基线 Y：与 getTextDimensions 总高度计算对齐
+            // getTextDimensions 总高 = line0.height + (n-1) * lineHeightPx
+            // 因此第 index 行基线 = blockY + index * lineHeightPx + abs(min_y)
+            $lineY = $blockY + $index * $dims['lineHeight'] + abs($lineInfo['min_y']);
 
+            // 水平对齐
             $lineX = match ($this->hAlign) {
                 self::ALIGN_LEFT   => $pad,
                 self::ALIGN_RIGHT  => $w - $pad - $lineInfo['width'],
                 default            => ($w - $lineInfo['width']) / 2,
             };
 
-            $lineY = $blockY;
-            for ($j = 0; $j <= $index; $j++) {
-                $lineY += ($j === 0 ? 0 : $dims['lineHeight']);
-                if ($j === $index) {
-                    $lineY += abs($lineInfo['min_y']);
-                }
+            // 安全区保护：防止文字从左右两侧溢出画布
+            $safeMinX = $pad;
+            $safeMaxX = $w - $pad - $lineInfo['width'];
+            if ($safeMaxX >= $safeMinX) {
+                $lineX = max($safeMinX, min($safeMaxX, $lineX));
+            }
+
+            // 空行占高度但不绘制文字与特效
+            if ($lineInfo['text'] === '') {
+                continue;
             }
 
             if (! empty($this->textHighlight)) {
-                $this->drawTextHighlight($lineX, $lineY, $lineInfo['width'], $lineInfo['height'], $size, $angle);
+                $this->drawTextHighlight($lineX, $lineY, $lineInfo['width'], $lineInfo['height'], $angle);
             }
             if (! empty($this->textGlow)) {
                 $this->drawGlow($lineInfo['text'], $size, $angle, (int) $lineX, (int) $lineY);
@@ -2588,22 +2761,37 @@ class TextToImg
         }
 
         // 预处理文字：统一换行符
-        $text = str_replace(['\r\n', '\r', '<br>', '<br/>', '<br />'], "\n", $this->text);
+        $text = str_replace(["\r\n", "\r", '<br>', '<br/>', '<br />'], "\n", $this->text);
 
-        // 自动换行处理
-        $tempSize = $this->size ?? $this->minSize;
-        $lines = $this->autoWrap
-            ? $this->wrapText($text, $tempSize, $this->angle)
-            : $this->splitTextIntoLines($text);
+        // 自动换行处理：如果 size 未指定，先用一个估算字号进行预换行，
+        // 避免用 minSize 导致行数过多，最终字号计算异常偏小
+        $lines = $this->splitTextIntoLines($text);
+        if ($this->autoWrap) {
+            $tempSize = $this->size ?? $this->estimateFontSize($lines);
+            $lines = $this->wrapText($text, $tempSize);
+        }
+
+        // 多行旋转场景：实际绘制采用"先水平排版再整体旋转"策略，
+        // 因此字号计算、换行、尺寸估算全部按 angle=0 处理
+        $isMultiLineRotated = $this->angle !== 0 && count($lines) > 1;
+        $calcAngle = $isMultiLineRotated ? 0 : $this->angle;
 
         // 自动计算字号
-        $fontSize = $this->size ?? $this->calculateFontSize($lines, $this->angle);
+        $fontSize = $this->size ?? $this->calculateFontSize($lines, $calcAngle);
+
+        // 如果开启了 autoWrap 且字号与预换行字号差异大，用实际字号重新换行一次
+        if ($this->autoWrap && $this->size === null && abs($fontSize - $tempSize) > 2) {
+            $lines = $this->wrapText($text, $fontSize);
+            $fontSize = $this->calculateFontSize($lines, $calcAngle);
+        }
 
         // 如果开启了自适应尺寸，根据文字尺寸调整画布
         if ($this->autoSize) {
-            $dims = $this->getTextDimensions($lines, $fontSize, $this->angle);
-            $this->width  = (int) round($dims['width'] / $this->scale) + $this->padding * 2;
-            $this->height = (int) round($dims['height'] / $this->scale) + $this->padding * 2;
+            $dims = $this->getTextDimensions($lines, $fontSize, $calcAngle);
+            // 避免多次 round 精度损失，直接按像素尺寸 + 边距计算
+            $padPx = (int) round($this->padding * $this->scale);
+            $this->width  = (int) ceil(($dims['width'] + $padPx * 2) / $this->scale);
+            $this->height = (int) ceil(($dims['height'] + $padPx * 2) / $this->scale);
         }
 
         // 创建画布
@@ -2630,11 +2818,12 @@ class TextToImg
      * 如果传入文件名则保存到本地，否则直接输出到浏览器（自动发送 Header）。
      *
      * @param  string|null  $fileName  保存路径，null 则输出到浏览器
+     * @param  bool         $exit      输出到浏览器后是否终止脚本（默认 true，防止后续输出污染图片流）
      * @return $this
      *
      * @throws Exception
      */
-    public function render(?string $fileName = null): static
+    public function render(?string $fileName = null, bool $exit = true): static
     {
         $this->build();
 
@@ -2649,9 +2838,31 @@ class TextToImg
             $this->saveToFile($fileName, $format);
         } else {
             $this->outputToBrowser($format);
+            if ($exit) {
+                exit;
+            }
         }
 
         return $this;
+    }
+
+    /**
+     * 统一图片输出（保存到文件或输出到流）
+     *
+     * @param  string       $format    图片格式
+     * @param  string|null  $fileName  文件路径，null 则输出到当前流
+     * @return bool 是否成功
+     */
+    private function outputImage(string $format, ?string $fileName = null): bool
+    {
+        return match ($format) {
+            self::FORMAT_PNG => imagepng($this->image, $fileName),
+            self::FORMAT_JPEG, self::FORMAT_JPG => imagejpeg($this->image, $fileName, $this->quality),
+            self::FORMAT_GIF => imagegif($this->image, $fileName),
+            self::FORMAT_WEBP => function_exists('imagewebp') ? imagewebp($this->image, $fileName, $this->quality) : false,
+            self::FORMAT_BMP => function_exists('imagebmp') ? imagebmp($this->image, $fileName) : false,
+            default => false,
+        };
     }
 
     /**
@@ -2664,16 +2875,7 @@ class TextToImg
      */
     private function saveToFile(string $fileName, string $format): void
     {
-        $success = match ($format) {
-            self::FORMAT_PNG   => imagepng($this->image, $fileName),
-            self::FORMAT_JPEG, self::FORMAT_JPG => imagejpeg($this->image, $fileName, $this->quality),
-            self::FORMAT_GIF   => imagegif($this->image, $fileName),
-            self::FORMAT_WEBP  => function_exists('imagewebp') ? imagewebp($this->image, $fileName, $this->quality) : false,
-            self::FORMAT_BMP   => function_exists('imagebmp') ? imagebmp($this->image, $fileName) : false,
-            default => false,
-        };
-
-        if (! $success) {
+        if (! $this->outputImage($format, $fileName)) {
             throw new Exception('图片保存失败: ' . $fileName);
         }
     }
@@ -2696,22 +2898,29 @@ class TextToImg
             default => 'image/png',
         };
 
-        if (! headers_sent()) {
-            header('Content-Type: ' . $mime);
-        }
-
-        $success = match ($format) {
-            self::FORMAT_PNG  => imagepng($this->image),
-            self::FORMAT_JPEG, self::FORMAT_JPG => imagejpeg($this->image, null, $this->quality),
-            self::FORMAT_GIF  => imagegif($this->image),
-            self::FORMAT_WEBP => function_exists('imagewebp') ? imagewebp($this->image, null, $this->quality) : false,
-            self::FORMAT_BMP  => function_exists('imagebmp') ? imagebmp($this->image) : false,
-            default => false,
-        };
+        // 先写入临时缓冲获取二进制数据，用于计算 Content-Length 并确保输出干净
+        ob_start();
+        $success = $this->outputImage($format);
 
         if (! $success) {
+            ob_end_clean();
             throw new Exception('图片输出失败，请检查 GD 扩展是否支持该格式。');
         }
+
+        $imageData = ob_get_clean();
+
+        // 清理所有已发送的输出缓冲，确保图片数据纯净
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        if (! headers_sent()) {
+            header('Content-Type: ' . $mime);
+            header('Content-Length: ' . strlen($imageData));
+            header('Cache-Control: no-cache, must-revalidate');
+        }
+
+        echo $imageData;
     }
 
     /**
@@ -2740,38 +2949,24 @@ class TextToImg
     {
         $this->build();
 
-        ob_start();
         $format = strtolower($this->outputFormat);
-        $success = match ($format) {
-            self::FORMAT_PNG  => imagepng($this->image),
-            self::FORMAT_JPEG, self::FORMAT_JPG => imagejpeg($this->image, null, $this->quality),
-            self::FORMAT_GIF  => imagegif($this->image),
-            self::FORMAT_WEBP => function_exists('imagewebp') ? imagewebp($this->image, null, $this->quality) : false,
-            self::FORMAT_BMP  => function_exists('imagebmp') ? imagebmp($this->image) : false,
-            default => false,
-        };
-
-        if (! $success) {
-            ob_end_clean();
-            throw new Exception('Base64 编码失败。');
-        }
-
-        $data = ob_get_clean();
+        $data = $this->getImageBinary($format);
         $base64 = base64_encode($data);
 
-        if ($includePrefix) {
-            $mime = match ($format) {
-                self::FORMAT_PNG  => 'image/png',
-                self::FORMAT_JPEG, self::FORMAT_JPG => 'image/jpeg',
-                self::FORMAT_GIF  => 'image/gif',
-                self::FORMAT_WEBP => 'image/webp',
-                self::FORMAT_BMP  => 'image/bmp',
-                default => 'image/png',
-            };
-            return 'data:' . $mime . ';base64,' . $base64;
+        if (! $includePrefix) {
+            return $base64;
         }
 
-        return $base64;
+        $mime = match ($format) {
+            self::FORMAT_PNG  => 'image/png',
+            self::FORMAT_JPEG, self::FORMAT_JPG => 'image/jpeg',
+            self::FORMAT_GIF  => 'image/gif',
+            self::FORMAT_WEBP => 'image/webp',
+            self::FORMAT_BMP  => 'image/bmp',
+            default => 'image/png',
+        };
+
+        return 'data:' . $mime . ';base64,' . $base64;
     }
 
     /**
@@ -2785,20 +2980,25 @@ class TextToImg
     {
         $this->build();
 
+        return $this->getImageBinary(strtolower($this->outputFormat));
+    }
+
+    /**
+     * 获取图片二进制数据（内部统一方法）
+     *
+     * @param  string  $format  图片格式
+     * @return string
+     *
+     * @throws Exception
+     */
+    private function getImageBinary(string $format): string
+    {
         ob_start();
-        $format = strtolower($this->outputFormat);
-        $success = match ($format) {
-            self::FORMAT_PNG  => imagepng($this->image),
-            self::FORMAT_JPEG, self::FORMAT_JPG => imagejpeg($this->image, null, $this->quality),
-            self::FORMAT_GIF  => imagegif($this->image),
-            self::FORMAT_WEBP => function_exists('imagewebp') ? imagewebp($this->image, null, $this->quality) : false,
-            self::FORMAT_BMP  => function_exists('imagebmp') ? imagebmp($this->image) : false,
-            default => false,
-        };
+        $success = $this->outputImage($format);
 
         if (! $success) {
             ob_end_clean();
-            throw new Exception('二进制数据获取失败。');
+            throw new Exception('图片二进制数据生成失败，请检查 GD 扩展是否支持该格式。');
         }
 
         return ob_get_clean();

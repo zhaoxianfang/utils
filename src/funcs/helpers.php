@@ -3205,3 +3205,20 @@ if (! function_exists('escape')) {
         }, preg_split('//u', $str, -1, PREG_SPLIT_NO_EMPTY)));
     }
 }
+
+if (! function_exists('md_to_html')) {
+    /**
+     * 把markdown转换为html
+     *
+     * @param  string  $markdown  markdown字符串
+     * @param  array  $options  转换选项
+     *
+     * @return string  html字符串
+     */
+    function md_to_html(string $markdown = '', array $options = []): string
+    {
+        $converter = new \zxf\Utils\Text\MdToH5($options);
+
+        return $converter->convert($markdown);
+    }
+}
