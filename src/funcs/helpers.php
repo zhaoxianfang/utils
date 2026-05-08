@@ -1956,6 +1956,9 @@ if (! function_exists('is_resource_file')) {
     {
         // 解析 URL
         $path = parse_url($url, PHP_URL_PATH);
+        if (empty($path)){
+            return false;
+        }
         // 获取文件扩展名
         $ext = pathinfo($path, PATHINFO_EXTENSION);
         // bool: 使用预定义的后缀和特殊规则进行判断
