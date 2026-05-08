@@ -23,9 +23,9 @@ uuid():string
 ```
 
 ## 强大的DOM操作库
-[🇺🇸 Dom README.md](src/Dom/README.md)
-
-[🇨🇳 Dom 操作库 中文 README.md](src/Dom/README_CN.md)
+```
+composer require zxf/dom
+```
 
 ## BarCode 一维条形码
 [一维条形码文档](src/BarCode/README.md)
