@@ -935,7 +935,7 @@ class LabelOptions
         }
 
         // 判断是否为ASCII字符（英文字符、数字、符号）
-        if (ord($char) < 128) {
+        if (strlen($char) === 1 && ord($char) < 128) {
             // ASCII字符宽度约为字体大小的0.6倍
             return $this->fontSize * 0.6;
         }

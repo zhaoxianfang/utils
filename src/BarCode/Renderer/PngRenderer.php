@@ -50,6 +50,20 @@ class PngRenderer extends BaseRenderer
         $this->barcodeStructure = []; // 重置结构分析
         $this->renderModuleSize = $this->resolveModuleSize($barcodeData);
 
+        // 确保有足够的静区宽度
+        $moduleSize = $this->renderModuleSize;
+        if ($this->config->showQuietZone) {
+            $minQuietZone = 11 * $moduleSize;
+            $newMarginLeft = max($this->config->marginLeft, (int) $minQuietZone);
+            $newMarginRight = max($this->config->marginRight, (int) $minQuietZone);
+            if ($newMarginLeft !== $this->config->marginLeft || $newMarginRight !== $this->config->marginRight) {
+                $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), [
+                    'marginLeft' => $newMarginLeft,
+                    'marginRight' => $newMarginRight,
+                ]));
+            }
+        }
+
         $this->createImage($barcodeData);
         $this->drawBarcode($barcodeData);
         
@@ -266,23 +280,46 @@ class PngRenderer extends BaseRenderer
         }
 
         $textColor = $this->hexToColor($this->config->barColor);
-        
+
+        // 清理控制字符，避免 GD 绘制异常（保留原始数据用于条码编码）
+        $displayData = $this->sanitizeDisplayText($data);
+
         // 判断是否为长竖线特征条码
         if (!$this->barcodeStructure['hasLongBars']) {
             // 无长竖线条码使用普通对齐方式
             switch ($this->barcodeType) {
                 case 'Code 39':
-                    $this->drawAlignedText($this->removeDelimiters($data), $textColor);
+                    $this->drawAlignedText($this->removeDelimiters($displayData), $textColor);
                     break;
                 default:
-                    $this->drawAlignedText($data, $textColor);
+                    $this->drawAlignedText($displayData, $textColor);
                     break;
             }
             return;
         }
-        
+
         // 长竖线特征条码使用动态分段显示
-        $this->drawSegmentedText($data, $textColor);
+        $this->drawSegmentedText($displayData, $textColor);
+    }
+
+    /**
+     * 清理显示文本中的控制字符
+     *
+     * GD 的 imagestring 无法正确渲染 ASCII 控制字符（0-31、127），
+     * 会导致空白或乱码。此方法将其替换为空格，确保视觉显示正常。
+     */
+    protected function sanitizeDisplayText(string $data): string
+    {
+        $result = '';
+        for ($i = 0; $i < strlen($data); $i++) {
+            $ord = ord($data[$i]);
+            if ($ord < 32 || $ord === 127) {
+                $result .= ' ';
+            } else {
+                $result .= $data[$i];
+            }
+        }
+        return $result;
     }
 
     /**
@@ -495,26 +532,77 @@ class PngRenderer extends BaseRenderer
      */
     protected function drawAlignedText(string $data, int $textColor): void
     {
+        $lines = explode("\n", $data);
+
         $barY = $this->config->marginTop;
-        $y = $barY + $this->config->height + $this->config->textOffset + $this->config->fontSize;
-        
+        $baseY = $barY + $this->config->height + $this->config->textOffset;
+
         $imgWidth = imagesx($this->image);
-        $textWidth = imagefontwidth(5) * strlen($data);
-        
-        switch ($this->textAlign) {
-            case 'left':
-                $x = $this->config->marginLeft;
-                break;
-            case 'right':
-                $x = $imgWidth - $this->config->marginRight - $textWidth;
-                break;
-            case 'center':
-            default:
-                $x = (int)(($imgWidth - $textWidth) / 2);
-                break;
+
+        // 优先使用 TTF 字体渲染
+        if ($this->config->fontPath !== null && file_exists($this->config->fontPath)) {
+            $this->drawAlignedTextTtf($lines, $baseY, $imgWidth, $textColor);
+            return;
         }
-        
-        imagestring($this->image, 5, $x, $y - 12, $data, $textColor);
+
+        // GD 内置字体回退
+        $fontSize = min(5, max(1, (int)($this->config->fontSize / 3)));
+        $lineHeight = imagefontheight($fontSize) + 2;
+
+        foreach ($lines as $index => $line) {
+            $textWidth = imagefontwidth($fontSize) * strlen($line);
+            $y = $baseY + $index * $lineHeight + imagefontheight($fontSize);
+
+            switch ($this->textAlign) {
+                case 'left':
+                    $x = $this->config->marginLeft;
+                    break;
+                case 'right':
+                    $x = $imgWidth - $this->config->marginRight - $textWidth;
+                    break;
+                case 'center':
+                default:
+                    $x = (int)(($imgWidth - $textWidth) / 2);
+                    break;
+            }
+
+            imagestring($this->image, $fontSize, $x, $y - imagefontheight($fontSize), $line, $textColor);
+        }
+    }
+
+    /**
+     * 使用 TTF 字体绘制多行对齐文本
+     */
+    protected function drawAlignedTextTtf(array $lines, int $baseY, int $imgWidth, int $textColor): void
+    {
+        $fontSize = $this->config->fontSize;
+        $fontPath = $this->config->fontPath;
+
+        // 计算行高
+        $sampleBox = imagettfbbox($fontSize, 0, $fontPath, 'Mg');
+        $lineHeight = abs($sampleBox[1] - $sampleBox[7]) + 4;
+
+        foreach ($lines as $index => $line) {
+            $bbox = imagettfbbox($fontSize, 0, $fontPath, $line);
+            $textWidth = abs($bbox[2] - $bbox[0]);
+            $textHeight = abs($bbox[1] - $bbox[7]);
+            $y = $baseY + $index * $lineHeight + $textHeight;
+
+            switch ($this->textAlign) {
+                case 'left':
+                    $x = $this->config->marginLeft;
+                    break;
+                case 'right':
+                    $x = $imgWidth - $this->config->marginRight - $textWidth;
+                    break;
+                case 'center':
+                default:
+                    $x = (int)(($imgWidth - $textWidth) / 2);
+                    break;
+            }
+
+            imagettftext($this->image, $fontSize, 0, $x, $y, $textColor, $fontPath, $line);
+        }
     }
 
     /**

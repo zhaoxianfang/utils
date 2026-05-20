@@ -9,6 +9,7 @@ use zxf\Utils\BarCode\DTO\BarcodeConfig;
 use zxf\Utils\BarCode\Renderer\BaseRenderer;
 use zxf\Utils\BarCode\Renderer\PngRenderer;
 use zxf\Utils\BarCode\Renderer\SvgRenderer;
+use zxf\Utils\BarCode\Renderer\HtmlRenderer;
 
 /**
  * 条形码构建器（增强版）
@@ -574,13 +575,16 @@ class BarcodeBuilder
     public function toBase64(string $format = 'png'): string
     {
         $format = strtolower($format);
-        if ($format === 'svg') {
-            $content = $this->toSvg();
-            $mimeType = 'image/svg+xml';
-        } else {
-            $content = $this->toPng();
-            $mimeType = 'image/png';
-        }
+        $content = match ($format) {
+            'svg' => $this->toSvg(),
+            'html' => $this->toHtml(),
+            default => $this->toPng(),
+        };
+        $mimeType = match ($format) {
+            'svg' => 'image/svg+xml',
+            'html' => 'text/html',
+            default => 'image/png',
+        };
 
         return 'data:' . $mimeType . ';base64,' . base64_encode($content);
     }
@@ -619,6 +623,58 @@ class BarcodeBuilder
         }
         
         return file_put_contents($filename, $svgData) !== false;
+    }
+
+    /**
+     * 渲染为HTML
+     *
+     * @return string HTML字符串
+     */
+    public function toHtml(): string
+    {
+        if ($this->barcodeData === null) {
+            $this->generate();
+        }
+
+        $config = $this->resolveScaledConfig();
+        $renderer = new HtmlRenderer($config);
+        $this->configureRenderer($renderer);
+
+        return $renderer->render($this->barcodeData, $this->getFullData(), []);
+    }
+
+    /**
+     * 保存为HTML文件
+     *
+     * @param string $filename 文件路径
+     * @return bool 保存成功返回true
+     */
+    public function saveHtml(string $filename): bool
+    {
+        $htmlData = $this->toHtml();
+        
+        $dir = dirname($filename);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        
+        return file_put_contents($filename, $htmlData) !== false;
+    }
+
+    /**
+     * 直接输出HTML到浏览器
+     */
+    public function outputHtml(): void
+    {
+        if ($this->barcodeData === null) {
+            $this->generate();
+        }
+
+        $config = $this->resolveScaledConfig();
+        $renderer = new HtmlRenderer($config);
+        $this->configureRenderer($renderer);
+
+        $renderer->outputToBrowser($this->barcodeData, $this->getFullData(), []);
     }
 
     /**

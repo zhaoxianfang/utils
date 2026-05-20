@@ -347,6 +347,67 @@ test('环境检查', function() {
     return isset($env['passed']) ? true : '环境检查返回格式错误';
 });
 
+// 新数据格式生成器测试
+test('MeCard 数据格式', function() {
+    $meCard = QrCodeHelper::generateMeCardString(['name' => '张三', 'phone' => '13800138000']);
+    return str_starts_with($meCard, 'MECARD:') ? true : 'MeCard格式错误';
+});
+
+test('WhatsApp 数据格式', function() {
+    $wa = QrCodeHelper::generateWhatsAppString('13800138000', '你好');
+    return str_starts_with($wa, 'https://wa.me/') ? true : 'WhatsApp格式错误';
+});
+
+test('Skype 数据格式', function() {
+    $skype = QrCodeHelper::generateSkypeString('live:testuser', 'chat');
+    return str_starts_with($skype, 'skype:') ? true : 'Skype格式错误';
+});
+
+test('Zoom 数据格式', function() {
+    $zoom = QrCodeHelper::generateZoomString('1234567890', 'password');
+    return str_contains($zoom, 'zoom.us') ? true : 'Zoom格式错误';
+});
+
+test('Instagram 数据格式', function() {
+    $ig = QrCodeHelper::generateInstagramString('testuser');
+    return str_contains($ig, 'instagram.com') ? true : 'Instagram格式错误';
+});
+
+test('LinkedIn 数据格式', function() {
+    $li = QrCodeHelper::generateLinkedInString('testuser');
+    return str_contains($li, 'linkedin.com') ? true : 'LinkedIn格式错误';
+});
+
+test('YouTube 数据格式', function() {
+    $yt = QrCodeHelper::generateYouTubeString('dQw4w9WgXcQ');
+    return str_contains($yt, 'youtube.com') ? true : 'YouTube格式错误';
+});
+
+test('PayPal 数据格式', function() {
+    $pp = QrCodeHelper::generatePayPalString('test@example.com', 100, 'CNY');
+    return str_starts_with($pp, 'https://www.paypal.com/paypalme/') ? true : 'PayPal格式错误';
+});
+
+test('FedEx 数据格式', function() {
+    $fedex = QrCodeHelper::generateFedExString('123456789012');
+    return str_contains($fedex, 'fedex.com') ? true : 'FedEx格式错误';
+});
+
+test('App Store 数据格式', function() {
+    $app = QrCodeHelper::generateAppStoreString('123456789');
+    return str_contains($app, 'apps.apple.com') ? true : 'App Store格式错误';
+});
+
+test('容量查询', function() {
+    $cap = QrCodeHelper::getCapacity(1, 'L');
+    return ($cap['numeric'] ?? 0) > 0 ? true : '容量查询失败';
+});
+
+test('编码模式估算', function() {
+    $mode = QrCodeHelper::estimateDataMode('123456');
+    return $mode === 'numeric' ? true : "期望 numeric, 实际 {$mode}";
+});
+
 echo "\n【批量生成测试】\n";
 echo "----------------\n";
 
@@ -379,6 +440,26 @@ test('JPEG 格式输出', function() use ($outputDir) {
 test('Base64 输出', function() {
     $base64 = QrCode::make('Base64 Test')->toBase64();
     return str_starts_with($base64, 'data:image/png;base64,') ? true : 'Base64格式错误';
+});
+
+test('SVG 格式输出', function() use ($outputDir) {
+    $svg = QrCode::make('SVG Test')->toSvg();
+    file_put_contents($outputDir . '/format_svg.svg', $svg);
+    return file_exists($outputDir . '/format_svg.svg') && str_contains($svg, '<svg') ? true : 'SVG生成失败';
+});
+
+test('SVG 圆角模块输出', function() use ($outputDir) {
+    $svg = QrCode::make('Rounded SVG')
+        ->rounded(true)
+        ->roundedRadius(0.4)
+        ->toSvg();
+    file_put_contents($outputDir . '/rounded_svg.svg', $svg);
+    return file_exists($outputDir . '/rounded_svg.svg') && str_contains($svg, 'rx=') ? true : '圆角SVG生成失败';
+});
+
+test('SVG Base64 输出', function() {
+    $base64 = QrCode::make('SVG Base64')->format('svg')->toBase64();
+    return str_starts_with($base64, 'data:image/svg+xml;base64,') ? true : 'SVG Base64格式错误';
 });
 
 test('width() 别名', function() use ($outputDir) {
@@ -426,7 +507,7 @@ test('空数据二维码应抛出异常', function() use ($outputDir) {
     try {
         QrCode::make('')->save($outputDir . '/empty.png');
         return '空数据应该抛出异常';
-    } catch (\Exception $e) {
+    } catch (\Exception) {
         return true; // 期望抛出异常
     }
 });
@@ -486,6 +567,7 @@ test('带背景的渐变效果', function() use ($outputDir) {
 
     // 使用背景
     QrCode::make('Gradient BG')
+        ->foregroundColor(Color::fromHex('#FF0000'))
         ->backgroundImage($outputDir . '/gradient_bg.png')
         ->save($outputDir . '/qr_with_gradient.png');
     

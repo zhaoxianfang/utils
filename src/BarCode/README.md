@@ -20,13 +20,13 @@
 
 ## 特性
 
-- **7种条码类型**：EAN-13、EAN-8、UPC-A、Code 128、Code 39、ITF-14、ISSN
+- **9种条码类型**：EAN-13、EAN-8、UPC-A、Code 128、Code 39、Codabar、ITF-14、ISSN、ISBN
 - **符合GS1标准**：严格遵循国际条形码编码规范，确保100%可识别
 - **长竖线特征**：EAN/UPC 条码支持标准长竖线（保护符突出显示）
-- **多种输出格式**：支持 PNG 图片和 SVG 矢量图
+- **多种输出格式**：支持 PNG 图片、SVG 矢量图和 HTML/CSS 渲染
 - **指定宽高**：支持设置生成图片的整体宽度和高度
 - **Base64输出**：支持直接返回 Base64 编码数据 URI
-- **浏览器输出**：支持直接输出 PNG / SVG 到浏览器
+- **浏览器输出**：支持直接输出 PNG / SVG / HTML 到浏览器
 - **透明背景**：SVG 支持透明背景（设置 `bgColor('transparent')`）
 - **丰富的自定义**：颜色、尺寸、字体、渐变、圆角、水印等
 - **增强水印**：支持 9 种位置定位、旋转、TTF 字体、斜向平铺
@@ -168,6 +168,70 @@ BarcodeBuilder::create()
 - 期刊专用
 - EAN-8 变体
 
+### 8. Codabar（NW-7）
+
+```php
+BarcodeBuilder::create()
+    ->type('codabar')
+    ->data('A123456B')  // 可包含起始/终止符 A/B/C/D
+    ->savePng('codabar.png');
+```
+
+**特征**：
+- 离散型自校验条码
+- 支持数字和 - $ : / . +
+- 起始/终止符为 A, B, C, D
+- 广泛应用于图书馆、血库
+
+### 9. ISBN（国际标准书号）
+
+```php
+// ISBN-13（12位数据自动计算校验位，或13位完整 ISBN）
+BarcodeBuilder::create()
+    ->type('isbn')
+    ->data('978020137962')  // 自动补全校验位
+    ->savePng('isbn13.png');
+
+// ISBN-13 带连字符（自动去除格式化符号）
+BarcodeBuilder::create()
+    ->type('isbn')
+    ->data('978-3-16-148410-0')
+    ->savePng('isbn13_formatted.png');
+
+// ISBN-10 自动转换为 ISBN-13（EAN-13 条码）
+BarcodeBuilder::create()
+    ->type('isbn')
+    ->data('0-306-40615-2')
+    ->savePng('isbn10_convert.png');
+```
+
+**特征**：
+- 支持 ISBN-10 和 ISBN-13 自动识别
+- ISBN-10 自动转换为 ISBN-13（加 978 前缀，重新计算 EAN-13 校验位）
+- 自动校验位验证与补全
+- 支持带连字符和空格的格式化输入
+- 条码基于 EAN-13 标准，兼容所有图书零售扫描系统
+
+**辅助方法**：
+```php
+$generator = BarcodeFactory::create('isbn');
+
+// ISBN-10 校验位计算（模 11，可能为 X）
+$check = $generator->calculateIsbn10Checksum('030640615'); // 返回 '2'
+
+// ISBN-13 校验位计算（EAN-13 模 10）
+$check = $generator->calculateIsbn13Checksum('978020137962'); // 返回 '4'
+
+// ISBN-10 转 ISBN-13
+$isbn13 = $generator->convertIsbn10To13('0306406152'); // 返回 '9780306406157'
+
+// ISBN-13 转 ISBN-10（仅 978 前缀）
+$isbn10 = $generator->convertIsbn13To10('9780306406157'); // 返回 '0306406152'
+
+// 格式化输出
+$formatted = $generator->formatIsbn('9783161484100'); // 返回 '978-3-16-148410-0'
+```
+
 ## 高级配置
 
 ### 尺寸设置
@@ -230,7 +294,7 @@ BarcodeBuilder::create()
     ->savePng('no_text.png');
 ```
 
-### 文本对齐
+### 文本对齐与多行文本
 
 ```php
 BarcodeBuilder::create()
@@ -238,6 +302,21 @@ BarcodeBuilder::create()
     ->data('ALIGN_TEST')
     ->textAlign('right')  // left, center, right
     ->savePng('aligned.png');
+
+// 多行文本（使用换行符分隔）
+BarcodeBuilder::create()
+    ->type('code128')
+    ->data("LINE1\nLINE2\nLINE3")
+    ->fontSize(14)
+    ->savePng('multiline.png');
+
+// 使用 TTF 字体（支持更丰富的排版）
+BarcodeBuilder::create()
+    ->type('code128')
+    ->data('TTF Font')
+    ->fontPath('/path/to/font.ttf')
+    ->fontSize(16)
+    ->savePng('ttf_text.png');
 ```
 
 ### 个性化效果
@@ -314,6 +393,24 @@ BarcodeBuilder::create()
     ->type('ean13')
     ->data('690123456789')
     ->outputSvg();
+
+// 输出 HTML 到浏览器（使用 div/CSS 渲染）
+BarcodeBuilder::create()
+    ->type('code128')
+    ->data('HTML-TEST')
+    ->outputHtml();
+
+// 保存为 HTML 文件
+BarcodeBuilder::create()
+    ->type('code39')
+    ->data('TEST123')
+    ->saveHtml('barcode.html');
+
+// 获取 HTML 字符串
+$html = BarcodeBuilder::create()
+    ->type('ean13')
+    ->data('690123456789')
+    ->toHtml();
 ```
 
 ### Base64 输出
@@ -382,15 +479,17 @@ $ean13->setQuietZone(15);  // 设置静区为15个模块（默认11）
 
 ## 条码类型说明
 
-| 条码类型   | 数据长度 | 字符集           | 长竖线 | 应用场景   |
-|------------|----------|------------------|--------|------------|
-| EAN-13     | 13位     | 数字             | 有     | 零售商品   |
-| EAN-8      | 8位      | 数字             | 有     | 小包装商品 |
-| UPC-A      | 12位     | 数字             | 有     | 北美零售   |
-| ISSN       | 8位      | 数字             | 有     | 期刊       |
-| Code 128   | 可变     | 全ASCII          | 无     | 物流/仓储  |
-| Code 39    | 可变     | 数字+大写字母+特殊符号 | 无 | 工业/医疗  |
-| ITF-14     | 14位     | 数字             | 无     | 物流包装   |
+| 条码类型       | 数据长度 | 字符集                 | 长竖线 | 应用场景   |
+|----------------|----------|------------------------|--------|------------|
+| EAN-13         | 13位     | 数字                   | 有     | 零售商品   |
+| EAN-8          | 8位      | 数字                   | 有     | 小包装商品 |
+| UPC-A          | 12位     | 数字                   | 有     | 北美零售   |
+| ISSN           | 8位      | 数字                   | 有     | 期刊       |
+| ISBN           | 13位     | 数字                   | 有     | 图书出版   |
+| Code 128       | 可变     | 全ASCII                | 无     | 物流/仓储  |
+| Code 39        | 可变     | 数字+大写字母+特殊符号 | 无     | 工业/医疗  |
+| Codabar (NW-7) | 可变     | 数字+ -$:/.+           | 无     | 图书馆/血库|
+| ITF-14         | 14位     | 数字                   | 无     | 物流包装   |
 
 ## 技术规范
 
@@ -443,11 +542,14 @@ $ean13->setQuietZone(15);  // 设置静区为15个模块（默认11）
 | `generate()`                 | -                             | 生成条码数据                             |
 | `toPng()`                    | -                             | 输出PNG数据                              |
 | `toSvg()`                    | -                             | 输出SVG数据                              |
+| `toHtml()`                   | -                             | 输出HTML字符串                           |
 | `savePng($filename)`         | string $filename              | 保存为PNG文件                            |
 | `saveSvg($filename)`         | string $filename              | 保存为SVG文件                            |
+| `saveHtml($filename)`        | string $filename              | 保存为HTML文件                           |
 | `outputPng()`                | -                             | 直接输出PNG到浏览器                      |
 | `outputSvg()`                | -                             | 直接输出SVG到浏览器                      |
-| `toBase64($format)`          | string $format                | 返回Base64数据URI（png/svg）             |
+| `outputHtml()`               | -                             | 直接输出HTML到浏览器                     |
+| `toBase64($format)`          | string $format                | 返回Base64数据URI（png/svg/html）        |
 | `getFullData()`              | -                             | 获取完整数据（含校验位）                 |
 | `getChecksum()`              | -                             | 获取校验位                               |
 
@@ -609,6 +711,8 @@ BarcodeBuilder::create()
     ->savePng('isbn.png');
 ```
 
+**注意**：部分扫码器会将 978/979 前缀的 EAN-13 自动转换为 ISBN-10 格式显示，导致扫描结果与条码下方印刷的 13 位数字不一致。这是扫码器的正常行为，而非条码生成错误。如需避免此行为，请使用非 ISBN 前缀（如 690）的 EAN-13 条码。
+
 ### Q: 支持批量生成条码吗？
 
 A: 支持，使用循环即可：
@@ -661,6 +765,26 @@ php src/BarCode/tests.php
 - 文件输出测试
 
 ## 更新日志
+
+### v1.7.0 (2026-05-20)
+- **【重要】精简条码类型，移除识别率较低的生成器**
+  - 移除 Code 11、Code 93、MSI、Standard 2 of 5、Industrial 2 of 5、Pharmacode 生成器
+  - 集中维护 9 种高兼容性条码类型：EAN-13、EAN-8、UPC-A、Code 128、Code 39、Codabar、ITF-14、ISSN、ISBN
+  - 更新文档、测试和辅助类，移除所有已删除类型的引用
+- **【新增】ISBN 条码生成器**
+  - 支持 ISBN-10 和 ISBN-13 自动识别
+  - ISBN-10 自动转换为 ISBN-13（加 978 前缀，重新计算 EAN-13 校验位）
+  - 支持带连字符和空格的格式化输入
+- **【增强】静区自动保障机制**
+  - PNG / SVG 渲染器自动强制最小静区宽度（11 × 模块宽度）
+  - 确保 EAN-13 / UPC-A 等条码符合 GS1 静区规范，提高扫码识别率
+- **【修复】EAN-13 978 前缀条码识别问题**
+  - 修复编码模块数计算错误，确保与 Picqer 标准库完全一致
+  - 修复预展开模式导致的模块数翻倍问题
+- **【修复】二维码多项问题**
+  - 修复 PHP 8.2+ `Deprecated: ord()` 警告
+  - 修复 SVG 生成纯黑方块问题
+  - 统一 PNG 与 SVG 标签文字位置
 
 ### v1.6.0 (2026-04-16)
 - ✅ **【重要】重构尺寸语义，取消模块宽度设置**
@@ -765,12 +889,15 @@ src/
 │   ├── UPCAGenerator.php
 │   ├── Code128Generator.php
 │   ├── Code39Generator.php
+│   ├── CodabarGenerator.php
+│   ├── ISBNGenerator.php
 │   ├── ITF14Generator.php
 │   └── ISSNGenerator.php
 ├── Renderer/           # 渲染器
 │   ├── BaseRenderer.php
 │   ├── PngRenderer.php
-│   └── SvgRenderer.php
+│   ├── SvgRenderer.php
+│   └── HtmlRenderer.php
 ├── BarcodeFactory.php  # 工厂类
 ├── BarcodeBuilder.php  # 构建器类
 ├── BarcodeHelper.php   # 辅助工具类

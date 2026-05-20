@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace zxf\Utils\BarCode;
 
-use zxf\Utils\BarCode\Renderer\PngRenderer;
-use zxf\Utils\BarCode\Renderer\SvgRenderer;
 use zxf\Utils\BarCode\Exceptions\BarcodeException;
 
 /**
@@ -37,27 +35,17 @@ class BarcodeHelper
                 ->type($type)
                 ->data($data);
             
-            // 应用其他选项
-            if (isset($options['width'])) {
-                $builder->width((int)$options['width']);
-            }
-            if (isset($options['height'])) {
-                $builder->height((int)$options['height']);
-            }
-            if (isset($options['bgColor'])) {
-                $builder->bgColor($options['bgColor']);
-            }
-            if (isset($options['barColor'])) {
-                $builder->barColor($options['barColor']);
-            }
-            if (isset($options['showText'])) {
-                $builder->showText((bool)$options['showText']);
+            foreach (['width','height','bgColor','barColor','showText'] as $key) {
+                if (isset($options[$key])) {
+                    $builder->$key($options[$key]);
+                }
             }
             
-            if ($format === 'svg') {
-                return $builder->saveSvg($outputPath);
-            }
-            return $builder->savePng($outputPath);
+            return match ($format) {
+                'svg' => $builder->saveSvg($outputPath),
+                'html' => $builder->saveHtml($outputPath),
+                default => $builder->savePng($outputPath),
+            };
         } catch (\Exception $e) {
             error_log('条码生成失败: ' . $e->getMessage());
             return false;
@@ -143,11 +131,11 @@ class BarcodeHelper
                         }
                     }
 
-                    if ($format === 'svg') {
-                        $builder->saveSvg($filepath);
-                    } else {
-                        $builder->savePng($filepath);
-                    }
+                    match ($format) {
+                        'svg' => $builder->saveSvg($filepath),
+                        'html' => $builder->saveHtml($filepath),
+                        default => $builder->savePng($filepath),
+                    };
 
                     $results['success']++;
                     $results['files'][] = $filepath;
@@ -212,6 +200,8 @@ class BarcodeHelper
                 'upca' => ['min' => 11, 'max' => 12, 'optimal' => 12],
                 'itf14' => ['min' => 13, 'max' => 14, 'optimal' => 14],
                 'issn' => ['min' => 7, 'max' => 8, 'optimal' => 8],
+                'isbn' => ['min' => 10, 'max' => 17, 'optimal' => 13],
+                'codabar' => ['min' => 1, 'max' => 48, 'optimal' => null],
             ];
 
             $normalizedType = strtolower($type);
@@ -311,6 +301,20 @@ class BarcodeHelper
                 'length' => '7-8位',
                 'uses' => '期刊杂志',
             ],
+            'isbn' => [
+                'name' => 'ISBN',
+                'description' => '国际标准书号，基于EAN-13，支持ISBN-10自动转换为ISBN-13',
+                'charset' => '0-9, -',
+                'length' => '10-13位',
+                'uses' => '图书出版',
+            ],
+            'codabar' => [
+                'name' => 'Codabar',
+                'description' => 'NW-7 离散型自校验条码，用于图书馆、血库',
+                'charset' => '0-9, - $ : / . +',
+                'length' => '可变',
+                'uses' => '图书馆、医疗',
+            ],
         ];
 
         $normalizedType = strtolower($type);
@@ -357,23 +361,18 @@ class BarcodeHelper
             ->type($type)
             ->data($data);
         
-        // 应用选项
         foreach ($options as $key => $value) {
-            if (in_array($key, ['format'], true)) {
-                continue;
-            }
+            if ($key === 'format') continue;
             if (method_exists($builder, $key)) {
                 $builder = $builder->$key($value);
             }
         }
 
-        if ($format === 'svg') {
-            $content = $builder->toSvg();
-            $mimeType = 'image/svg+xml';
-        } else {
-            $content = $builder->toPng();
-            $mimeType = 'image/png';
-        }
+        [$content, $mimeType] = match ($format) {
+            'svg' => [$builder->toSvg(), 'image/svg+xml'],
+            'html' => [$builder->toHtml(), 'text/html'],
+            default => [$builder->toPng(), 'image/png'],
+        };
 
         return 'data:' . $mimeType . ';base64,' . base64_encode($content);
     }

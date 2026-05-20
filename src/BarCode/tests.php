@@ -99,12 +99,22 @@ test('EAN-13 带校验位生成 (13位)', function() use ($outputDir) {
 });
 
 // 测试 978 前缀 EAN-13 (ISBN Bookland EAN)
+// 注意：扫描器可能将 978 前缀的 EAN-13 自动转换为 ISBN-10 格式，导致显示内容不一致
 test('EAN-13 978前缀 (Bookland EAN)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean13')
         ->data('9780201379624')
         ->savePng($outputDir . '/ean13_978_prefix.png');
     return file_exists($outputDir . '/ean13_978_prefix.png') ? true : '文件未生成';
+});
+
+// 测试非 ISBN 前缀的 EAN-13（避免扫描器自动转换）
+test('EAN-13 690前缀 (零售商品)', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('6901234567892')
+        ->savePng($outputDir . '/ean13_690_prefix.png');
+    return file_exists($outputDir . '/ean13_690_prefix.png') ? true : '文件未生成';
 });
 
 // 测试 EAN-13 校验位计算
@@ -243,6 +253,63 @@ test('ISSN 生成 (8位带校验位)', function() use ($outputDir) {
     return file_exists($outputDir . '/issn_with_checksum.png') ? true : '文件未生成';
 });
 
+echo "\n【基础功能测试 - Codabar】\n";
+echo "-------------------------\n";
+
+test('Codabar 基础生成', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('codabar')
+        ->data('A1234567890B')
+        ->savePng($outputDir . '/codabar_basic.png');
+    return file_exists($outputDir . '/codabar_basic.png') ? true : '文件未生成';
+});
+
+test('Codabar 无起止符', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('codabar')
+        ->data('1234567890')
+        ->savePng($outputDir . '/codabar_no_startstop.png');
+    return file_exists($outputDir . '/codabar_no_startstop.png') ? true : '文件未生成';
+});
+
+echo "\n【基础功能测试 - ISBN】\n";
+echo "----------------------\n";
+
+test('ISBN-13 基础生成', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('isbn')
+        ->data('978020137962')
+        ->savePng($outputDir . '/isbn13_basic.png');
+    return file_exists($outputDir . '/isbn13_basic.png') ? true : '文件未生成';
+});
+
+test('ISBN-13 带校验位生成', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('isbn')
+        ->data('978-3-16-148410-0')
+        ->savePng($outputDir . '/isbn13_full.png');
+    return file_exists($outputDir . '/isbn13_full.png') ? true : '文件未生成';
+});
+
+test('ISBN-10 转 ISBN-13 生成', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('isbn')
+        ->data('0-306-40615-2')
+        ->savePng($outputDir . '/isbn10_convert.png');
+    return file_exists($outputDir . '/isbn10_convert.png') ? true : '文件未生成';
+});
+
+test('ISBN 校验位计算', function() {
+    $checksum10 = BarcodeHelper::calculateChecksum('isbn', '030640615');
+    $checksum13 = BarcodeHelper::calculateChecksum('isbn', '978020137962');
+    return $checksum10 === '2' && $checksum13 === '4' ? true : "ISBN-10: {$checksum10}, ISBN-13: {$checksum13}";
+});
+
+test('ISBN 数据验证', function() {
+    $result = BarcodeHelper::validateData('isbn', '978-3-16-148410-0');
+    return $result['valid'] === true ? true : 'ISBN验证失败';
+});
+
 echo "\n【SVG 输出测试】\n";
 echo "----------------\n";
 
@@ -261,6 +328,34 @@ test('Code 128 SVG 生成', function() use ($outputDir) {
         ->data('TEST123')
         ->saveSvg($outputDir . '/code128_test.svg');
     return file_exists($outputDir . '/code128_test.svg') ? true : '文件未生成';
+});
+
+echo "\n【HTML 输出测试】\n";
+echo "----------------\n";
+
+test('Code 128 HTML 生成', function() use ($outputDir) {
+    $html = BarcodeBuilder::create()
+        ->type('code128')
+        ->data('HTML-TEST-123')
+        ->saveHtml($outputDir . '/code128_test.html');
+    return file_exists($outputDir . '/code128_test.html') ? true : '文件未生成';
+});
+
+test('EAN-13 HTML 生成', function() use ($outputDir) {
+    $html = BarcodeBuilder::create()
+        ->type('ean13')
+        ->data('690123456789')
+        ->toHtml();
+    file_put_contents($outputDir . '/ean13_test.html', $html);
+    return file_exists($outputDir . '/ean13_test.html') && str_contains($html, '<div') ? true : 'HTML生成失败';
+});
+
+test('HTML Base64 输出', function() {
+    $base64 = BarcodeBuilder::create()
+        ->type('code39')
+        ->data('BASE64HTML')
+        ->toBase64('html');
+    return str_starts_with($base64, 'data:text/html;base64,') ? true : 'Base64 HTML格式错误';
 });
 
 echo "\n【长竖线特征测试】\n";
@@ -337,6 +432,22 @@ test('BarcodeHelper 类型信息获取', function() {
 test('BarcodeHelper Base64 生成', function() {
     $base64 = BarcodeHelper::toBase64('ean13', '690123456789');
     return str_starts_with($base64, 'data:image/png;base64,') ? true : 'Base64格式错误';
+});
+
+test('BarcodeHelper Base64 HTML 生成', function() {
+    $base64 = BarcodeHelper::toBase64('code128', 'HTML-BASE64-TEST', ['format' => 'html']);
+    return str_starts_with($base64, 'data:text/html;base64,') ? true : 'Base64 HTML格式错误';
+});
+
+// 测试新类型数据验证
+test('BarcodeHelper Codabar 数据验证', function() {
+    $result = BarcodeHelper::validateData('codabar', 'A1234B');
+    return $result['valid'] === true ? true : 'Codabar验证失败';
+});
+
+test('BarcodeHelper ISBN 数据验证', function() {
+    $result = BarcodeHelper::validateData('isbn', '978-3-16-148410-0');
+    return $result['valid'] === true ? true : 'ISBN验证失败';
 });
 
 // 测试批量生成

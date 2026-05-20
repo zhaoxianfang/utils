@@ -21,8 +21,9 @@
 - ✅ **标签特效**：支持标签阴影和描边效果
 - ✅ **圆点风格**：支持圆点风格二维码（可自定义圆点半径0-1）
 - ✅ **背景图片**：支持设置背景图片
-- ✅ **多种格式**：支持 PNG、JPEG、GIF 输出
-- ✅ **透明背景**：支持生成透明背景的二维码（仅PNG格式）
+- ✅ **多种格式**：支持 PNG、JPEG、GIF、WebP、SVG 输出
+- ✅ **矢量SVG**：原生矢量SVG生成，支持圆角、Logo嵌入和标签
+- ✅ **透明背景**：支持生成透明背景的二维码（PNG/SVG格式）
 - ✅ **指定宽高**：支持设置生成图片的最终宽度和高度
 - ✅ **水印支持**：支持添加文字水印（9种位置、透明度、TTF字体）
 - ✅ **边距控制**：支持模块边距（margin）和图片外边距（padding）
@@ -531,9 +532,12 @@ QrCode::make('Watermark')
 | 方法 | 返回类型 | 说明 |
 |------|---------|------|
 | `save()` | bool | 保存到文件 |
+| `saveSvg()` | bool | 保存为SVG文件 |
 | `toString()` | string | 获取二进制数据 |
 | `toBase64()` | string | 获取 Base64 编码 |
+| `toSvg()` | string | 获取SVG字符串 |
 | `output()` | void | 输出到浏览器 |
+| `outputSvg()` | void | 输出SVG到浏览器 |
 | `render()` | GdImage | 获取 GD 图像资源 |
 
 **输出示例：**
@@ -576,6 +580,28 @@ $base64 = QrCode::make('Output Test')
 $image = QrCode::make('Output Test')
     ->size(300)
     ->render();
+
+// 生成SVG矢量图
+$svg = QrCode::make('https://example.com')
+    ->size(300)
+    ->toSvg();
+
+// 保存SVG文件
+QrCode::make('https://example.com')
+    ->size(300)
+    ->saveSvg('qrcode.svg');
+
+// 输出SVG到浏览器
+QrCode::make('https://example.com')
+    ->size(300)
+    ->outputSvg();
+
+// SVG支持圆角、Logo和标签
+$svg = QrCode::make('Hello SVG')
+    ->size(300)
+    ->rounded(true)
+    ->roundedRadius(0.5)
+    ->toSvg();
 ```
 
 ### 7. Getter 方法
@@ -1257,6 +1283,55 @@ $eventString = QrCodeHelper::generateEventString(
     '会议室A',
     '会议描述'
 );
+
+// MeCard 名片
+$meCard = QrCodeHelper::generateMeCardString([
+    'name' => '张三',
+    'phone' => '13800138000',
+    'email' => 'zhangsan@example.com',
+    'url' => 'https://example.com'
+]);
+
+// WhatsApp 消息
+$whatsapp = QrCodeHelper::generateWhatsAppString('8613800138000', '你好');
+
+// Skype 通话
+$skype = QrCodeHelper::generateSkypeString('username', 'chat');
+
+// Zoom 会议
+$zoom = QrCodeHelper::generateZoomString('1234567890', 'password');
+
+// Instagram 主页
+$instagram = QrCodeHelper::generateInstagramString('username');
+
+// YouTube 视频
+$youtube = QrCodeHelper::generateYouTubeString('dQw4w9WgXcQ');
+
+// PayPal 付款
+$paypal = QrCodeHelper::generatePayPalString('email@example.com', 99.99, 'USD');
+
+// FedEx 追踪
+$fedex = QrCodeHelper::generateFedExString('123456789012');
+
+// App Store 应用
+$appStore = QrCodeHelper::generateAppStoreString('123456789', 'us');
+```
+
+### 版本估算与容量查询
+
+```php
+// 估算最佳编码模式
+$mode = QrCodeHelper::estimateDataMode('Hello123'); // 'alphanumeric'
+
+// 估算所需版本（基于ISO/IEC 18004容量表）
+$version = QrCodeHelper::estimateVersion('https://example.com', 'M');
+
+// 获取指定版本的容量信息
+$capacity = QrCodeHelper::getCapacity(5, 'M');
+// 返回：['version'=>5, 'ecLevel'=>'M', 'numeric'=>202, 'alphanumeric'=>122, 'byte'=>84, 'kanji'=>52, 'dimensions'=>37]
+
+// 获取最大数据长度
+$maxLen = QrCodeHelper::getMaxDataLength(10, 'H', 'byte'); // 119
 ```
 
 ### 生成SVG二维码

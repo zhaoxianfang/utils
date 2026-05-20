@@ -715,7 +715,7 @@ class QrCode
      */
     public function format(string $format): self
     {
-        $validFormats = ['png', 'jpeg', 'gif', 'jpg', 'webp'];
+        $validFormats = ['png', 'jpeg', 'gif', 'jpg', 'webp', 'svg'];
         $format = strtolower($format);
         if (!in_array($format, $validFormats)) {
             throw new Exception('不支持的输出格式: ' . $format);
@@ -1830,6 +1830,205 @@ class QrCode
     }
 
     /**
+     * 生成SVG矢量图二维码
+     *
+     * 基于二维码矩阵直接生成原生SVG，支持圆角模块、Logo嵌入和标签。
+     *
+     * @return string SVG XML字符串
+     * @throws Exception
+     */
+    public function toSvg(): string
+    {
+        if (empty($this->data)) {
+            throw new Exception('二维码数据不能为空');
+        }
+
+        $matrix = $this->encodeWithBacon();
+        $moduleCount = count($matrix);
+        $totalModules = $moduleCount + $this->margin * 2;
+
+        // 计算模块大小
+        $moduleSize = (int)($this->size / $totalModules);
+        $moduleSize = max(2, $moduleSize);
+
+        $qrContentWidth = $moduleSize * $moduleCount;
+        $qrTotalWidth = $moduleSize * $totalModules;
+
+        // 计算标签高度
+        $labelHeight = 0;
+        if ($this->labelOptions !== null && $this->labelOptions->isEnabled()) {
+            $labelHeight = $this->labelOptions->calculateTextHeight($qrTotalWidth)[0];
+        }
+
+        $qrAreaHeight = $qrTotalWidth;
+        $finalSize = $qrAreaHeight + $this->padding * 2;
+        if ($this->labelOptions !== null && $this->labelOptions->isEnabled()) {
+            $finalSize = $qrAreaHeight + $labelHeight + $this->padding * 2;
+        }
+        $finalHeight = $finalSize;
+        $svgWidth = $qrTotalWidth + $this->padding * 2;
+
+        // 计算居中偏移（与 render() 保持一致）
+        $qrX = $this->padding + (int)(($svgWidth - $this->padding * 2 - $qrTotalWidth) / 2);
+        $qrY = $this->padding + (int)(($qrAreaHeight - $qrTotalWidth) / 2);
+
+        $contentX = $qrX + $moduleSize * $this->margin;
+        $contentY = $qrY + $moduleSize * $this->margin;
+
+        $fg = $this->foregroundColor;
+        $bg = $this->backgroundColor;
+
+        // SVG 构建：宽度必须保持为二维码实际宽度（含padding），
+        // 高度才是包含标签后的最终高度
+        $svgHeight = $finalHeight;
+
+        $svg = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        $svg .= '<svg xmlns="http://www.w3.org/2000/svg" version="1.1"';
+        $svg .= ' width="' . $svgWidth . '" height="' . $svgHeight . '"';
+        $svg .= ' viewBox="0 0 ' . $svgWidth . ' ' . $svgHeight . '"';
+        $svg .= ' shape-rendering="crispEdges">' . "\n";
+
+        // 背景
+        $bgHex = '#' . $bg->toHex();
+        $fgHex = '#' . $fg->toHex();
+
+        if (!$this->transparentBackground) {
+            $svg .= '  <rect width="100%" height="100%"';
+            $svg .= ' fill="' . $bgHex . '"/>' . "\n";
+        } else {
+            $svg .= '  <rect width="100%" height="100%" fill="none"/>' . "\n";
+        }
+        $radius = $this->rounded ? ($moduleSize * $this->roundedRadius) : 0;
+        $rx = min($radius, $moduleSize / 2);
+
+        // 收集连续的水平条以优化SVG大小
+        $paths = [];
+        for ($y = 0; $y < $moduleCount; $y++) {
+            $x = 0;
+            while ($x < $moduleCount) {
+                if ($matrix[$y][$x]) {
+                    $startX = $x;
+                    while ($x < $moduleCount && $matrix[$y][$x]) {
+                        $x++;
+                    }
+                    $width = ($x - $startX) * $moduleSize;
+                    $px = $contentX + $startX * $moduleSize;
+                    $py = $contentY + $y * $moduleSize;
+                    if ($rx > 0) {
+                        $svg .= '  <rect x="' . $px . '" y="' . $py . '"';
+                        $svg .= ' width="' . $width . '" height="' . $moduleSize . '"';
+                        $svg .= ' rx="' . $rx . '" ry="' . $rx . '"';
+                        $svg .= ' fill="' . $fgHex . '"/>' . "\n";
+                    } else {
+                        $paths[] = 'M' . $px . ',' . $py . ' h' . $width . ' v' . $moduleSize . ' h-' . $width . ' Z';
+                    }
+                } else {
+                    $x++;
+                }
+            }
+        }
+
+        if (empty($paths) === false && $rx === 0) {
+            $svg .= '  <path d="' . implode(' ', $paths) . '" fill="' . $fgHex . '"/>' . "\n";
+        }
+
+        // Logo（嵌入SVG图片）
+        if ($this->logoPath !== null && file_exists($this->logoPath)) {
+            $logoSize = (int)($qrContentWidth * 0.15);
+            $logoX = $contentX + (int)(($qrContentWidth - $logoSize) / 2);
+            $logoY = $contentY + (int)(($qrContentWidth - $logoSize) / 2);
+            $logoData = base64_encode(file_get_contents($this->logoPath));
+            $logoMime = match (strtolower(pathinfo($this->logoPath, PATHINFO_EXTENSION))) {
+                'png' => 'image/png',
+                'jpg', 'jpeg' => 'image/jpeg',
+                'gif' => 'image/gif',
+                'svg' => 'image/svg+xml',
+                default => 'image/png',
+            };
+            $svg .= '  <image x="' . $logoX . '" y="' . $logoY . '"';
+            $svg .= ' width="' . $logoSize . '" height="' . $logoSize . '"';
+            $svg .= ' href="data:' . $logoMime . ';base64,' . $logoData . '"';
+            $svg .= ' preserveAspectRatio="xMidYMid meet"/>' . "\n";
+        }
+
+        // 标签（支持多行文本和自动换行）
+        if ($this->labelOptions !== null && $this->labelOptions->isEnabled()) {
+            $fontSize = $this->labelOptions->getFontSize();
+            $marginTop = max(2, (int)($this->labelOptions->getMarginTop() / 4));
+            $alignment = $this->labelOptions->getAlignment();
+            $textX = match ($alignment) {
+                'left' => $qrX,
+                'right' => $qrX + $qrTotalWidth,
+                default => (int)($svgWidth / 2),
+            };
+            $textAnchor = match ($alignment) {
+                'left' => 'start',
+                'right' => 'end',
+                default => 'middle',
+            };
+
+            // 获取多行文本（支持 \n 和自动换行）
+            $lines = $this->labelOptions->getLines($qrTotalWidth);
+            $lineHeight = $this->labelOptions->getLineHeight();
+            // 标签Y坐标与 PNG 渲染器保持一致：紧贴二维码底部，间距最小化
+            $labelY = $qrY + $qrTotalWidth + $marginTop;
+
+            $svg .= '  <text x="' . $textX . '" y="' . $labelY . '"';
+            $svg .= ' text-anchor="' . $textAnchor . '" dominant-baseline="middle"';
+            $svg .= ' font-family="sans-serif" font-size="' . $fontSize . '"';
+            $svg .= ' fill="' . $fgHex . '">' . "\n";
+
+            foreach ($lines as $index => $line) {
+                $dy = $index === 0 ? 0 : $lineHeight;
+                $svg .= '    <tspan x="' . $textX . '" dy="' . $dy . '">' . htmlspecialchars($line) . '</tspan>' . "\n";
+            }
+
+            $svg .= '  </text>' . "\n";
+        }
+
+        $svg .= '</svg>';
+
+        return $svg;
+    }
+
+    /**
+     * 保存SVG到文件
+     *
+     * @param string $filename 文件路径
+     * @return bool
+     * @throws Exception
+     */
+    public function saveSvg(string $filename): bool
+    {
+        $directory = dirname($filename);
+        if (!is_dir($directory) && !mkdir($directory, 0755, true)) {
+            throw new Exception('目录不可写: ' . $directory);
+        }
+
+        $svg = $this->toSvg();
+        return file_put_contents($filename, $svg) !== false;
+    }
+
+    /**
+     * 输出SVG到浏览器
+     *
+     * @return void
+     * @throws Exception
+     */
+    public function outputSvg(): void
+    {
+        $svg = $this->toSvg();
+
+        header('Content-Type: image/svg+xml');
+        header('Content-Length: ' . strlen($svg));
+        header('Content-Disposition: inline; filename="qrcode.svg"');
+        header('Cache-Control: no-cache, must-revalidate');
+        header('Expires: Sat, 1 Jan 2000 00:00:00 GMT');
+
+        echo $svg;
+    }
+
+    /**
      * 获取二维码的Base64编码
      *
      * @return string Base64编码
@@ -1840,8 +2039,13 @@ class QrCode
             'png' => 'image/png',
             'jpeg', 'jpg' => 'image/jpeg',
             'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
             default => 'image/png'
         };
+
+        if ($this->format === 'svg') {
+            return 'data:' . $mimeType . ';base64,' . base64_encode($this->toSvg());
+        }
 
         return 'data:' . $mimeType . ';base64,' . base64_encode($this->toString());
     }
