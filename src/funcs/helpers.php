@@ -319,11 +319,14 @@ if (! function_exists('img_to_gray')) {
                     default => imagejpeg($image, null, $quality),
                 };
             }
-
+            imagedestroy($image);
             return $success;
 
-        } catch (Exception) {
-            throw;
+        } catch (Exception $e) {
+            if (isset($image) && is_resource($image)) {
+                imagedestroy($image);
+            }
+            throw $e;
         }
     }
 }
@@ -731,7 +734,7 @@ if (! function_exists('is_json')) {
             if ((! empty($data) && is_object($data)) || (is_array($data) && ! empty($data))) {
                 return true;
             }
-        } catch (Exception) {
+        } catch (Exception $e) {
         }
 
         return false;
@@ -1139,7 +1142,7 @@ if (! function_exists('set_protected_value')) {
         $reflectionClass = new ReflectionClass($obj);
         try {
             $reflectionClass->setStaticPropertyValue($filed, $value);
-        } catch (Exception) {
+        } catch (Exception $e) {
             $reflectionProperty = $reflectionClass->getProperty($filed);
             $reflectionProperty->setValue($obj, $value);
         }

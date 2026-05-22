@@ -368,7 +368,7 @@ class DateTools
     {
         try {
             return (new DateTimeImmutable($iso))->getTimestamp();
-        } catch (Exception) {
+        } catch (Exception $e) {
             return false;
         }
     }

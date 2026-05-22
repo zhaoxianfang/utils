@@ -82,7 +82,7 @@ class QrCodeHelper
                 }
             }
             return 40;
-        } catch (Exception) {
+        } catch (Exception $e) {
             return 1;
         }
     }
