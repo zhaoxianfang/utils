@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 华为开发者联盟 https://developer.huawei.com/consumer/cn/doc/development/HMSCore-Guides/dev-process-0000001050123523
  * api接口文档: https://developer.huawei.com/consumer/cn/doc/development/HMSCore-References/server-api-api-0000001050123599

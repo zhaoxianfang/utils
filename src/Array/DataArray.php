@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Array;
 
 use ArrayAccess;
@@ -15,7 +17,6 @@ use Traversable;
 use RuntimeException;
 use InvalidArgumentException;
 use Stringable;
-use Serializable;
 use RecursiveIteratorIterator;
 
 /**
@@ -30,15 +31,14 @@ use RecursiveIteratorIterator;
  * echo $data['user.name']; // John (通过数组访问)
  * echo $data->get('list.*.name'); // 通配符查找
  *
- * @see https://weisifang.com/docs/doc/6_203 DataArray使用文档
+ * @see https://yoc.cn/docs/doc/6_203 DataArray使用文档
  */
 class DataArray implements
     ArrayAccess,
     Countable,
     IteratorAggregate,
     JsonSerializable,
-    Stringable,
-    Serializable
+    Stringable
 {
     /**
      * 存储数据的数组
@@ -354,38 +354,8 @@ class DataArray implements
     }
 
     /*****************************************************************
-     * Serializable 接口实现
+     * 序列化魔术方法
      *****************************************************************/
-
-    /**
-     * 序列化对象
-     *
-     * @return string
-     */
-    public function serialize(): string
-    {
-        return serialize([
-            'data' => $this->data,
-            'readOnly' => $this->readOnly,
-            'delimiter' => $this->delimiter,
-            'wildcardSearchDepth' => $this->wildcardSearchDepth
-        ]);
-    }
-
-    /**
-     * 反序列化对象
-     *
-     * @param string $data
-     */
-    public function unserialize(string $data): void
-    {
-        $unserialized = unserialize($data);
-
-        $this->data = $unserialized['data'] ?? [];
-        $this->readOnly = $unserialized['readOnly'] ?? false;
-        $this->delimiter = $unserialized['delimiter'] ?? '.';
-        $this->wildcardSearchDepth = $unserialized['wildcardSearchDepth'] ?? 50;
-    }
 
     /**
      * PHP 8.1+ 序列化魔术方法
@@ -1503,7 +1473,7 @@ class DataArray implements
      * @param int $mode 过滤模式
      * @return static 新的DataArray实例
      */
-    public function filter(callable $callback = null, int $mode = 0): static
+    public function filter(?callable $callback = null, int $mode = 0): static
     {
         $callback = $callback ?: fn($value) => (bool)$value;
         $filtered = array_filter($this->data, $callback, $mode);
@@ -1823,7 +1793,7 @@ class DataArray implements
      * @param callable|null $default 条件为假时执行的回调
      * @return static 返回当前实例以支持链式操作
      */
-    public function when(mixed $condition, callable $callback, callable $default = null): static
+    public function when(mixed $condition, callable $callback, ?callable $default = null): static
     {
         if ($condition) {
             $callback($this, $condition);
@@ -1842,7 +1812,7 @@ class DataArray implements
      * @param callable|null $default 条件为真时执行的回调
      * @return static 返回当前实例以支持链式操作
      */
-    public function unless(mixed $condition, callable $callback, callable $default = null): static
+    public function unless(mixed $condition, callable $callback, ?callable $default = null): static
     {
         return $this->when(!$condition, $callback, $default);
     }
@@ -2054,7 +2024,7 @@ class DataArray implements
      * @param callable|null $callback 排序回调函数
      * @return static 新的DataArray实例
      */
-    public function top(int $count, callable $callback = null): static
+    public function top(int $count, ?callable $callback = null): static
     {
         $sorted = $callback ? $this->usort($callback) : $this->sort();
         return $sorted->slice(0, $count);
@@ -2125,7 +2095,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return float 总和
      */
-    public function sum(callable|string $callback = null): float
+    public function sum(callable|string|null $callback = null): float
     {
         if ($callback) {
             if (is_string($callback)) {
@@ -2143,7 +2113,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return float 平均值
      */
-    public function avg(callable|string $callback = null): float
+    public function avg(callable|string|null $callback = null): float
     {
         $count = count($this->data);
         if ($count === 0) {
@@ -2159,7 +2129,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return mixed 最大值
      */
-    public function max(callable|string $callback = null): mixed
+    public function max(callable|string|null $callback = null): mixed
     {
         if ($callback) {
             if (is_string($callback)) {
@@ -2180,7 +2150,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return mixed 最小值
      */
-    public function min(callable|string $callback = null): mixed
+    public function min(callable|string|null $callback = null): mixed
     {
         if ($callback) {
             if (is_string($callback)) {
@@ -2201,7 +2171,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return static 新的DataArray实例，包含值和出现次数
      */
-    public function frequency(callable|string $callback = null): static
+    public function frequency(callable|string|null $callback = null): static
     {
         if ($callback) {
             if (is_string($callback)) {
@@ -2223,7 +2193,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return float 中位数
      */
-    public function median(callable|string $callback = null): float
+    public function median(callable|string|null $callback = null): float
     {
         $values = $this->getNumericValues($callback);
 
@@ -2248,7 +2218,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return array 众数数组
      */
-    public function mode(callable|string $callback = null): array
+    public function mode(callable|string|null $callback = null): array
     {
         $frequency = $this->frequency($callback)->toArray();
 
@@ -2266,7 +2236,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
      * @return float 标准差
      */
-    public function stddev(callable|string $callback = null): float
+    public function stddev(callable|string|null $callback = null): float
     {
         $values = $this->getNumericValues($callback);
 
@@ -2290,7 +2260,7 @@ class DataArray implements
      * @param callable|string|null $callback 回调函数或字段名
      * @return array 数值数组
      */
-    protected function getNumericValues(callable|string $callback = null): array
+    protected function getNumericValues(callable|string|null $callback = null): array
     {
         if ($callback) {
             if (is_string($callback)) {
@@ -2315,7 +2285,7 @@ class DataArray implements
      * @param string|null $delimiter 键名分隔符
      * @return static 新的DataArray实例
      */
-    public function flatten(string $delimiter = null): static
+    public function flatten(?string $delimiter = null): static
     {
         $delimiter = $delimiter ?: $this->delimiter;
         $result = [];
@@ -2350,7 +2320,7 @@ class DataArray implements
      * @param string|null $delimiter 键名分隔符
      * @return static 新的DataArray实例
      */
-    public function unflatten(string $delimiter = null): static
+    public function unflatten(?string $delimiter = null): static
     {
         $delimiter = $delimiter ?: $this->delimiter;
         $result = [];
@@ -3210,7 +3180,7 @@ class DataArray implements
 
         $result = [];
         for ($i = 0; $i < $count; $i++) {
-            $random = mt_rand() / mt_getrandmax() * $totalWeight;
+            $random = random_int(0, PHP_INT_MAX) / PHP_INT_MAX * $totalWeight;
             $current = 0;
 
             foreach ($weights as $key => $weight) {

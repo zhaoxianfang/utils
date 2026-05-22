@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace zxf\Utils\Cache;
 
-use InvalidArgumentException;
 use RuntimeException;
 
 /**
@@ -96,7 +95,7 @@ class FileCache
             return $default;
         }
 
-        $data = $this->useSerialize ? @unserialize($content) : json_decode($content, true);
+        $data = $this->useSerialize ? unserialize($content, ['allowed_classes' => false]) : json_decode($content, true);
         if (!is_array($data) || !array_key_exists('expires', $data) || !array_key_exists('value', $data)) {
             return $default;
         }

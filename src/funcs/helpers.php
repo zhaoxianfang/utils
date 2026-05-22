@@ -243,7 +243,6 @@ if (! function_exists('img_to_gray')) {
         }
 
         $mimeType = $imageInfo['mime'];
-        $extension = pathinfo($imgFile, PATHINFO_EXTENSION);
 
         // 根据 MIME 类型创建图片资源
         $image = match ($mimeType) {
@@ -321,14 +320,10 @@ if (! function_exists('img_to_gray')) {
                 };
             }
 
-            imagedestroy($image);
             return $success;
 
-        } catch (Exception $e) {
-            if (isset($image) && is_resource($image)) {
-                imagedestroy($image);
-            }
-            throw $e;
+        } catch (Exception) {
+            throw;
         }
     }
 }
@@ -736,7 +731,7 @@ if (! function_exists('is_json')) {
             if ((! empty($data) && is_object($data)) || (is_array($data) && ! empty($data))) {
                 return true;
             }
-        } catch (Exception $e) {
+        } catch (Exception) {
         }
 
         return false;
@@ -1144,9 +1139,8 @@ if (! function_exists('set_protected_value')) {
         $reflectionClass = new ReflectionClass($obj);
         try {
             $reflectionClass->setStaticPropertyValue($filed, $value);
-        } catch (Exception $err) {
+        } catch (Exception) {
             $reflectionProperty = $reflectionClass->getProperty($filed);
-            $reflectionProperty->setAccessible(true);
             $reflectionProperty->setValue($obj, $value);
         }
     }
@@ -2306,7 +2300,7 @@ if (! function_exists('base64_to_image')) {
                 // 检查是否有该文件夹，如果没有就创建，并给予最高权限
                 create_dir_or_filepath($new_file);
             }
-            $new_file = $new_file.md5(time().mt_rand(1, 1000000)).".{$type}";
+            $new_file = $new_file.md5(time().random_int(1, 1000000)).".{$type}";
             if (file_put_contents($new_file, base64_decode(str_replace($result[1], '', $base64_image_content)))) {
                 return ltrim($new_file, '.');
             } else {
@@ -2319,14 +2313,20 @@ if (! function_exists('base64_to_image')) {
 }
 
 if (! function_exists('show_img')) {
-    /*
+    /**
      * 页面直接输出图片
+     *
+     * @param string $imgFile 图片文件路径
      */
-    #[NoReturn]
-    function show_img($imgFile = ''): void
+    function show_img(string $imgFile = ''): never
     {
         header('Content-type:image/png');
-        exit(file_get_contents($imgFile));
+        $content = @file_get_contents($imgFile);
+        if ($content === false) {
+            throw new RuntimeException("无法读取图片文件: {$imgFile}");
+        }
+        echo $content;
+        exit;
     }
 }
 
@@ -3156,7 +3156,7 @@ if (! function_exists('str_rand')) {
         $chars = 'abcdefghijkmnpqrstuvwxyzACDEFGHIJKLMNOPQRSTUVWXYZ12345679'.$tack;
         $str = '';
         for ($i = 0; $i < $length; $i++) {
-            $str .= $chars[mt_rand(0, strlen($chars) - 1)];
+            $str .= $chars[random_int(0, strlen($chars) - 1)];
         }
 
         return $str;
@@ -3168,15 +3168,17 @@ if (! function_exists('download_url_file')) {
     /**
      * 下载url文件
      */
-    #[NoReturn]
-    function download_url_file($url = ''): void
+    function download_url_file(string $url = ''): never
     {
-        $filename = ! empty($url) ? $url : (! empty($_GPC['url']) ? $_GPC['url'] : '');
-        $title = substr($filename, strrpos($filename, '/') + 1);
+        $filename = ! empty($url) ? $url : (! empty($_GET['url'] ?? '') ? $_GET['url'] : '');
+        $title = substr($filename, (int) strrpos($filename, '/') + 1);
         $file = fopen($filename, 'rb');
+        if ($file === false) {
+            throw new RuntimeException("无法打开文件: {$filename}");
+        }
         header('Content-type:application/octet-stream');
         header('Accept-Ranges:bytes');
-        header("Content-Disposition:attachment;filename=$title");
+        header("Content-Disposition:attachment;filename={$title}");
         while (! feof($file)) {
             echo fread($file, 8192);
             ob_flush();

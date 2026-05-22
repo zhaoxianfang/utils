@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace zxf\Utils\Date;
 
 use DateTime;

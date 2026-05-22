@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * MdToH5 - Markdown to HTML5 转换器
  *
@@ -248,12 +250,11 @@ class MdToH5
             return '';
         }
 
+        $cacheKey = $this->options['cache_enabled'] ? md5($markdown) : null;
+
         // 检查缓存
-        if ($this->options['cache_enabled']) {
-            $cacheKey = md5($markdown);
-            if (isset($this->cache[$cacheKey]) && (time() - $this->cache[$cacheKey]['time']) < $this->options['cache_ttl']) {
-                return $this->cache[$cacheKey]['html'];
-            }
+        if ($cacheKey !== null && isset($this->cache[$cacheKey]) && (time() - $this->cache[$cacheKey]['time']) < $this->options['cache_ttl']) {
+            return $this->cache[$cacheKey]['html'];
         }
 
         try {
@@ -283,7 +284,7 @@ class MdToH5
             $html = $this->cleanupWhitespace($html);
 
             // 存储到缓存
-            if ($this->options['cache_enabled']) {
+            if ($cacheKey !== null) {
                 $this->cache[$cacheKey] = [
                     'html' => $html,
                     'time' => time()

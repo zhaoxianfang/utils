@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * QQ互联  https://connect.qq.com/index.html
  * api接口文档

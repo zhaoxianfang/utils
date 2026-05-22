@@ -1,0 +1,177 @@
+<?php
+
+/**
+ * ============================================================================
+ * 重试机制封装
+ * ============================================================================
+ *
+ * 支持指数退避、自定义条件重试、抖动策略的通用重试工具。
+ *
+ * @package     zxf\Utils\Support
+ * @author      zxf\Utils
+ * @version     1.0.0
+ * @license     MIT
+ * @link        https://github.com/zhaoxianfang/utils
+ *
+ * @example
+ * $result = Retry::make(fn () => fetchData())
+ *     ->times(3)
+ *     ->sleep(100)
+ *     ->backoff(2)
+ *     ->run();
+ */
+
+declare(strict_types=1);
+
+namespace zxf\Utils\Support;
+
+use Closure;
+use Throwable;
+
+/**
+ * 重试机制封装
+ *
+ * 支持指数退避、自定义条件重试、抖动策略
+ *
+ * @example
+ * $result = Retry::make(fn () => fetchData())
+ *     ->times(3)
+ *     ->sleep(100)
+ *     ->backoff(2)
+ *     ->run();
+ */
+final class Retry
+{
+    private Closure $callback;
+
+    private int $maxAttempts = 3;
+
+    private int $sleepMilliseconds = 100;
+
+    private float $backoffMultiplier = 1.0;
+
+    private bool $useJitter = false;
+
+    private ?Closure $retryIf = null;
+
+    private ?Closure $onFailure = null;
+
+    private function __construct(Closure $callback)
+    {
+        $this->callback = $callback;
+    }
+
+    /**
+     * 创建重试实例
+     */
+    public static function make(Closure $callback): self
+    {
+        return new self($callback);
+    }
+
+    /**
+     * 设置最大重试次数
+     */
+    public function times(int $maxAttempts): self
+    {
+        $this->maxAttempts = max(1, $maxAttempts);
+        return $this;
+    }
+
+    /**
+     * 设置基础等待时间（毫秒）
+     */
+    public function sleep(int $milliseconds): self
+    {
+        $this->sleepMilliseconds = max(0, $milliseconds);
+        return $this;
+    }
+
+    /**
+     * 设置指数退避倍数
+     */
+    public function backoff(float $multiplier): self
+    {
+        $this->backoffMultiplier = max(1.0, $multiplier);
+        return $this;
+    }
+
+    /**
+     * 启用随机抖动，避免惊群效应
+     */
+    public function jitter(bool $enable = true): self
+    {
+        $this->useJitter = $enable;
+        return $this;
+    }
+
+    /**
+     * 自定义重试条件
+     */
+    public function when(Closure $callback): self
+    {
+        $this->retryIf = $callback;
+        return $this;
+    }
+
+    /**
+     * 失败时的回调
+     */
+    public function onFailure(Closure $callback): self
+    {
+        $this->onFailure = $callback;
+        return $this;
+    }
+
+    /**
+     * 执行重试逻辑
+     */
+    public function run(): mixed
+    {
+        $attempts = 0;
+        $lastException = null;
+
+        while ($attempts < $this->maxAttempts) {
+            $attempts++;
+
+            try {
+                $result = ($this->callback)($attempts);
+
+                if ($this->retryIf !== null && ($this->retryIf)($result, $attempts)) {
+                    if ($attempts < $this->maxAttempts) {
+                        $this->sleep($attempts);
+                    }
+                    continue;
+                }
+
+                return $result;
+            } catch (Throwable $e) {
+                $lastException = $e;
+
+                if ($this->onFailure !== null) {
+                    ($this->onFailure)($e, $attempts);
+                }
+
+                if ($attempts < $this->maxAttempts) {
+                    $this->doSleep($attempts);
+                }
+            }
+        }
+
+        throw $lastException ?? new \RuntimeException('Retry failed after ' . $this->maxAttempts . ' attempts');
+    }
+
+    /**
+     * 计算并执行等待
+     */
+    private function doSleep(int $attempt): void
+    {
+        $delay = $this->sleepMilliseconds * ($this->backoffMultiplier ** ($attempt - 1));
+
+        if ($this->useJitter) {
+            $delay = (int) ($delay * (0.5 + random_int(0, 1000) / 2000));
+        }
+
+        usleep(max(0, $delay) * 1000);
+    }
+}

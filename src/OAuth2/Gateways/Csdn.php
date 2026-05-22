@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * CSDN
  * api接口文档

@@ -2,14 +2,13 @@
 
 declare(strict_types=1);
 
-namespace zxf\Util;
+namespace zxf\Utils\Files;
 
 use FilesystemIterator;
 use RecursiveIteratorIterator;
 use RecursiveDirectoryIterator;
 use RecursiveCallbackFilterIterator;
 use RuntimeException;
-use InvalidArgumentException;
 use SplFileInfo;
 use Generator;
 use JsonException;
@@ -30,11 +29,11 @@ use ZipArchive;
  * 9. 文件上传和下载功能
  * 10. 流式文件操作
  *
- * @package zxf\Util
+ * @package zxf\Utils\Files
  * @version 3.0
  * @author AI Assistant
  */
-class Files
+class File
 {
     /**
      * 文件操作模式常量
@@ -352,10 +351,10 @@ class Files
      * @param string $filePath 序列化文件路径
      * @return mixed 反序列化后的数据
      */
-    public static function readSerializedFile(string $filePath): mixed
+    public static function readSerializedFile(string $filePath, array|false $allowedClasses = false): mixed
     {
         $content = self::readFile($filePath);
-        $data = unserialize($content, ['allowed_classes' => true]);
+        $data = unserialize($content, ['allowed_classes' => $allowedClasses]);
 
         if ($data === false && $content !== serialize(false)) {
             throw new RuntimeException(sprintf('反序列化失败: "%s"', $filePath));
@@ -1462,7 +1461,7 @@ class Files
      * @param string|null $backupName 备份名称
      * @return string 备份路径
      */
-    public static function backup(string $source, string $backupDir, string $backupName = null): string
+    public static function backup(string $source, string $backupDir, ?string $backupName = null): string
     {
         $source = self::normalizePath($source);
         $backupDir = self::normalizePath($backupDir);

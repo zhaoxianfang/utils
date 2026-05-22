@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 小米开放平台 https://dev.mi.com/console/doc/detail?pId=711
  * api接口文档: https://dev.mi.com/console/doc/detail?pId=707

@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 快手开放平台 https://open.kuaishou.com/
  * api接口文档: https://open.kuaishou.com/platform/docs/api-overview

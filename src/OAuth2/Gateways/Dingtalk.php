@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 钉钉开放平台 https://open.dingtalk.com/
  * api接口文档: https://open.dingtalk.com/document/orgapp-server/obtain-identity-credentials

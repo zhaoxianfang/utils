@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 阿里云
  * api接口文档

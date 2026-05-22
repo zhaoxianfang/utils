@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Http;
 
 use zxf\Utils\Xml\XML2Array;
@@ -9,59 +11,55 @@ use zxf\Utils\Xml\XML2Array;
  */
 class Request
 {
-    /**
-     * @var object 对象实例
-     */
-    protected static $instance;
+    protected static ?self $instance = null;
 
     private ?string $contentType = '';
 
-    private mixed $overridden = [];
+    private array $overridden = [];
 
-    private mixed $get = [];
+    private array $get = [];
 
-    private mixed $post = [];
+    private array $post = [];
 
-    private mixed $input = [];
+    private array $input = [];
 
-    /**
-     * 接收到的原始数据
-     *
-     * @var mixed|array
-     */
-    private static mixed $rawInput = null;
+    private static ?string $rawInput = null;
 
-    private mixed $files = [];
+    private array $files = [];
 
-    private mixed $sessions = [];
+    private array $sessions = [];
 
-    private mixed $cookies = [];
+    private array $cookies = [];
 
-    private mixed $env = [];
+    private array $env = [];
 
-    private mixed $servers = [];
+    private array $servers = [];
 
-    private mixed $headers = [];
+    private array $headers = [];
 
-    private mixed $protocol;
+    private ?string $protocol = null;
 
-    private mixed $method;
+    private ?string $method = null;
 
-    private mixed $query;
+    private ?string $query = null;
 
-    private mixed $userAgent;
+    private ?string $userAgent = null;
 
-    private mixed $port;
+    private ?int $port = null;
+
+    private array $resolvers = [];
+
+    private array $proxies = [];
 
     public function __construct()
     {
         $this->init();
     }
 
-    public static function instance($refresh = false)
+    public static function instance(bool $refresh = false): static
     {
-        if (! isset(self::$instance) || is_null(self::$instance) || empty(self::$instance) || $refresh) {
-            self::$instance = new static;
+        if (self::$instance === null || $refresh) {
+            self::$instance = new static();
         }
 
         return self::$instance;
@@ -108,7 +106,7 @@ class Request
         $this->protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : ($this->servers['SERVER_PROTOCOL'] ?? 'http');
 
         // 获取请求的端口号信息（如果是HTTP默认端口80，HTTPS默认端口443）
-        $this->port = $this->port();
+        $this->port = (int) ($_SERVER['SERVER_PORT'] ?? ($_SERVER['X_FORWARDED_PORT'] ?? 80));
 
         // 获取请求头信息
         if (! function_exists('apache_request_headers')) {
@@ -150,7 +148,7 @@ class Request
      *                             true:返回数据类型；
      *                             false:只返回请求数据；
      */
-    public function getRawInput(bool $returnOriginal = true, bool $getDataType = false)
+    public function getRawInput(bool $returnOriginal = true, bool $getDataType = false): array|string|null
     {
         $rawInput = $this->getRequestRawContent();
 
@@ -158,12 +156,12 @@ class Request
         if ($returnOriginal) {
             return $rawInput;
         }
-        if (! empty($this->input)) {
+        if ($this->input !== []) {
             return $this->input;
         }
 
         // 如果未获取到原始数据，返回 null
-        if (empty($rawInput) && empty($this->get) && empty($this->post) && empty($this->files)) {
+        if (($rawInput === null || $rawInput === '') && $this->get === [] && $this->post === [] && $this->files === []) {
             return [];
         }
 
@@ -293,9 +291,9 @@ class Request
      *
      * @return array
      */
-    public function body()
+    public function body(): array
     {
-        return $this->input();
+        return (array) $this->input();
     }
 
     /**
@@ -303,12 +301,12 @@ class Request
      *
      * @return bool
      */
-    public function overridden()
+    public function overridden(): bool
     {
-        return ! empty($this->overridden);
+        return $this->overridden !== [];
     }
 
-    private function parseData(array $data, ?string $key = null, mixed $default = null)
+    private function parseData(array $data, int|string|null $key = null, mixed $default = null): mixed
     {
         if ($key === null) {
             return $data;
@@ -404,7 +402,7 @@ class Request
      * @param  mixed  $default  默认值
      * @return string
      */
-    public function put(?string $key = null, mixed $default = null)
+    public function put(?string $key = null, mixed $default = null): mixed
     {
         return $this->method() === 'PUT' ? $this->post($key, $default) : $default;
     }
@@ -417,7 +415,7 @@ class Request
      * @param  mixed  $default  默认值
      * @return string
      */
-    public function delete(?string $key = null, mixed $default = null)
+    public function delete(?string $key = null, mixed $default = null): mixed
     {
         return $this->method() === 'DELETE' ? $this->post($key, $default) : $default;
     }
@@ -477,7 +475,7 @@ class Request
      * @param  string  $default  默认值
      * @return string
      */
-    public function server(?string $key = null, mixed $default = null)
+    public function server(?string $key = null, mixed $default = null): mixed
     {
         return $this->parseData($this->servers, $key, $default);
     }
@@ -500,9 +498,9 @@ class Request
      * @param  mixed  $default  默认值
      * @return string
      */
-    public function input(?string $key = null, mixed $default = null)
+    public function input(?string $key = null, mixed $default = null): mixed
     {
-        return $this->parseData((array) $this->input, $key, $default);
+        return $this->parseData($this->input, $key, $default);
     }
 
     /**
@@ -531,10 +529,10 @@ class Request
      * @param  array|string  $keys  The keys to select from the input.
      * @return array
      */
-    public function only(array|string $keys)
+    public function only(array|string $keys): array
     {
         return array_intersect_key(
-            $this->input(), array_flip((array) $keys)
+            (array) $this->input(), array_flip((array) $keys)
         );
     }
 
@@ -552,10 +550,10 @@ class Request
      * @param  array|string  $keys  要从输入中忽略的键。
      * @return array
      */
-    public function except(array|string $keys)
+    public function except(array|string $keys): array
     {
         return array_diff_key(
-            $this->input(), array_flip((array) $keys)
+            (array) $this->input(), array_flip((array) $keys)
         );
     }
 
@@ -664,7 +662,7 @@ class Request
     {
         $format = (! empty($format) && is_string($format)) ? $format : 'Y-m-d H:i:s';
 
-        return date($format, $this->server('REQUEST_TIME'));
+        return date($format, (int) $this->server('REQUEST_TIME'));
     }
 
     /**
@@ -836,7 +834,7 @@ class Request
      * @param  string  $default  默认值
      * @return string
      */
-    public function language($default = null)
+    public function language(?string $default = null): mixed
     {
         return $this->parseData($this->languages(), 0, $default);
     }
@@ -875,7 +873,7 @@ class Request
      * @param  string|null  $default  默认值
      * @return string
      */
-    public function charset(?string $default = null)
+    public function charset(?string $default = null): mixed
     {
         return $this->parseData($this->charsets(), 0, $default);
     }
@@ -1003,8 +1001,8 @@ class Request
         foreach ($ips as $ip) {
             if (
                 filter_var($ip, FILTER_VALIDATE_IP,
-                    FILTER_FLAG_IPV4 || FILTER_FLAG_IPV6 ||
-                    FILTER_FLAG_NO_PRIV_RANGE || FILTER_FLAG_NO_RES_RANGE)
+                    FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6 |
+                    FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
             ) {
                 return $ip;
             }
@@ -1040,11 +1038,10 @@ class Request
      * @param  bool  $decorated  前缀为：
      * @return string
      */
-    public function port(bool $decorated = false)
+    public function port(bool $decorated = false): string|int
     {
-        $port = $_SERVER['SERVER_PORT'] ?? ($_SERVER['X_FORWARDED_PORT'] ?? 80);
-        $this->port = $port;
+        $port = $this->port ?? (int) ($_SERVER['SERVER_PORT'] ?? ($_SERVER['X_FORWARDED_PORT'] ?? 80));
 
-        return $decorated ? (in_array($port, [80, 443]) ? '' : ":{$port}") : $port;
+        return $decorated ? (in_array((int) $port, [80, 443], true) ? '' : ":{$port}") : (int) $port;
     }
 }

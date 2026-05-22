@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 蚂蚁金服 https://openhome.alipay.com
  * 支付宝第三方应用授权文档

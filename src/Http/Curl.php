@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 // +---------------------------------------------------------------------
 // | Curl
 // +---------------------------------------------------------------------
@@ -20,7 +22,7 @@ use zxf\Utils\Data\Collection;
 
 class Curl
 {
-    private $ch = null; // curl 句柄
+    private ?\CurlHandle $ch = null; // curl 句柄
 
     private array|string|null $httpParams = null;
 
@@ -42,13 +44,13 @@ class Curl
     private array $respObjData = [];
 
     private array $defaultParams = [
-        CURLOPT_RETURNTRANSFER => true, // 返回响应内容，而不是直接输出; 获取的信息以文件流的形式返回
+        CURLOPT_RETURNTRANSFER => true, // 返回响应内容，而不是直接输出
         CURLOPT_HEADER => true, // 返回头部信息
-        CURLOPT_SSL_VERIFYPEER => false, // 对认证证书来源的检查
-        CURLOPT_SSL_VERIFYHOST => false, // 从证书中检查SSL加密算法是否存在
+        CURLOPT_SSL_VERIFYPEER => true, // 默认启用 SSL 证书验证（安全）
+        CURLOPT_SSL_VERIFYHOST => 2, // 验证证书中的主机名
         CURLOPT_TIMEOUT => 10, // 设置超时限制防止死循环
-        CURLOPT_FOLLOWLOCATION => true, // 启用时会将服务器服务器返回的"Location: "放在header中递归的返回给服务器
-        CURLOPT_AUTOREFERER => true, // 自动设置Referer
+        CURLOPT_FOLLOWLOCATION => true, // 启用时会将服务器返回的 "Location:" 递归处理
+        CURLOPT_AUTOREFERER => true, // 自动设置 Referer
         CURLOPT_MAXREDIRS => 5, // 最大跳转次数
         CURLOPT_CONNECTTIMEOUT => 10, // 设置连接等待时间
     ];
@@ -127,13 +129,13 @@ class Curl
      *
      *
      * @param  array  $options  参数
-     * @return Curl
+     * @return static
      *
      * @throws Exception
      */
-    public static function instance(array $options = [], bool $responseObject = false)
+    public static function instance(array $options = [], bool $responseObject = false): static
     {
-        if (! isset(self::$instance) || is_null(self::$instance)) {
+        if (self::$instance === null) {
             self::$instance = new static($options, $responseObject);
         }
 
@@ -180,6 +182,27 @@ class Curl
 
         curl_setopt($this->ch, CURLOPT_HTTPHEADER, $curlHeader);
         curl_setopt($this->ch, CURLINFO_HEADER_OUT, true);
+
+        return $this;
+    }
+
+    /**
+     * 设置 SSL 验证
+     *
+     * 生产环境强烈建议保持验证开启（默认）
+     *
+     * @param bool $verify 是否验证 SSL 证书
+     * @param int $verifyHost 验证级别: 0=不验证, 1=存在即可(不安全), 2=验证匹配(推荐)
+     */
+    public function verifySsl(bool $verify = true, int $verifyHost = 2): self
+    {
+        $this->defaultParams[CURLOPT_SSL_VERIFYPEER] = $verify;
+        $this->defaultParams[CURLOPT_SSL_VERIFYHOST] = $verify ? $verifyHost : 0;
+
+        if ($this->ch instanceof \CurlHandle) {
+            curl_setopt($this->ch, CURLOPT_SSL_VERIFYPEER, $verify);
+            curl_setopt($this->ch, CURLOPT_SSL_VERIFYHOST, $verify ? $verifyHost : 0);
+        }
 
         return $this;
     }

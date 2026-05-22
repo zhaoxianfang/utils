@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Http;
 
 use Exception;
@@ -10,36 +12,30 @@ use zxf\Utils\Xml\Array2XML;
  */
 class Response
 {
-    /**
-     * @var object 对象实例
-     */
-    protected static $instance;
+    protected static ?self $instance = null;
 
     private array $headers = [];
 
     private mixed $body;
 
-    private mixed $statusCode = 200;
+    private int $statusCode = 200;
 
-    public function __construct($body = null, $statusCode = 200)
+    public function __construct(mixed $body = null, int $statusCode = 200)
     {
         $this->body = $body;
         $this->statusCode = $statusCode;
     }
 
-    public static function instance($refresh = false)
+    public static function instance(bool $refresh = false): static
     {
-        if (! isset(self::$instance) || is_null(self::$instance) || $refresh) {
-            self::$instance = new static;
+        if (self::$instance === null || $refresh) {
+            self::$instance = new static();
         }
 
         return self::$instance;
     }
 
-    //  设置响应头
-    // $response->setHeader('Content-Type', 'application/json');
-    // $response->setHeader('Access-Control-Allow-Origin', '*');
-    public function setHeader(mixed $name, mixed $value)
+    public function setHeader(array|string $name, mixed $value = null): self
     {
         if (is_array($name)) {
             $this->headers = array_merge($this->headers, $name);
@@ -56,30 +52,24 @@ class Response
         return $this->headers[$name] ?? null;
     }
 
-    //  获取所有响应头
-    public function getHeaders()
+    public function getHeaders(): array
     {
         return $this->headers;
     }
 
-    //  设置响应体
-    // $response->setBody('{"message": "Hello, world!"}');
-    // $response->setBody(''<h1>Hello, World!</h1>'');
-    public function setBody(mixed $body)
+    public function setBody(mixed $body): self
     {
         $this->body = $body;
 
         return $this;
     }
 
-    //  获取响应体
-    public function getBody()
+    public function getBody(): mixed
     {
         return $this->body;
     }
 
-    //  设置状态码
-    public function setStatusCode(int $statusCode = 200)
+    public function setStatusCode(int $statusCode = 200): self
     {
         $this->statusCode = $statusCode;
 
@@ -96,49 +86,41 @@ class Response
      * 重定向
      *
      * @param  bool  $permanent  是否永久重定向
-     * @return $this
+     * @return self
      */
-    public function redirect(string $url, bool $permanent = false)
+    public function redirect(string $url, bool $permanent = false): self
     {
         $this->setHeader('Location', $url);
-        if ($permanent) {
-            $this->setStatusCode(301);
-        } else {
-            $this->setStatusCode(302);
-        }
+        $this->setStatusCode($permanent ? 301 : 302);
 
         return $this;
     }
 
-    //  下载文件
-    public function download(string $file = '', mixed $filename = null)
+    public function download(string $file = '', ?string $filename = null): never
     {
-        if (! $filename) {
-            $filename = basename($file);
-        }
-        // 检查文件是否存在
-        if (file_exists($file)) {
-            // 设置头信息，告诉浏览器该文件为下载文件
-            header('Content-Description: File Transfer');
-            header('Content-Type: application/octet-stream');
-            header('Content-Disposition: attachment; filename='.$filename);
-            header('Content-Transfer-Encoding: binary');
-            header('Expires: 0');
-            header('Cache-Control: must-revalidate');
-            header('Pragma: public');
-            header('Content-Length: '.filesize($file));
-            ob_clean();
-            flush();
-            readfile($file);
-            exit;
-        } else {
+        $filename = $filename ?? basename($file);
+
+        if (! file_exists($file)) {
             throw new Exception('文件不存在');
         }
+
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename=' . $filename);
+        header('Content-Transfer-Encoding: binary');
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . filesize($file));
+        ob_clean();
+        flush();
+        readfile($file);
+        exit;
     }
 
     //  发送 JSON 响应
     // $response->json(['message' => 'Hello, world!']);
-    public function json(array $data = [])
+    public function json(array $data = []): self
     {
         $this->setHeader('Content-Type', 'application/json');
         $this->setBody(json_encode($data));
@@ -147,7 +129,7 @@ class Response
     }
 
     //  发送文本响应
-    public function text(string $text = '')
+    public function text(string $text = ''): self
     {
         $this->setHeader('Content-Type', 'text/plain');
         $this->setBody($text);
@@ -155,8 +137,7 @@ class Response
         return $this;
     }
 
-    //  发送 HTML 响应
-    public function html(string $html)
+    public function html(string $html): self
     {
         $this->setHeader('Content-Type', 'text/html');
         $this->setBody($html);
@@ -164,17 +145,14 @@ class Response
         return $this;
     }
 
-    //  设置响应字符集
-    // $response->setCharset('UTF-8');
-    public function setCharset(string $charset = 'UTF-8')
+    public function setCharset(string $charset = 'UTF-8'): self
     {
-        $this->setHeader('Content-Type', 'text/html; charset='.$charset);
+        $this->setHeader('Content-Type', 'text/html; charset=' . $charset);
 
         return $this;
     }
 
-    //  发送 XML 响应
-    public function xml(array $data, array $config = [])
+    public function xml(array $data, array $config = []): self
     {
         $this->headers = [];
         $this->setHeader('Content-Type', 'text/xml');
@@ -183,8 +161,7 @@ class Response
         return $this;
     }
 
-    // 将数据对象转换为 SimpleXMLElement 对象
-    private function arrayToXml($array, array $config = [])
+    private function arrayToXml(mixed $array, array $config = []): mixed
     {
         return Array2XML::toXML($array, $config);
     }
@@ -198,37 +175,29 @@ class Response
     }
 
     //  发送 CSV 响应
-    public function csv(array $data, $filename = 'csv_file')
+    public function csv(array $data, string $filename = 'csv_file'): never
     {
         $this->headers = [];
-        // 设置响应标头，告诉浏览器要下载的文件类型是CSV
-        // 设置响应标头，告诉浏览器要下载的文件类型是CSV
         header('Content-Type: text/csv');
-        header('Content-Disposition: attachment; filename="'.$filename.'.csv"');
-        // 创建一个文件句柄，选择一个输出流
+        header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
         $output = fopen('php://output', 'w');
 
-        // 循环遍历数组并将每一行写入CSV文件
         foreach ($data as $row) {
             fputcsv($output, $row);
         }
 
-        // 关闭文件句柄
         fclose($output);
         exit();
     }
 
-    //  设置响应的长度
-    public function setLength(int $length = 0)
+    public function setLength(int $length = 0): self
     {
         $this->setHeader('Content-Length', $length);
 
         return $this;
     }
 
-    //  设置 ETag
-    // $response->setEtag('1234567890');
-    public function setEtag($etag)
+    public function setEtag(string $etag): self
     {
         $this->setHeader('ETag', $etag);
 
@@ -237,7 +206,7 @@ class Response
 
     //  展示图片内容到浏览器
     // $response->image();
-    public function image($imagePath)
+    public function image(string $imagePath): self
     {
         // 检查文件是否存在
         if (file_exists($imagePath)) {
@@ -257,37 +226,33 @@ class Response
         }
     }
 
-    //  设置响应的过期时间
-    public function setExpires(int $expires = 0)
+    public function setExpires(int $expires = 0): self
     {
         $this->setHeader('Expires', $expires);
 
         return $this;
     }
 
-    //  设置响应的缓存控制
-    // $response->setCacheControl('max-age=3600, must-revalidate');
-    public function setCacheControl(string $cacheControl)
+    public function setCacheControl(string $cacheControl): self
     {
         $this->setHeader('Cache-Control', $cacheControl);
 
         return $this;
     }
 
-    //  设置响应的身份验证信息
-    public function setAuthentication($username, $password = null)
+    public function setAuthentication(string $username, ?string $password = null): self
     {
-        if (! $password) {
+        if ($password === null) {
             $this->setHeader('WWW-Authenticate', 'Basic');
         } else {
-            $this->setHeader('WWW-Authenticate', 'Basic realm="'.$username.'"');
+            $this->setHeader('WWW-Authenticate', 'Basic realm="' . $username . '"');
         }
 
         return $this;
     }
 
     //  设置响应的压缩格式
-    public function setCompression($format)
+    public function setCompression(string $format): self
     {
         $this->setHeader('Content-Encoding', $format);
 
@@ -296,7 +261,7 @@ class Response
 
     //  发送异常响应
     // $response->sendException(new Exception('Something went wrong!'));
-    public function sendException(Exception $exception)
+    public function sendException(Exception $exception): self
     {
         $this->setStatusCode($exception->getCode());
         $this->setBody($exception->getMessage());
@@ -304,95 +269,78 @@ class Response
         return $this;
     }
 
-    //  设置响应的代理认证信息
-    public function setProxyAuthentication($username, $password = null)
+    public function setProxyAuthentication(string $username, ?string $password = null): self
     {
-        if (! $password) {
+        if ($password === null) {
             $this->setHeader('Proxy-Authenticate', 'Basic');
         } else {
-            $this->setHeader('Proxy-Authenticate', 'Basic realm="'.$username.'"');
+            $this->setHeader('Proxy-Authenticate', 'Basic realm="' . $username . '"');
         }
 
         return $this;
     }
 
-    //  发送 JSONP 响应
-    public function jsonp($data, $callback = null)
+    public function jsonp(mixed $data, ?string $callback = null): self
     {
-        if (! $callback) {
+        if ($callback === null || $callback === '') {
             return $this->json($data);
         }
 
         $this->setHeader('Content-Type', 'application/javascript');
-        $this->setBody($callback.'('.json_encode($data).');');
+        $this->setBody($callback . '(' . json_encode($data) . ');');
 
         return $this;
     }
 
-    //  发送大文件响应
-    public function sendLargeFile($file)
+    public function sendLargeFile(string $file): self
     {
         $this->setHeader('Content-Type', 'application/octet-stream');
-        $this->setBody(fread($file, filesize($file)));
+        $this->setBody(fread(fopen($file, 'rb'), filesize($file)));
 
         return $this;
     }
 
     //  设置响应的服务器信息
     // $response->setServerInfo('Apache/2.4.18 (Unix) PHP/5.6.34', '1.0');
-    public function setServerInfo($serverName, $serverVersion = null)
+    public function setServerInfo(string $serverName, ?string $serverVersion = null): self
     {
-        $this->setHeader('Server', $serverName);
-        if ($serverVersion) {
-            $this->setHeader('Server', $serverName.'/'.$serverVersion);
-        }
+        $this->setHeader('Server', $serverVersion !== null ? $serverName . '/' . $serverVersion : $serverName);
 
         return $this;
     }
 
-    //  设置响应的接口信息
-    // $response->setInterfaceInfo('APIv1', '1.0');
-    public function setInterfaceInfo($interfaceName, $version = null)
+    public function setInterfaceInfo(string $interfaceName, ?string $version = null): self
     {
-        $this->setHeader('X-Interface', $interfaceName);
-        if ($version) {
-            $this->setHeader('X-Interface', $interfaceName.'/'.$version);
-        }
+        $this->setHeader('X-Interface', $version !== null ? $interfaceName . '/' . $version : $interfaceName);
 
         return $this;
     }
 
-    //  发送包含会话ID的响应
-    public function sessionId($sessionId)
+    public function sessionId(string $sessionId): self
     {
-        $this->setHeader('Cookie', 'PHPSESSID='.$sessionId);
+        $this->setHeader('Cookie', 'PHPSESSID=' . $sessionId);
 
         return $this;
     }
 
-    //  设置响应的Last-Modified时间
-    // $response->setLastModified('Tue, 15 Nov 1994 12:45:26 GMT');
-    public function setLastModified($lastModified)
+    public function setLastModified(string $lastModified): self
     {
         $this->setHeader('Last-Modified', $lastModified);
 
         return $this;
     }
 
-    /**
-     * 发送响应并终止当前脚本执行
-     */
-    public function send()
+    public function send(): never
     {
-        // 设置响应头
-        empty($this->headers) && $this->headers = ['Content-Type' => 'text/html; charset=UTF-8'];
-        foreach ($this->headers as $header => $value) {
-            header($header.': '.$value);
+        if ($this->headers === []) {
+            $this->headers = ['Content-Type' => 'text/html; charset=UTF-8'];
         }
 
-        // 设置响应状态码
-        http_response_code($this->statusCode ?? 200);
+        foreach ($this->headers as $header => $value) {
+            header($header . ': ' . $value);
+        }
 
+        http_response_code($this->statusCode);
         echo $this->body;
         exit();
     }

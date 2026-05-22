@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 第三方登陆实例抽象类
  *

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * QrCode 模块全面测试文件
  * 

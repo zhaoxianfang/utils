@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Data;
 
 use zxf\Utils\Array\DataArray;
@@ -51,7 +53,7 @@ class Collection extends DataArray
      * @param callable|null $callback 回调函数
      * @return static
      */
-    public static function times(int $times, callable $callback = null): static
+    public static function times(int $times, ?callable $callback = null): static
     {
         if ($times < 1) {
             return new static([]);
@@ -73,7 +75,7 @@ class Collection extends DataArray
      * @param string|null $key 键字段名
      * @return static
      */
-    public function pluck(string|array $value, string $key = null): static
+    public function pluck(string|array $value, ?string $key = null): static
     {
         $results = [];
 

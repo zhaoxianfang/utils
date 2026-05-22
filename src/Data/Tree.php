@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Data;
 
 use Closure;
@@ -109,7 +111,7 @@ use InvalidArgumentException;
  */
 class Tree
 {
-    private static $instance = null;
+    private static ?self $instance = null;
 
     private array $data = []; // 原始数据数组
 
@@ -147,11 +149,11 @@ class Tree
     /**
      * 初始化实例
      */
-    public static function instance(array $data = []): self
+    public static function instance(array $data = []): static
     {
-        if (! isset(self::$instance) || is_null(self::$instance)) {
+        if (self::$instance === null) {
             self::$instance = new static($data);
-        } elseif (! empty($data)) {
+        } elseif ($data !== []) {
             self::$instance->setData($data);
         }
 
@@ -162,7 +164,7 @@ class Tree
      * 设置数据
      *
      *
-     * @return $this
+     * @return self
      */
     public function setData(array $data = [])
     {
@@ -226,7 +228,7 @@ class Tree
     /**
      * 设置排序字段
      *
-     * @return $this
+     * @return self
      */
     public function setWeight(string $field = 'weight')
     {
@@ -239,7 +241,7 @@ class Tree
      * 存在 $weight 的前提下 根据权重排序的方式, desc 降序 asc 升序
      *
      *
-     * @return $this
+     * @return self
      */
     public function setSortType(string $sortType = 'desc')
     {
@@ -259,7 +261,7 @@ class Tree
      * 设置是否在为 toArray 输出时添加层级图标前缀
      *
      * @param bool $withIcon true=添加前缀，false=不添加
-     * @return $this
+     * @return self
      */
     public function withIcon(bool $withIcon = true): self
     {
@@ -276,7 +278,7 @@ class Tree
      *
      * @param string $field 要修改的字段名
      * @param string $prefix 前缀字符串
-     * @return $this
+     * @return self
      */
     public function setPrefix(string $field, string $prefix): self
     {
@@ -634,7 +636,7 @@ class Tree
      *    where(fn($item) => $item['age'] > 18)
      *
      * @param  mixed  ...$args
-     * @return $this
+     * @return self
      */
     public function where(...$args): self
     {
@@ -686,7 +688,7 @@ class Tree
      * NULL条件查询
      *
      * @param  string  $field  要查询的字段名
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->whereNull('deleted_at');  // 查询deleted_at为NULL的记录
@@ -704,7 +706,7 @@ class Tree
      * 非NULL条件查询
      *
      * @param  string  $field  要查询的字段名
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->whereNotNull('email');  // 查询email不为NULL的记录
@@ -723,7 +725,7 @@ class Tree
      *
      * @param  string  $field  要查询的字段名
      * @param  array  $values  允许的值数组
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->whereIn('status', [1, 2, 3]);  // 查询status为1,2或3的记录
@@ -742,7 +744,7 @@ class Tree
      *
      * @param  string  $field  要查询的字段名
      * @param  array  $values  排除的值数组
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->whereNotIn('role', ['guest', 'test']);  // 查询role不是guest或test的记录
@@ -761,7 +763,7 @@ class Tree
      *
      * @param  string  $field  要查询的字段名
      * @param  array  $range  范围数组[min, max]
-     * @return $this
+     * @return self
      *
      * @throws InvalidArgumentException 当范围参数无效时抛出异常
      *
@@ -788,7 +790,7 @@ class Tree
      *
      * @param  string  $field  要查询的字段名
      * @param  array  $range  范围数组[min, max]
-     * @return $this
+     * @return self
      *
      * @throws InvalidArgumentException 当范围参数无效时抛出异常
      *
@@ -815,7 +817,7 @@ class Tree
      * @param  string  $field  要查询的字段名
      * @param  string  $pattern  匹配模式(可以使用%通配符)
      * @param  bool  $caseSensitive  是否区分大小写，默认false
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->whereLike('name', '%张%');       // 查询name包含"张"的记录
@@ -947,7 +949,7 @@ class Tree
      *
      * @param  array  $where  条件参数，格式同where方法
      * @param  callable  $attrCallback  返回要添加的属性的回调函数
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->addField(['gender' => 1], function() {
@@ -987,7 +989,7 @@ class Tree
      *
      * @param  array  $where  条件参数，格式同where方法
      * @param  callable  $attrCallback  返回要添加的属性的回调函数
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->addFieldWithParentIds(['gender' => 1], function() {
@@ -1028,7 +1030,7 @@ class Tree
      *
      * @param  array  $where  条件参数，格式同where方法
      * @param  callable  $attrCallback  返回要移除的属性名的回调函数
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->removeField(['gender' => 1], function() {
@@ -1074,7 +1076,7 @@ class Tree
      *
      * @param  array  $where  条件参数，格式同where方法
      * @param  callable  $attrCallback  返回要移除的属性名的回调函数
-     * @return $this
+     * @return self
      *
      * 使用示例:
      * $tree->removeFieldWithParentIds(['gender' => 1], function() {
@@ -1290,7 +1292,7 @@ class Tree
     /**
      * 重置所有属性并清空数据
      *
-     * @return $this
+     * @return self
      */
     public function reset(): self
     {
@@ -1312,7 +1314,7 @@ class Tree
      * 添加新节点
      *
      *
-     * @return $this
+     * @return self
      */
     public function addNode(array $node)
     {
@@ -1325,7 +1327,7 @@ class Tree
      * 通过主键id删除节点
      *
      *
-     * @return $this
+     * @return self
      */
     public function removeNode(int $id)
     {
@@ -1338,7 +1340,7 @@ class Tree
      * 通过主键id更新节点
      *
      *
-     * @return $this
+     * @return self
      */
     public function updateNode(int $id, array $newData)
     {

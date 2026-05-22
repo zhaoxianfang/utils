@@ -22,7 +22,8 @@
       "zxf\\Utils\\": "src/"
     },
     "files": [
-      "src/funcs/helpers.php"
+      "src/funcs/helpers.php",
+      "src/funcs/support.php"
     ]
   },
   "autoload-dev": {

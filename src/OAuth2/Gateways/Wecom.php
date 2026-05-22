@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 企业微信开放平台 https://work.weixin.qq.com/api/doc/
  * api接口文档: https://work.weixin.qq.com/api/doc/90000/90135/91022

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Image;
 
 use Exception;
@@ -571,8 +573,7 @@ class TextToImg
 
         // 释放已有的 GD 资源，避免内存泄漏
         if ($this->image !== null) {
-            imagedestroy($this->image);
-            $this->image = null;
+                        $this->image = null;
         }
 
         return $this;
@@ -1536,8 +1537,7 @@ class TextToImg
     {
         // 若已存在旧画布，先释放以避免重复 build() 导致内存泄漏
         if ($this->image !== null) {
-            imagedestroy($this->image);
-            $this->image = null;
+                        $this->image = null;
         }
 
         $w = (int) round($this->width * $this->scale);
@@ -1882,7 +1882,7 @@ class TextToImg
             $this->image, $src, 0, 0, $srcX, $srcY,
             $w, $h, (int) round($w / $scale), (int) round($h / $scale)
         );
-        imagedestroy($src);
+        $src = null;
     }
 
     /**
@@ -2327,7 +2327,7 @@ class TextToImg
         // 6. 旋转临时画布
         $bg = imagecolorallocatealpha($tmp, 0, 0, 0, 127);
         $rotated = imagerotate($tmp, $angle, $bg);
-        imagedestroy($tmp);
+        unset($tmp);
 
         if ($rotated === false) {
             throw new Exception('文字旋转处理失败。');
@@ -2357,7 +2357,7 @@ class TextToImg
             imagefill($scaled, 0, 0, $transparent);
             imagecopyresampled($scaled, $rotated, 0, 0, 0, 0, $newW, $newH, $rotW, $rotH);
 
-            imagedestroy($rotated);
+            $rotated = null;
             $rotated = $scaled;
             $rotW    = $newW;
             $rotH    = $newH;
@@ -2378,7 +2378,7 @@ class TextToImg
 
         // 10. 将旋转后的文字块合并到主画布
         imagecopy($this->image, $rotated, (int) $x, (int) $y, 0, 0, $rotW, $rotH);
-        imagedestroy($rotated);
+        $rotated = null;
     }
 
     /**
@@ -2514,7 +2514,7 @@ class TextToImg
         }
 
         imagecopyresampled($this->image, $src, $pos['x'], $pos['y'], 0, 0, $targetW, $targetH, $srcW, $srcH);
-        imagedestroy($src);
+        $src = null;
     }
 
     /**
@@ -3014,8 +3014,7 @@ class TextToImg
     public function destroy(): static
     {
         if ($this->image !== null) {
-            imagedestroy($this->image);
-            $this->image = null;
+                        $this->image = null;
         }
 
         return $this;
@@ -3055,7 +3054,6 @@ class TextToImg
         $rotated = imagerotate($this->image, $angle, $bg);
 
         if ($rotated !== false) {
-            imagedestroy($this->image);
             $this->image = $rotated;
         }
 
@@ -3093,8 +3091,7 @@ class TextToImg
         }
 
         imagecopy($cropped, $this->image, 0, 0, $x, $y, $w, $h);
-        imagedestroy($this->image);
-        $this->image = $cropped;
+                $this->image = $cropped;
         $this->width = $w;
         $this->height = $h;
 
@@ -3150,8 +3147,7 @@ class TextToImg
             imagecopyresampled($resized, $this->image, 0, 0, 0, 0, $width, $height, $srcW, $srcH);
         }
 
-        imagedestroy($this->image);
-        $this->image = $resized;
+                $this->image = $resized;
         $this->width = $width;
         $this->height = $height;
 
@@ -3195,7 +3191,7 @@ class TextToImg
         }
 
         imagecopyresampled($this->image, $src, $x, $y, 0, 0, $targetW, $targetH, $srcW, $srcH);
-        imagedestroy($src);
+        $src = null;
 
         return $this;
     }
@@ -3226,8 +3222,7 @@ class TextToImg
         }
 
         imagecopy($clean, $this->image, 0, 0, 0, 0, $w, $h);
-        imagedestroy($this->image);
-        $this->image = $clean;
+                $this->image = $clean;
 
         return $this;
     }

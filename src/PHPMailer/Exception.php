@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * PHPMailer Exception class.
  * PHP Version 5.5.

@@ -281,8 +281,7 @@ class Compressor
     private function releaseImage(): void
     {
         if ($this->image !== null) {
-            imagedestroy($this->image);
-            $this->image = null;
+                        $this->image = null;
         }
     }
 
@@ -384,7 +383,7 @@ class Compressor
                 }
             }
         }
-        imagedestroy($img);
+        $img = null;
     }
 
     /**
@@ -819,7 +818,7 @@ class Compressor
         $cropped = imagecreatetruecolor($w, $h);
         $this->setupAlpha($cropped);
         imagecopy($cropped, $this->image, 0, 0, $x, $y, $w, $h);
-        imagedestroy($this->image); $this->image = $cropped;
+        $this->image = $cropped;
     }
 
     /**
@@ -845,7 +844,7 @@ class Compressor
         $dst = imagecreatetruecolor($dstW, $dstH);
         $this->setupAlpha($dst);
         imagecopyresampled($dst, $this->image, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
-        imagedestroy($this->image); $this->image = $dst;
+        $this->image = $dst;
     }
 
     /**
@@ -869,7 +868,7 @@ class Compressor
         $dst = imagecreatetruecolor($dstW, $dstH);
         $this->setupAlpha($dst);
         imagecopy($dst, $tmp, 0, 0, $srcX, $srcY, $dstW, $dstH);
-        imagedestroy($tmp); imagedestroy($this->image); $this->image = $dst;
+        unset($tmp); $this->image = $dst;
     }
 
     /**
@@ -898,7 +897,7 @@ class Compressor
         $bg = imagecolorallocatealpha($this->image, 255, 255, 255, 127);
         $rotated = imagerotate($this->image, $this->rotateAngle, $bg);
         if ($rotated === false) throw new Exception('旋转失败');
-        imagesavealpha($rotated, true); imagedestroy($this->image); $this->image = $rotated;
+        imagesavealpha($rotated, true); $this->image = $rotated;
     }
 
     /**
@@ -930,7 +929,7 @@ class Compressor
         $pos = $this->calcPosition($cfg['position'], $cw, $ch, $tw, $th, $cfg['margin'], $cfg['offsetX'], $cfg['offsetY']);
         if ($cfg['opacity'] < 100) imagefilter($src, IMG_FILTER_COLORIZE, 0, 0, 0, (int)round(127 * (1 - $cfg['opacity'] / 100)));
         imagecopyresampled($this->image, $src, $pos['x'], $pos['y'], 0, 0, $tw, $th, $srcW, $srcH);
-        imagedestroy($src);
+        $src = null;
     }
 
     /**

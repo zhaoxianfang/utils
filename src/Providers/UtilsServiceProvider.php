@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Providers;
 
 use Illuminate\Support\ServiceProvider;
@@ -8,11 +10,6 @@ use Composer\InstalledVersions;
 
 class UtilsServiceProvider extends ServiceProvider
 {
-    /**
-     * 服务提供者是否延迟加载
-     */
-    protected bool $defer = false;
-
     /**
      * 启动服务
      */
@@ -28,11 +25,12 @@ class UtilsServiceProvider extends ServiceProvider
             'zxf/utils' => fn () => InstalledVersions::getPrettyVersion('zxf/utils'),
         ]);
     }
+
     /**
      * 注册服务
      */
     public function register(): void
     {
-
+        //
     }
 }

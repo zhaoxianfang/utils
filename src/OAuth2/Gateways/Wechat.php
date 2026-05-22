@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 网站应用微信登录开发 https://open.weixin.qq.com/cgi-bin/showdocument?action=dir_list&t=resource/res_list&verify=1&id=open1419316505&token=
  * 1.PC登录:微信开放平台创建'网站应用'

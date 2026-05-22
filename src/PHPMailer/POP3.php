@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * PHPMailer POP-Before-SMTP Authentication Class.
  * PHP Version 5.5.

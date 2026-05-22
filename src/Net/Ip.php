@@ -512,7 +512,7 @@ class Ip
     public static function getLocalIp(): ?string
     {
         $interfaces = self::getLocalIps();
-        foreach ($interfaces as $name => $ips) {
+        foreach ($interfaces as $ips) {
             foreach ($ips as $ip) {
                 if (self::isV4($ip) && !self::isLoopback($ip) && !self::isLinkLocal($ip)) {
                     return $ip;
@@ -536,7 +536,7 @@ class Ip
                 $mac = $m[1];
             }
         } else {
-            $cmd = $interface ? "ip link show {$interface} 2>/dev/null" : "ip link show 2>/dev/null | grep ether";
+            $cmd = $interface !== '' ? 'ip link show ' . escapeshellarg($interface) . ' 2>/dev/null' : "ip link show 2>/dev/null | grep ether";
             $output = shell_exec($cmd);
             if ($output && preg_match('/ether\s+([0-9a-f:]{17})/', $output, $m)) {
                 $mac = $m[1];

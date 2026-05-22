@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\Minify;
 
 use zxf\Utils\Minify\Exceptions\FileImportException;

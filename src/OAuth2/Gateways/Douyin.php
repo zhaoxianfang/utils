@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * 网站应用抖音登录开发 https://developer.open-douyin.com/docs/resource/zh-CN/dop/develop/openapi/account-permission/douyin-get-permission-code
  * 抖音小程序开发 https://developer.open-douyin.com/docs/resource/zh-CN/mini-game/develop/server/log-in/code-2-session/

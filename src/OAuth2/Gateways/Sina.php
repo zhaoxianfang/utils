@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace zxf\Utils\OAuth2\Gateways;
 
 use zxf\Utils\OAuth2\Connector\Gateway;
