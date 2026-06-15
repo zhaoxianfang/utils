@@ -62,9 +62,9 @@ class Curl
     ];
 
     /**
-     * @var object 对象实例
+     * @var static|null 单例实例
      */
-    protected static object $instance;
+    protected static ?object $instance = null;
 
     /**
      * @param  array  $config  给curl进行默认配置

@@ -9,7 +9,7 @@ namespace zxf\Utils\Data;
  */
 class CountryNumber
 {
-    private static self $instance;
+    private static ?self $instance = null;
 
     // 国家列表
     private array $countries = [

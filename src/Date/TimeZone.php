@@ -34,7 +34,7 @@ use Exception;
  */
 class TimeZone
 {
-    private static self $instance;
+    private static ?self $instance = null;
 
     /**
      * 初始化实例

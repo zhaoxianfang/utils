@@ -71,13 +71,13 @@ class Command
     private static bool $isParse = false;
 
     /**
-     * @var object 对象实例
+     * @var static|null 单例实例
      */
-    protected static $instance;
+    protected static ?object $instance = null;
 
-    protected ?\zxf\Utils\Sundry\CliInput $cliInput;
+    protected ?\zxf\Utils\Sundry\CliInput $cliInput = null;
 
-    protected ?\zxf\Utils\Sundry\CliOutput $cliOutput;
+    protected ?\zxf\Utils\Sundry\CliOutput $cliOutput = null;
 
     public function __construct()
     {
