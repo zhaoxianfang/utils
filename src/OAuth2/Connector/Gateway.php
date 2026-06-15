@@ -268,9 +268,13 @@ abstract class Gateway implements GatewayInterface
             }else{
                 $this->token = $this->parseToken($token);
             }
-        }else{
-            return $this->token;
+            if (empty($this->token['access_token'])) {
+                $code = isset($this->token['error'])?$this->token['error']:(isset($this->token['code'])?$this->token['code']:500);
+                $message = isset($this->token['message'])?$this->token['message']:(isset($this->token['error_description'])?$this->token['error_description']:'获取 TOKEN 出错');
+                throw new OAuthException($message, $code, $token);
+            }
         }
+        return $this->token;
     }
 
     /**
