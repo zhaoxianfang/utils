@@ -139,7 +139,10 @@ final class Retry
 
                 if ($this->retryIf !== null && ($this->retryIf)($result, $attempts)) {
                     if ($attempts < $this->maxAttempts) {
-                        $this->sleep($attempts);
+                        // 注意：此处必须调用真正执行等待的 doSleep()，
+                        // 而非 sleep()（sleep 只是设置基础等待毫秒数的 setter），
+                        // 否则 retryIf 命中时不会退避，且若回调始终触发 retryIf 会立即死循环。
+                        $this->doSleep($attempts);
                     }
                     continue;
                 }

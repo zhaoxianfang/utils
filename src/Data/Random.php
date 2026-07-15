@@ -124,7 +124,10 @@ class Random
                 'b' => random_int(0, 255),
             ];
         } catch (RandomException $e) {
-
+            // 不允许静默吞掉异常后返回 null：方法签名声明返回 array，
+            // 在严格模式下返回 null 会触发 TypeError，且调用方无法区分失败原因。
+            // 直接向上抛出，让调用方决定如何处理 CSPRNG 不可用的情况。
+            throw new RuntimeException('生成随机 RGB 颜色失败：' . $e->getMessage(), 0, $e);
         }
     }
 

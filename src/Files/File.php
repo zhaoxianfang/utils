@@ -427,8 +427,12 @@ class File
         // 创建目标目录
         self::createDirectory($targetDirectory);
 
-        // 生成目标文件名
-        $filename = $newFilename ?? $uploadFile['name'];
+        // 生成目标文件名：使用 basename() 剥离用户可控文件名中的目录部分，
+        // 防止通过 "../../evil.php" 之类的名称将文件写到目标目录之外（路径穿越）。
+        $filename = basename((string) ($newFilename ?? $uploadFile['name']));
+        if ($filename === '') {
+            throw new RuntimeException('非法的目标文件名');
+        }
         $targetPath = self::normalizePath($targetDirectory . DIRECTORY_SEPARATOR . $filename);
 
         // 移动上传文件

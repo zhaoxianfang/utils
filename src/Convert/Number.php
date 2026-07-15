@@ -32,7 +32,7 @@ final class Number
 
     private const CHINESE_UNITS = ['', '拾', '佰', '仟'];
 
-    private const CHINESE_BIG_UNITS = ['', '万', '亿', '万亿'];
+    private const CHINESE_BIG_UNITS = ['', '万', '亿', '万亿', '亿亿', '万亿亿', '亿亿亿'];
 
     /**
      * 格式化为货币格式（千分位）
@@ -199,7 +199,8 @@ final class Number
 
             if ($group > 0) {
                 $groupStr = self::groupToChinese($group);
-                $result = $groupStr . self::CHINESE_BIG_UNITS[$groupIndex] . $result;
+                // 使用 bigUnit() 获取分组单位，避免超大数值时数组越界（Undefined array key）
+                $result = $groupStr . self::bigUnit($groupIndex) . $result;
             } elseif ($result !== '' && ! str_starts_with($result, '零')) {
                 $result = '零' . $result;
             }
@@ -208,6 +209,21 @@ final class Number
         }
 
         return rtrim($result, '零');
+    }
+
+    /**
+     * 根据分组下标返回中文大数单位
+     *
+     * 中文每 4 位为一个分组：万(10^4)、亿(10^8)、万亿(10^12)、亿亿(10^16)……
+     * 超过内建数组范围时，以“亿亿”为基、逐层叠加“万”（每加一个“万”即 ×10^4），
+     * 保证任意大整数都不会触发数组越界，且数值含义正确。
+     */
+    private static function bigUnit(int $groupIndex): string
+    {
+        if ($groupIndex < count(self::CHINESE_BIG_UNITS)) {
+            return self::CHINESE_BIG_UNITS[$groupIndex];
+        }
+        return '亿亿' . str_repeat('万', $groupIndex - 4);
     }
 
     private static function groupToChinese(int $number): string

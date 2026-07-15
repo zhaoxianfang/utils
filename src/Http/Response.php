@@ -99,6 +99,8 @@ class Response
     public function download(string $file = '', ?string $filename = null): never
     {
         $filename = $filename ?? basename($file);
+        // 过滤文件名中的换行/回车与引号，防止响应头注入（CRLF injection）及文件名解析异常
+        $filename = str_replace(["\r", "\n", '"'], '', $filename);
 
         if (! file_exists($file)) {
             throw new Exception('文件不存在');
@@ -106,7 +108,7 @@ class Response
 
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename=' . $filename);
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Content-Transfer-Encoding: binary');
         header('Expires: 0');
         header('Cache-Control: must-revalidate');
@@ -178,6 +180,8 @@ class Response
     public function csv(array $data, string $filename = 'csv_file'): never
     {
         $this->headers = [];
+        // 过滤文件名中的换行/回车与引号，防止响应头注入
+        $filename = str_replace(["\r", "\n", '"'], '', $filename);
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="' . $filename . '.csv"');
         $output = fopen('php://output', 'w');
@@ -337,6 +341,9 @@ class Response
         }
 
         foreach ($this->headers as $header => $value) {
+            // 过滤 CRLF，防止响应头注入（Header Injection）
+            $header = str_replace(["\r", "\n"], '', (string) $header);
+            $value = str_replace(["\r", "\n"], '', (string) $value);
             header($header . ': ' . $value);
         }
 

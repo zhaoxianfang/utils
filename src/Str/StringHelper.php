@@ -142,7 +142,8 @@ class StringHelper
     public static function removePrefix(string $string, string|array $prefix): string
     {
         foreach ((array) $prefix as $p) {
-            if (str_starts_with($string, $p)) return substr($string, strlen($p));
+            // 使用多字节安全的截取，避免多字节前缀被按字节错误截断
+            if (str_starts_with($string, $p)) return mb_substr($string, mb_strlen($p));
         }
         return $string;
     }
@@ -157,7 +158,8 @@ class StringHelper
     public static function removeSuffix(string $string, string|array $suffix): string
     {
         foreach ((array) $suffix as $s) {
-            if (str_ends_with($string, $s)) return substr($string, 0, -strlen($s));
+            // 使用多字节安全的截取，避免多字节后缀被按字节错误截断
+            if (str_ends_with($string, $s)) return mb_substr($string, 0, -mb_strlen($s));
         }
         return $string;
     }
@@ -183,10 +185,16 @@ class StringHelper
      */
     public static function random(int $length = 16, string $charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'): string
     {
-        $charLen = strlen($charset);
+        // 将字符集拆分为“字符”数组（按 Unicode 码点），避免含多字节字符时
+        // 用 strlen 计算长度、按字节下标取字符产生乱码。
+        $chars = preg_split('//u', $charset, -1, PREG_SPLIT_NO_EMPTY);
+        if ($chars === false || $chars === []) {
+            throw new InvalidArgumentException('字符集不能为空');
+        }
+        $charLen = count($chars);
         $result = '';
         for ($i = 0; $i < $length; $i++) {
-            $result .= $charset[random_int(0, $charLen - 1)];
+            $result .= $chars[random_int(0, $charLen - 1)];
         }
         return $result;
     }
@@ -237,8 +245,12 @@ class StringHelper
     public static function mask(string $string, string $mask = '*', int $start = 3, int $length = 4): string
     {
         $strLen = mb_strlen($string);
-        if ($strLen <= $start) return $string;
-        $actual = min($length, $strLen - $start);
+        // 规范化起始位置与长度，避免负数导致 mb_substr 行为异常或 str_repeat 报警告
+        $start = max(0, $start);
+        if ($start >= $strLen) {
+            return $string;
+        }
+        $actual = max(0, min($length, $strLen - $start));
         return mb_substr($string, 0, $start) . str_repeat($mask, $actual) . mb_substr($string, $start + $actual);
     }
 
@@ -263,9 +275,10 @@ class StringHelper
     {
         if (!str_contains($email, '@')) return $email;
         [$local, $domain] = explode('@', $email, 2);
-        $len = strlen($local);
+        $len = mb_strlen($local);
         if ($len <= 2) return $email;
-        return substr($local, 0, 2) . str_repeat('*', $len - 2) . '@' . $domain;
+        // 使用多字节安全的截取，避免本地名含多字节字符时星号数量或截断出错
+        return mb_substr($local, 0, 2) . str_repeat('*', $len - 2) . '@' . $domain;
     }
 
     /**

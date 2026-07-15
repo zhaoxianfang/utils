@@ -38,6 +38,13 @@ final class CSV
 
     private bool $hasHeader = true;
 
+    /**
+     * 是否在写入时防止 CSV 公式注入（默认开启）。
+     * 当单元格内容以 = + - @ 开头时，Excel 等会将其当作公式执行，
+     * 通过前置单引号将其转为纯文本，避免恶意数据在表格软件中执行。
+     */
+    private bool $preventFormulaInjection = true;
+
     public static function make(): self
     {
         return new self();
@@ -76,6 +83,17 @@ final class CSV
     public function hasHeader(bool $hasHeader = true): self
     {
         $this->hasHeader = $hasHeader;
+        return $this;
+    }
+
+    /**
+     * 设置是否防止 CSV 公式注入（默认开启）。
+     *
+     * @param bool $enable true=开启防护（推荐），false=原样写入
+     */
+    public function preventFormulaInjection(bool $enable = true): self
+    {
+        $this->preventFormulaInjection = $enable;
         return $this;
     }
 
@@ -149,7 +167,7 @@ final class CSV
 
             foreach ($data as $row) {
                 $row = $this->convertEncoding($row, $this->outputEncoding, $this->inputEncoding);
-                fputcsv($handle, $row, $this->delimiter, $this->enclosure, $this->escape);
+                fputcsv($handle, $this->sanitizeRow($row), $this->delimiter, $this->enclosure, $this->escape);
             }
         } finally {
             fclose($handle);
@@ -176,7 +194,7 @@ final class CSV
         try {
             foreach ($data as $row) {
                 $row = $this->convertEncoding($row, $this->outputEncoding, $this->inputEncoding);
-                fputcsv($handle, $row, $this->delimiter, $this->enclosure, $this->escape);
+                fputcsv($handle, $this->sanitizeRow($row), $this->delimiter, $this->enclosure, $this->escape);
             }
         } finally {
             fclose($handle);
@@ -215,5 +233,28 @@ final class CSV
             static fn ($cell) => is_string($cell) ? mb_convert_encoding($cell, $to, $from) : $cell,
             $row
         );
+    }
+
+    /**
+     * 防止 CSV 公式注入。
+     *
+     * 当单元格内容为字符串且以 = + - @ 等字符开头时，Excel / WPS 等表格软件
+     * 会将其当作公式执行（如 `=cmd|...` 造成命令执行或信息泄露）。
+     * 通过前置单引号，表格软件会将其按纯文本处理，从而消除风险。
+     *
+     * @param array<int|string, mixed> $row
+     * @return array<int|string, mixed>
+     */
+    private function sanitizeRow(array $row): array
+    {
+        if (! $this->preventFormulaInjection) {
+            return $row;
+        }
+        foreach ($row as &$cell) {
+            if (is_string($cell) && $cell !== '' && str_contains('=+-@', $cell[0])) {
+                $cell = "'" . $cell;
+            }
+        }
+        return $row;
     }
 }

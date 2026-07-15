@@ -107,7 +107,17 @@ class Ip
         if (self::isV4($ip)) {
             return str_starts_with($ip, '169.254.');
         }
-        return self::isV6($ip) && str_starts_with(strtolower($ip), 'fe8');
+        if (self::isV6($ip)) {
+            // IPv6 链路本地前缀为 fe80::/10（即 fe80 ~ febf），
+            // 不能只判断 'fe8'（会漏掉 fe9/fea/feb）。
+            // 通过解析二进制地址前缀精确判断：首字节为 0xFE 且次字节高 2 位为 10。
+            $bin = @inet_pton($ip);
+            if ($bin === false || strlen($bin) < 2) {
+                return false;
+            }
+            return ord($bin[0]) === 0xFE && (ord($bin[1]) & 0xC0) === 0x80;
+        }
+        return false;
     }
 
     /**
@@ -257,7 +267,9 @@ class Ip
             throw new InvalidArgumentException('无效的CIDR: ' . $cidr);
         }
         $ipLong = self::v4ToLong($ip);
-        $mask = -1 << (32 - $prefix);
+        // 使用无符号方式计算掩码并强制截断为 32 位，避免 32 位环境下 `-1 <<` 溢出，
+        // 同时在 64 位环境下与原实现结果一致。
+        $mask = $prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - $prefix)) & 0xFFFFFFFF);
         $network = $ipLong & $mask;
         $broadcast = $network | (~$mask & 0xFFFFFFFF);
         $class = self::getClass($ip);
@@ -279,9 +291,15 @@ class Ip
      */
     public static function inCidr(string $ip, string $cidr): bool
     {
-        if (!self::isV4($ip)) return false;
+        if (!self::isV4($ip) || !str_contains($cidr, '/')) {
+            return false;
+        }
         [$net, $prefix] = explode('/', $cidr, 2);
-        $mask = -1 << (32 - (int) $prefix);
+        $prefix = (int) $prefix;
+        if (!self::isV4($net) || $prefix < 0 || $prefix > 32) {
+            return false;
+        }
+        $mask = $prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - $prefix)) & 0xFFFFFFFF);
         return (self::v4ToLong($ip) & $mask) === (self::v4ToLong($net) & $mask);
     }
 
@@ -349,16 +367,17 @@ class Ip
             // 找到最大的CIDR块
             $maxSize = 32;
             while ($maxSize > 0) {
-                $mask = 0xFFFFFFFF << (32 - $maxSize);
+                $mask = $maxSize === 0 ? 0 : ((0xFFFFFFFF << (32 - $maxSize)) & 0xFFFFFFFF);
                 $maskedStart = $startLong & $mask;
-                $blockEnd = $maskedStart + pow(2, 32 - $maxSize) - 1;
+                $blockSize = 1 << (32 - $maxSize);
+                $blockEnd = $maskedStart + $blockSize - 1;
                 if ($maskedStart === $startLong && $blockEnd <= $endLong) {
                     break;
                 }
                 $maxSize--;
             }
             $cidrs[] = self::longToV4($startLong) . '/' . $maxSize;
-            $startLong += (int) pow(2, 32 - $maxSize);
+            $startLong += 1 << (32 - $maxSize);
         }
         return $cidrs;
     }

@@ -94,9 +94,23 @@ class Env
      */
     public static function get(string $key, mixed $default = null, string $type = 'string'): mixed
     {
-        $value = self::$variables[$key] ?? getenv($key) ?? $_ENV[$key] ?? $_SERVER[$key] ?? null;
+        // 注意：不能使用 `??` 链直接串联 getenv()，因为 getenv() 在变量未设置时返回 false，
+        // 而 `??` 只对 null/未定义生效，会把 false 当作“有值”从而短路后面真实的 $_ENV/$_SERVER 来源。
+        // 这里逐层判断，显式把 getenv() 的 false 视为“未设置”。
+        $value = self::$variables[$key] ?? null;
 
-        if ($value === null || $value === false) {
+        if ($value === null) {
+            $env = getenv($key);
+            $value = ($env === false) ? null : $env;
+        }
+        if ($value === null) {
+            $value = $_ENV[$key] ?? null;
+        }
+        if ($value === null) {
+            $value = $_SERVER[$key] ?? null;
+        }
+
+        if ($value === null) {
             return $default;
         }
 
@@ -219,7 +233,9 @@ class Env
      */
     public static function has(string $key): bool
     {
-        return self::get($key, $this ?? null) !== null;
+        // 修复：原实现使用 `$this ?? null`，但在静态方法中 $this 未定义会触发致命错误。
+        // 正确做法是判断 get() 是否真的取到了值（default 传 null，取到任意值即视为存在）。
+        return self::get($key, null) !== null;
     }
 
     /**
@@ -256,7 +272,11 @@ class Env
             'int', 'integer'     => (int) $value,
             'float', 'double'    => (float) $value,
             'bool', 'boolean'    => self::toBool($value),
-            'array'              => array_map('trim', explode(',', $value)),
+            // 数组：按逗号分割并去除首尾空白，同时过滤掉空元素（如 "a,,b" 中的空项）
+            'array'              => array_values(array_filter(
+                array_map('trim', explode(',', $value)),
+                static fn (string $v): bool => $v !== ''
+            )),
             'json'               => json_decode($value, true) ?? $value,
             default              => $value,
         };

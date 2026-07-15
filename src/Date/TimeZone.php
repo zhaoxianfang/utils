@@ -128,20 +128,12 @@ class TimeZone
         if (is_numeric($datetime)) {
             $datetime = date('Y-m-d H:i:s', $datetime);
         }
-        // 将时间字符串转换为 DateTime 对象
+        // 将时间字符串转换为 DateTime 对象（携带源时区）
         $dateTimeObj = new DateTime($datetime, new DateTimeZone($fromTimeZone));
 
-        // 获取当前时区的差值
-        $fromTimeZoneDiff = $this->getTimeZoneOfUTC($fromTimeZone);
-
-        // 获取目标时区的差值
-        $toTimeZoneDiff = $this->getTimeZoneOfUTC($toTimeZone);
-
-        // 计算时间差
-        $timeDifference = $toTimeZoneDiff - $fromTimeZoneDiff;
-
-        // 添加时间差
-        $dateTimeObj->modify("$timeDifference hours");
+        // 直接使用 DateTime 的时区转换：PHP 会基于时区数据库自动处理夏令时（DST）切换，
+        // 比“固定小时偏移相减”更准确（避免跨夏令时边界时差 1 小时的错误）。
+        $dateTimeObj->setTimezone(new DateTimeZone($toTimeZone));
 
         return $dateTimeObj;
     }

@@ -154,16 +154,50 @@ class Archive
     public function extract(string $destination, ?string $password = null): array
     {
         if ($password !== null) {
+            // 注意：PHP ZipArchive 的 setPassword() 仅对 ZipCrypto/WinZip AES 加密有效，
+            // 且 extractTo() 会按条目自动解密；若密码错误解压出的内容将是损坏的。
+            // 这里仅设置密码，真正的校验在解压失败时由调用方自行判断。
             $this->zip->setPassword($password);
         }
 
         if (!is_dir($destination)) {
             mkdir($destination, 0755, true);
         }
+        $baseDir = realpath($destination);
+        if ($baseDir === false) {
+            throw new RuntimeException('无法解析目标目录: ' . $destination);
+        }
+        $baseDir = rtrim($baseDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
         $files = [];
         for ($i = 0; $i < $this->zip->numFiles; $i++) {
-            $files[] = $this->zip->getNameIndex($i);
+            $name = $this->zip->getNameIndex($i);
+            // 防御 Zip Slip（路径穿越）攻击：逐个校验条目名，
+            // 通过“手动解析相对路径、禁止逃出根目录”的方式确保解压目标始终落在 $baseDir 内。
+            $resolved = [];
+            foreach (explode('/', $name) as $part) {
+                if ($part === '' || $part === '.') {
+                    continue;
+                }
+                if ($part === '..') {
+                    if ($resolved === []) {
+                        throw new RuntimeException('压缩包内含非法路径，拒绝解压以防路径穿越: ' . $name);
+                    }
+                    array_pop($resolved);
+                    continue;
+                }
+                $resolved[] = $part;
+            }
+            if ($resolved === []) {
+                // 条目是一个纯目录或非法项（如 "/foo" 绝对路径），跳过进一步校验
+                $files[] = $name;
+                continue;
+            }
+            $target = $baseDir . implode(DIRECTORY_SEPARATOR, $resolved);
+            if (! str_starts_with($target, $baseDir)) {
+                throw new RuntimeException('压缩包内含非法路径，拒绝解压以防路径穿越: ' . $name);
+            }
+            $files[] = $name;
         }
 
         $this->zip->extractTo($destination);

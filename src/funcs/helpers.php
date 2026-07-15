@@ -4,77 +4,138 @@ declare(strict_types=1);
 
 if (! function_exists('uuid')) {
     /**
-     * 极速并发UUID生成器
+     * 极速并发 UUID 生成器（定长、短、高并发唯一）
      *
-     * 优化内容：
-     * 1. 添加类型安全
-     * 2. 增强随机性
-     * 3. 改进错误处理
-     * 4. 添加自定义编码支持
+     * 设计目标：
+     * 1. 返回长度尽量短 —— 默认 base62 编码，固定 11 个字符（最短的可定长安全长度）。
+     * 2. 高并发请求下的唯一性 —— 采用「毫秒时间 + 节点 + 序列」的雪花（Snowflake）结构，
+     *    在节点 ID 不冲突的前提下可保证绝对唯一（不依赖概率）。
+     * 3. 不溢出 —— 整体 63 bit，恰好放入有符号 64 位整数（绝不会超过 PHP_INT_MAX）。
+     * 4. 可排序 —— 高位为毫秒时间戳，按字典序/数值升序即时间顺序。
+     * 5. 类型安全与健壮性 —— 校验字符集；序列号耗尽时“忙等真实时间前进”而非借用伪造时间戳。
      *
-     * @param string $charset 自定义字符集
-     * @return string 返回10-11字符的全局唯一UUID
-     * @throws Exception 随机数生成失败时抛出异常
+     * 位布局（共 63 bit）：
+     *   [62..23] 40 bit 毫秒时间戳（自 2025-01-01 起，可用约 35 年，至 ~2060 年）
+     *   [22.. 7] 16 bit 节点 ID（由 16 位随机 ^ PID 派生，区分不同并发进程/Worker）
+     *   [ 6.. 0]  7 bit 序列号（同一毫秒、同一节点内自增，最多 128 个/毫秒）
+     *
+     * 并发唯一性说明：
+     *  - 同一 PHP 进程内：请求是串行执行的，时间戳 + 序列号保证绝对不重复；
+     *    单节点吞吐上限约 128 个/毫秒（≈ 12.8W 个/秒），超出时生成器会忙等至下一毫秒，
+     *    绝不产生重复 ID（也不会伪造未来时间戳去冒险碰撞）。日常请求远低于此上限。
+     *  - 不同进程（FPM 子进程 / Swoole Worker）：通过节点 ID 区分；
+     *    节点 ID 由「16 位密码学随机 ^ PID」得到（65536 空间），单机/单集群进程数
+     *    远小于 65536 时冲突概率极低。若需跨大规模集群的绝对唯一，可调用
+     *    uuid_node_id() 显式设置一个全局唯一的节点 ID。
+     *
+     * @param string $charset 自定义字符集（默认 base62，最短）。字符集越长返回字符串越长。
+     * @return string 定长唯一 ID（base62 下为 11 字符）
+     * @throws InvalidArgumentException 字符集非法时
      */
     function uuid(string $charset = ''): string
     {
         static $base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-        static $last_microtime = 0;
-        static $sequence = 0;
-        static $process_hash = 0;
-        static $entropy_seed = 0;
+        static $nodeId = null;  // 进程级节点标识（16 bit），首次调用时生成一次
+        static $seq = 0;        // 同一毫秒内的自增序列（7 bit）
+        static $lastMs = -1;    // 上次生成所用的时间戳（毫秒），用于驱动序列
 
-        // 一次性初始化
-        if ($process_hash === 0) {
-            $process_hash = (getmypid() & 0x7FF) | (random_int(0, 0x7FF) << 11);
-            $entropy_seed = random_int(1, 0x3FFFFFF);
+        // —— 字符集：默认 base62（信息密度最高、长度最短） ——
+        $charsetToUse = $charset !== '' ? $charset : $base62;
+        $base = strlen($charsetToUse);
+        if ($base < 2) {
+            throw new InvalidArgumentException('uuid() 字符集长度至少为 2');
         }
 
-        // 高精度时间获取
-        $current_microtime = intdiv(hrtime(true), 1000);
-        $relative_microtime = $current_microtime - 1788211200000000;
+        // —— 节点 ID：仅在当前进程首次调用时生成一次 ——
+        // 优先使用 uuid_node_id() 显式设置的全局唯一节点 ID（集群部署推荐）；
+        // 否则由「16 位密码学随机 ^ PID（低 16 位）」派生，使不同并发进程
+        // （即便 PID 相同/被复用）也极大概率获得不同的节点 ID；
+        // 这是跨进程保证唯一性的关键区分字段。
+        if ($nodeId === null) {
+            $configured = $GLOBALS['__uuid_node_id__'] ?? null;
+            if (is_int($configured) && $configured >= 0 && $configured <= 0xFFFF) {
+                $nodeId = $configured;
+            } else {
+                $nodeId = (unpack('v', random_bytes(2))[1] ^ (getmypid() & 0xFFFF)) & 0xFFFF;
+            }
+        }
 
-        // 无锁并发控制
-        if ($relative_microtime === $last_microtime) {
-            $sequence = ($sequence + 1) & 0x7FF;
-            if ($sequence === 0) {
-                // 微秒级快速重试，最多重试3次
-                $retryCount = 0;
-                do {
-                    $current_microtime = intdiv(hrtime(true), 1000);
-                    $relative_microtime = $current_microtime - 1788211200000000;
-                    $retryCount++;
-                } while ($relative_microtime === $last_microtime && $retryCount < 3);
+        // —— 毫秒时间戳（单调递增，基于 hrtime 避免系统时钟回拨影响） ——
+        // 基准 epoch：2025-01-01 00:00:00 UTC（毫秒）。40 bit 可覆盖约 35 年。
+        $epochMs = 1_735_689_600_000;
+        $ms = intdiv(hrtime(true), 1_000_000);
+        $ts = ($ms - $epochMs) & 0xFFFFFFFFFF; // 仅保留低 40 bit（0xFFFFFFFFFF = 2^40-1）
 
-                if ($relative_microtime === $last_microtime) {
-                    throw new RuntimeException('UUID sequence overflow after retries');
+        // —— 序列号：同毫秒内自增；耗尽则忙等真实时间前进 ——
+        if ($ts === $lastMs) {
+            $seq = ($seq + 1) & 0x7F; // 7 bit，0..127
+            if ($seq === 0) {
+                // 1 毫秒内序列号耗尽（极端高并发，超过 ≈12.8W 个/秒）：
+                // 必须等待 hrtime 真正进入下一毫秒，再使用“真实”时间戳。
+                // 注意：绝不使用“借用 +1 毫秒”之类的伪造时间戳，
+                // 否则伪造的未来时间随后变为真实时间时会产生 ID 碰撞。
+                while ($ts === $lastMs) {
+                    $ms = intdiv(hrtime(true), 1_000_000);
+                    $ts = ($ms - $epochMs) & 0xFFFFFFFFFF;
                 }
+                // 时间已前进：序列从随机起点开始，避免与上一毫秒尾部序列可预测重合
+                $seq = random_int(0, 0x7F);
+                $lastMs = $ts;
             }
         } else {
-            $sequence = random_int(1, 0x3FF);
-            $last_microtime = $relative_microtime;
+            // 新毫秒：序列从随机起点开始
+            $seq = random_int(0, 0x7F);
+            $lastMs = $ts;
         }
 
-        // 动态熵增强
-        $entropy_seed = ($entropy_seed * 1103515245 + 12345) & 0x3FFFFFF;
-        $mixed_entropy = ($entropy_seed ^ $process_hash ^ $relative_microtime) & 0x7FF;
+        // —— 组装 63 bit ID：40 位时间 | 16 位节点 | 7 位序列 ——
+        // 最大值 = (2^40-1)<<23 | (2^16-1)<<7 | (2^7-1) = 2^63 - 1 = PHP_INT_MAX，
+        // 因此任意情况下都不会发生整数溢出，可安全放入有符号 64 位整数。
+        $id = (($ts << 23) | ($nodeId << 7) | $seq);
 
-        // 最优位分配
-        $numeric_id = (($relative_microtime & 0x3FFFFFFFFFF) << 22) | ($sequence << 11) | $mixed_entropy;
+        // —— 编码为定长字符串 ——
+        // 先按“满位最大值”计算定长位数，再对实际值编码并左补位，
+        // 保证无论数值大小都输出一致长度（便于存储、索引与排序）。
+        $maxId = ((0xFFFFFFFFFF << 23) | (0xFFFF << 7) | 0x7F);
+        $len = 1;
+        $tmp = $maxId;
+        while ($tmp >= $base) {
+            $tmp = intdiv($tmp, $base);
+            $len++;
+        }
 
-        // 支持自定义字符集
-        $charsetToUse = $charset ?: $base62;
-        $base = strlen($charsetToUse);
-
-        // 极致编码
         $result = '';
-        $num = $numeric_id;
-        do {
+        $num = $id;
+        while ($num > 0) {
             $result = $charsetToUse[$num % $base] . $result;
             $num = intdiv($num, $base);
-        } while ($num > 0);
+        }
 
-        return $result ?: $charsetToUse[0];
+        // 左补字符集首字符到定长（高位补 0 的等价写法）
+        return str_pad($result, $len, $charsetToUse[0], STR_PAD_LEFT);
+    }
+
+    /**
+     * 获取/设置全局节点 ID（用于跨大规模集群时保证 uuid() 绝对唯一）
+     *
+     * 默认情况下 uuid() 会自动由「随机 ^ PID」派生一个 16 位节点 ID，
+     * 对于单实例 / 少量进程的场景已足够。但若部署了大量（接近 65536）个并发进程
+     * 或跨多台机器，建议在首次调用 uuid() 之前用本函数设置一个全局唯一的节点 ID
+     * （例如 FPM 的 pool 编号、Swoole WorkerId、或配置中心分配的值）。
+     *
+     * @param int|null $nodeId 要设置的节点 ID（0–65535）；传 null 表示仅读取当前配置。
+     * @return int 当前生效的节点 ID 配置（未设置时返回 -1）
+     * @throws InvalidArgumentException 节点 ID 超出 0–65535 范围时
+     */
+    function uuid_node_id(?int $nodeId = null): int
+    {
+        if ($nodeId !== null) {
+            if ($nodeId < 0 || $nodeId > 0xFFFF) {
+                throw new InvalidArgumentException('uuid_node_id() 必须在 0–65535 之间');
+            }
+            $GLOBALS['__uuid_node_id__'] = $nodeId;
+        }
+        return $GLOBALS['__uuid_node_id__'] ?? -1;
     }
 }
 

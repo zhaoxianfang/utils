@@ -182,8 +182,11 @@ final class Json
         try {
             $decodedA = self::decode($a);
             $decodedB = self::decode($b);
-            return Arr::sortRecursive((array) $decodedA)
-                == Arr::sortRecursive((array) $decodedB);
+            // 使用规范化后的 JSON 字符串进行严格比较，避免 `==` 对数值字符串与数字
+            // （如 "1" 与 1）产生误判，以及嵌套结构的弱类型比较陷阱。
+            $canonicalA = self::encode(Arr::sortRecursive((array) $decodedA));
+            $canonicalB = self::encode(Arr::sortRecursive((array) $decodedB));
+            return $canonicalA === $canonicalB;
         } catch (JsonException) {
             return false;
         }

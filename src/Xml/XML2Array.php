@@ -138,7 +138,10 @@ final class XML2Array
                 throw new RuntimeException("无法打开XML文件: $filePath");
             }
 
-            $reader->setParserProperty(XMLReader::SUBST_ENTITIES, true);
+            // 注意：切勿将 SUBST_ENTITIES 设为 true，否则会展开 XML 内部实体，
+            // 可能被利用进行 XXE 攻击（读取本地文件等）。此处保持默认（不替换实体），
+            // 配合 libxmlOptions 中的 LIBXML_NONET，双重防御外部实体加载。
+            $reader->setParserProperty(XMLReader::SUBST_ENTITIES, false);
 
             while ($reader->read()) {
                 $this->checkMemoryLimit();

@@ -82,6 +82,22 @@ class JWT
         $parts = self::split($jwt);
         $signingInput = "{$parts['header']}.{$parts['payload']}";
 
+        // 解析头部，校验算法，防止“算法混淆攻击（alg confusion）”：
+        // 必须以调用方期望（或令牌自身声明、且经过白名单校验）的算法为准，
+        // 严禁接受 alg=none 等未签名令牌。
+        $header = self::jsonDecode(Base64::urlSafeDecode($parts['header']));
+        $headerAlg = (string) ($header['alg'] ?? '');
+        if ($headerAlg === '' || ! isset(self::SUPPORTED_ALGORITHMS[$headerAlg])) {
+            throw new RuntimeException('JWT 头部算法不被支持');
+        }
+        // 当调用方未显式指定算法（空）时，退而使用令牌声明的算法，但仍需经白名单校验；
+        // 否则要求令牌声明算法与期望算法严格一致（使用 hash_equals 防时序侧信道）。
+        $expectedAlg = $algorithm === '' ? $headerAlg : $algorithm;
+        if (! hash_equals($headerAlg, $expectedAlg)) {
+            throw new RuntimeException('JWT 算法与期望不符（疑似算法混淆攻击）');
+        }
+        $algorithm = $expectedAlg;
+
         self::validateAlgorithm($algorithm);
 
         if (!self::verify($signingInput, $parts['signature'], $secret, $algorithm)) {

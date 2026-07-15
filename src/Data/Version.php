@@ -187,14 +187,29 @@ class Version
             }
         }
 
-        // x 通配符: 1.2.x, 1.x
-        if (str_contains($constraint, '.x') || str_contains($constraint, '.X') || str_contains($constraint, '.*')) {
-            $parts = explode('.', str_replace(['x', 'X', '*'], '0', $constraint));
-            $major = (int) ($parts[0] ?? 0);
-            $minor = (int) ($parts[1] ?? 0);
-            if (count($parts) === 2 || str_ends_with($constraint, '.x') || str_ends_with($constraint, '.X') || str_ends_with($constraint, '.*')) {
-                return $this->major === $major && $this->minor === $minor;
+        // x 通配符: 1.2.x、1.x、*.x、* 等。
+        // 仅校验约束中“明确指定的段”，被通配的段（x/*）不参与比较。
+        if (str_contains($constraint, '.x') || str_contains($constraint, '.X') || str_contains($constraint, '.*')
+            || $constraint === 'x' || $constraint === 'X' || $constraint === '*') {
+            $segments = explode('.', $constraint);
+            $majorMatch = true;
+            $minorMatch = true;
+            $patchMatch = true;
+
+            // 第 1 段（主版本）
+            if (isset($segments[0]) && !in_array($segments[0], ['x', 'X', '*'], true)) {
+                $majorMatch = $this->major === (int) $segments[0];
             }
+            // 第 2 段（次版本）
+            if (isset($segments[1]) && !in_array($segments[1], ['x', 'X', '*'], true)) {
+                $minorMatch = $this->minor === (int) $segments[1];
+            }
+            // 第 3 段（修订号）：仅当约束显式给出非通配的第三段才校验
+            if (isset($segments[2]) && !in_array($segments[2], ['x', 'X', '*'], true)) {
+                $patchMatch = $this->patch === (int) $segments[2];
+            }
+
+            return $majorMatch && $minorMatch && $patchMatch;
         }
 
         // 精确匹配

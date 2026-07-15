@@ -60,7 +60,11 @@ class Locker
     public function lock(): static
     {
         $this->open();
-        flock($this->handle, LOCK_EX);
+        // 必须检查 flock 的返回值：某些情况下（如被信号中断）可能返回 false，
+        // 若直接置 locked=true，调用方会误以为已持锁，进而可能释放他人持有的锁。
+        if (flock($this->handle, LOCK_EX) === false) {
+            throw new RuntimeException('获取文件锁失败');
+        }
         $this->locked = true;
         return $this;
     }

@@ -165,10 +165,17 @@ final class Template
             '/\{\{(\w+(?:\.\w+)*)(?:\|([^:}]+)(?::([^}]*))?)?\}\}/',
             function (array $matches) use ($data): string {
                 $value = $this->getValue($matches[1], $data);
+                $filterName = strtolower(trim($matches[2] ?? ''));
                 if (isset($matches[2])) {
                     $value = $this->applyFilter($matches[2], $value, $matches[3] ?? null);
                 }
-                return (string) $value;
+                // 默认对变量输出进行 HTML 转义，防止 XSS；
+                // 仅当显式使用 `|raw` 过滤器时才原样输出（调用方需自行保证内容安全）。
+                $rendered = (string) $value;
+                if ($filterName !== 'raw') {
+                    $rendered = htmlspecialchars($rendered, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                }
+                return $rendered;
             },
             $template
         );

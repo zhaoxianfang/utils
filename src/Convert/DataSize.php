@@ -56,7 +56,9 @@ final class DataSize
     public static function parse(string $size): self
     {
         $size = trim($size);
-        if (! preg_match('/^([\d.]+)\s*([KMGTPE]?B)$/i', $size, $matches)) {
+        // 仅允许 UNITS 中实际支持的单位（B/KB/MB/GB/TB/PB），
+        // 避免正则接受 EB 等未定义单位导致 “Unknown unit” 异常（与 autoFormat 支持的层级保持一致）
+        if (! preg_match('/^([\d.]+)\s*([KMGTP]?B)$/i', $size, $matches)) {
             throw new \InvalidArgumentException('Invalid data size format: ' . $size);
         }
 

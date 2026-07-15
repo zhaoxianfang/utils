@@ -114,9 +114,9 @@ abstract class Gateway implements GatewayInterface
         if (!$config) {
             throw new OAuthException('传入的配置不能为空');
         }
-        if(isset($_GET['referer']) && $config['callback']){
-            $config['callback'] .= ((strpos($config['callback'], '?') !== false) ? '&' : '?').'referer='.$_GET['referer'];
-        }
+        // 安全说明：早期版本会将 $_GET['referer'] 直接拼接到 callback 中，
+        // 这会被攻击者利用进行开放重定向 / CSRF 辅助。现已移除该行为，
+        // callback 应仅由受信任的配置指定，重定向目标需在业务侧自行校验。
         //默认参数
         $_config = [
             'app_id'        => '',
@@ -216,7 +216,8 @@ abstract class Gateway implements GatewayInterface
             if (session_status() !== PHP_SESSION_ACTIVE) {
                 session_start();
             }
-            if (!isset($_REQUEST['state']) || !isset($_SESSION['zxf\Util_oauth_state']) || $_REQUEST['state'] != $_SESSION['zxf\Util_oauth_state']) {
+            if (!isset($_REQUEST['state']) || !isset($_SESSION['zxf\Util_oauth_state'])
+                || !hash_equals((string) $_REQUEST['state'], (string) $_SESSION['zxf\Util_oauth_state'])) {
                 throw new OAuthException('传递的STATE参数不匹配！');
             }
         }

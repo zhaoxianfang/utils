@@ -79,8 +79,8 @@ class Request
         $this->contentType = strtolower(! empty($_SERVER['CONTENT_TYPE']) ? $_SERVER['CONTENT_TYPE'] : (! empty($_SERVER['HTTP_CONTENT_TYPE']) ? $_SERVER['HTTP_CONTENT_TYPE'] : 'text/html'));
         // 获取GET参数
         $this->get = ! empty($_GET) ? $_GET : [];
-        // 获取POST参数
-        $this->post = ! empty($_POST) ? $_POST : (! empty($GLOBALS['HTTP_RAW_POST_DATA']) ? $GLOBALS['HTTP_RAW_POST_DATA'] : []);
+        // 获取POST参数（PHP 5.6+ 已移除 $GLOBALS['HTTP_RAW_POST_DATA']，直接使用 $_POST）
+        $this->post = $_POST ?? [];
         // 获取查询字符串参数（URL中"?"后的部分）
         $this->query = $_SERVER['QUERY_STRING'] ?? '';
         // 获取用户代理（User-Agent）信息
@@ -576,7 +576,9 @@ class Request
     public function has(array|string $keys)
     {
         foreach ((array) $keys as $key) {
-            if (trim($this->input($key)) == '') {
+            $value = $this->input($key);
+            // 使用严格比较，避免 "0" 等合法值被误判为空；仅当值为 null 或去除空白后为空字符串才视为“不存在”
+            if ($value === null || trim((string) $value) === '') {
                 return false;
             }
         }
@@ -919,13 +921,21 @@ class Request
     }
 
     /**
-     * 检查是否所有代理服务器都是受信任的，或者此请求是否是通过受信任的代理服务器发送的。
+     * 检查当前请求是否来自“受信任的代理服务器”。
+     *
+     * 仅当显式通过 setProxies() 配置了受信代理列表，且当前直接连接的 REMOTE_ADDR
+     * 命中其中一项时，才认为转发头（X-Forwarded-For / Client-IP 等）可信。
+     *
+     * 默认（未配置 proxies）返回 false，即不信任任何转发头，
+     * 以防止客户端伪造 X-Forwarded-For / Client-IP 进行 IP 欺骗。
      *
      * @return bool
      */
     public function entrusted()
     {
-        return empty($this->proxies) || isset($this->servers['REMOTE_ADDR']) && in_array($this->servers['REMOTE_ADDR'], $this->proxies);
+        return ! empty($this->proxies)
+            && isset($this->servers['REMOTE_ADDR'])
+            && in_array($this->servers['REMOTE_ADDR'], $this->proxies, true);
     }
 
     /**
@@ -985,7 +995,8 @@ class Request
 
         $ips = [];
 
-        if ($trusted && isset($this->servers['HTTP_CLIENT_IP'])) {
+        // 仅当确实处于受信代理之后，才接受客户端可控的 Client-IP 头，避免 IP 伪造
+        if ($trusted && $this->entrusted() && isset($this->servers['HTTP_CLIENT_IP'])) {
             $ips[] = $this->servers['HTTP_CLIENT_IP'];
         }
 

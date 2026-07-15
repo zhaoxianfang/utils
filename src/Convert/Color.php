@@ -62,7 +62,9 @@ class Color
             }
         }
         $hex = sprintf('%02X%02X%02X', $r, $g, $b);
-        if ($withAlpha && $a < 1.0) {
+        // 当调用方显式要求包含 Alpha 通道时，无论如何都应输出两位 alpha（如 #RRGGBBFF），
+        // 保证与 hexToRgb 的 8 位格式能够无损往返转换。
+        if ($withAlpha) {
             $hex .= sprintf('%02X', (int) round($a * 255));
         }
         return '#' . $hex;

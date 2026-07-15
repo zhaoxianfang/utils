@@ -58,6 +58,10 @@ class Unit
         }
         $value = (float) $matches[1];
         $unit = strtoupper($matches[2]);
+        // 未带单位（如 "1024"）时按字节（B）处理，避免空单位命中 $map[''] 抛“不支持的单位”
+        if ($unit === '') {
+            $unit = 'B';
+        }
         $map = ['B' => 0, 'K' => 1, 'KB' => 1, 'M' => 2, 'MB' => 2, 'G' => 3, 'GB' => 3, 'T' => 4, 'TB' => 4, 'P' => 5, 'PB' => 5, 'E' => 6, 'EB' => 6];
         if (!isset($map[$unit])) {
             throw new InvalidArgumentException('不支持的单位: ' . $unit);

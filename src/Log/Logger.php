@@ -204,6 +204,8 @@ class Logger
 
         $levelName = self::LEVEL_NAMES[$level] ?? 'UNKNOWN';
         $time = date($this->timeFormat);
+        // 防止日志注入：消息中的换行/CRLF 会被伪造新的日志条目，统一替换为空格。
+        $message = str_replace(["\r", "\n"], ' ', $message);
         $contextStr = empty($context) ? '' : ' ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $line = "[{$time}] [{$levelName}] {$message}{$contextStr}" . PHP_EOL;
 
@@ -327,12 +329,16 @@ class Logger
             if (!is_dir($dir)) {
                 mkdir($dir, 0755, true);
             }
-            $this->fileHandle = fopen($file, 'ab');
+            $handle = fopen($file, 'ab');
+            if ($handle === false) {
+                // 打开日志文件失败时必须明确报错，而不是静默丢弃日志，
+                // 否则会导致日志无声丢失且后续复用已置为失败状态、永远无法写入。
+                throw new RuntimeException("无法打开日志文件进行写入: {$file}");
+            }
+            $this->fileHandle = $handle;
             $this->currentFile = $file;
         }
 
-        if ($this->fileHandle !== false) {
-            fwrite($this->fileHandle, $content);
-        }
+        fwrite($this->fileHandle, $content);
     }
 }

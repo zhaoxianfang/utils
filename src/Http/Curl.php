@@ -584,10 +584,12 @@ class Curl
         $this->initCurl();
         // 设置get参数
         if (! empty($this->httpParams)) {
+            // 根据 URL 是否已含查询字符串，选择使用 '?' 或 '&' 作为连接符，避免拼接出错误格式
+            $glue = str_contains($url, '?') ? '&' : '?';
             if (is_array($this->httpParams)) {
-                $paramString = str_contains($url, '?') ? http_build_query($this->httpParams) : '?'.http_build_query($this->httpParams);
+                $paramString = $glue . http_build_query($this->httpParams);
             } else {
-                $paramString = str_contains($url, '?') ? $this->httpParams : '?'.$this->httpParams;
+                $paramString = $glue . $this->httpParams;
             }
             $url .= $paramString;
         }
@@ -765,9 +767,10 @@ class Curl
     {
         $curl = curl_init($url);
         curl_setopt($curl, CURLOPT_NOBODY, true);          // 不取回数据
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false); // https请求 不验证证书和hosts
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($curl, CURLOPT_SSLVERSION, 1);
+        // 默认启用 SSL 证书与主机名验证（与常规请求保持一致），避免中间人攻击（MITM）。
+        // 若目标使用自签名证书，请通过 setCaPath() 指定 CA 或显式调用 verifySsl(false)。
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         $found = false; // 如果请求没有发送失败
         if (curl_exec($curl) !== false) {
             if (curl_getinfo($curl, CURLINFO_HTTP_CODE) == 200) {// 再检查http响应码是否为200
@@ -914,10 +917,17 @@ class Curl
         ];
 
         // JSONP 格式的json字符串处理, 如:callback({"key":"value"})
+        // 采用子串截取而非贪婪正则，避免 JSON 内部包含 '}' 时提取错误，
+        // 同时避免无匹配时访问未定义数组下标（Warning: Undefined array key）。
         if (str_starts_with($body, 'callback(')) {
-            $result = [];
-            preg_match_all("/(?:\{)(.*)(?:\})/i", $body, $result);
-            $body = $result[0][0];
+            $inner = substr($body, strlen('callback('));
+            if (str_ends_with($inner, ';')) {
+                $inner = substr($inner, 0, -1);
+            }
+            if (str_ends_with($inner, ')')) {
+                $inner = substr($inner, 0, -1);
+            }
+            $body = trim($inner);
         } else {
             if (! $this->isJson($body)) {
                 // 判断 等号出现次数
