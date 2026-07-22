@@ -1343,6 +1343,33 @@ $svg = QrCodeHelper::generateSvg('Hello World', 300, [
 ]);
 ```
 
+## 🔧 更新日志 / 修复说明
+
+### 渲染修复（重要）
+
+- **修复圆形 / 圆角 Logo 遮罩逻辑错误**：原实现通过 `imagecopy` 把白色形状遮罩直接叠加到 Logo 上，导致启用 `logoCircular()` / `logoRounded()` 时，Logo 中心被**白色圆形/圆角矩形覆盖**，而非按形状裁剪显示 Logo 本身。已改为新增的 `maskLogoByShape()` 逐像素 alpha 遮罩：形状内保留 Logo（并保留其自身透明度），形状外置为全透明。已通过验证（圆形 Logo 中心正确显示 Logo 颜色）。
+- **移除 PHP 8.5 已弃用的 `imagedestroy()` 调用**：该函数自 PHP 8.0 起已无实际作用，并在 PHP 8.5 触发弃用告警，已清理。
+
+### 核心编码核查
+
+- 核查 `Common/ReedSolomonCodec`（GF(256) 里德-所罗门纠错）、`Encoder/*`（分组、掩码、矩阵布局）、`Version`/`FormatInformation`/`Mode` 等，编码路径为对成熟实现的忠实移植，全部 65 项测试通过。
+- 生成的二维码（含 WiFi/URL/文本等）可通过测试脚本导出实图供手机扫码验证。
+
+### 数据字符串生成修复（功能正确性）
+
+`QrCodeHelper` 中的便捷字符串生成器此前未对特殊字符转义，当内容包含保留字符时，手机扫码后解析会错位甚至失败。本次修复：
+
+- **WiFi 字符串 `generateWifiString`**：对 `;` `\` `,` `:` `"` 转义。修复前 SSID / 密码含这些字符（如 `Home;5G`、`p@ss;word\1`）会导致扫描器解析失败；同时修正了末尾多余分号。
+- **VCard 字符串 `generateVCardString`**：按 RFC 2426 对 `\` `,` `;` 与换行转义，避免姓名含逗号（如 `Smith, John`）时字段被截断。
+- **MeCard 字符串 `generateMeCardString`**：对 `\` `;` `,` 转义。
+- **日历事件 `generateEventString`**：标题 / 地点 / 描述按 iCalendar 规则转义。
+
+### 测试套件加强（可扫描性实地验证）
+
+- 测试套件新增**真实扫码识别验证**段：若系统检测到 `zbarimg`（如 `brew install zbar`），会自动生成二维码并用真实解码器解码，比对内容是否一致（覆盖纯文本、URL、数字、中文、混合、长文本、含特殊字符的 WiFi / VCard 等）。未安装则自动跳过并提示。
+- 新增 SVG 合法性（XML well-formed）断言。
+- 当前完整测试 **74/74 通过**，其中包含 8 项真实解码验证。
+
 ## 📄 许可证
 
 MIT License

@@ -601,6 +601,55 @@ test('生成WiFi扫码测试二维码', function() use ($outputDir) {
     return file_exists($outputDir . '/scan_test_wifi.png') ? true : '文件未生成';
 });
 
+echo "\n【真实扫码识别验证（可选，依赖 zbarimg）】\n";
+echo "------------------------------------------\n";
+
+$zbarBin = trim((string) shell_exec('command -v zbarimg 2>/dev/null'));
+if ($zbarBin === '') {
+    echo "ℹ 未检测到 zbarimg，跳过真实扫码验证（可运行 `brew install zbar` 后重跑）\n";
+} else {
+    // 实地用 zbarimg 解码生成的二维码，比对是否等于原始内容（验证可扫描性 / 编码正确性）
+    $scanCases = [
+        'hello'        => 'Hello World',
+        'url'          => 'https://www.example.com/test?a=1&b=2',
+        'numeric'      => '12345678901234567890',
+        'chinese'      => '这是一段中文测试内容',
+        'mixed'        => '中文 ABC 123 !@# 日本語',
+        'long'         => str_repeat('A', 300),
+        'wifi_special' => QrCodeHelper::generateWifiString('Home;5G', 'p@ss;word\\1', 'WPA'),
+        'vcard_special' => QrCodeHelper::generateVCardString([
+            'name'   => 'Smith, John',
+            'email'  => 'a@b.com',
+            'phone'  => '13800138000',
+        ]),
+    ];
+    $scanDir = $outputDir . '/scan_verify';
+    if (!is_dir($scanDir)) {
+        mkdir($scanDir, 0755, true);
+    }
+    foreach ($scanCases as $key => $content) {
+        test('真实扫码验证: ' . $key, function() use ($scanDir, $zbarBin, $key, $content) {
+            $path = $scanDir . '/' . $key . '.png';
+            QrCode::make($content)->size(300)->margin(4)->save($path);
+            $out = shell_exec(escapeshellcmd($zbarBin) . ' -q --raw ' . escapeshellarg($path) . ' 2>/dev/null');
+            $decoded = str_replace("\r", '', rtrim((string) $out, "\n"));
+            if ($decoded === $content) {
+                return true;
+            }
+            return '解码不匹配: 期望 ' . json_encode($content) . ' 实际 ' . json_encode($decoded);
+        });
+    }
+}
+
+test('SVG 输出为合法 XML', function() {
+    $svg = QrCode::make('SVG Validity Check')->toSvg();
+    $prev = libxml_use_internal_errors(true);
+    $doc = simplexml_load_string($svg);
+    libxml_clear_errors();
+    libxml_use_internal_errors($prev);
+    return $doc !== false ? true : 'SVG 不是合法 XML';
+});
+
 echo "\n========================================\n";
 echo "   测试结果汇总\n";
 echo "========================================\n";

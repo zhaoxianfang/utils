@@ -905,6 +905,26 @@ src/
 └── tests.php           # 测试脚本
 ```
 
+## 更新日志 / 修复说明
+
+### 编码正确性修复（重要）
+
+以下修复直接影响条码的**可扫描性**，均已通过「生成 → 按权威标准编码表解码 → 与原始数据比对」的往返校验（标准校验 17 项，失败 0）：
+
+- **ITF-14（Interleaved 2 of 5）编码表修正**：原编码表中数字 `5`↔`8`、`6`↔`9` 的条宽序列存在互换错误，导致生成的条码无法被标准读码器正确识别。已修正为标准的交错二五码序列：
+  - `4 => nnwnw`、`5 => wnnwn`、`6 => nwnwn`、`7 => nnnww`、`8 => wnwnn`、`9 => nwwnn`。
+- **Codabar（NW-7）编码表修正**：原编码表中数字 `1`、`2`、`4`、`7` 的模块序列错误，其中数字 `4` 的序列与数字 `2` **完全冲突**（无法区分），已按 AIM/ANSI BC3（convention A）标准修正。
+
+### 结构与健壮性核查
+
+- 全面核查 `BaseGenerator`、`EAN13/EAN8/UPCA`、`Code39`、`Code128`（含 A/B/C 自动切换）、`ISBN/ISSN` 生成器，编码表与校验位算法均与 GS1 标准一致。
+- 核查 `BarcodeFactory`、`BarcodeBuilder`、`BarcodeHelper`、`DTO/BarcodeConfig` 与各渲染器（PNG/SVG/HTML），逻辑正确。
+
+### 渲染器安全加固
+
+- **SVG 渲染器**：对背景色、条颜色、渐变色、水印色、文本填充色统一做 XML 属性转义（`escapeXmlAttr`），防止颜色配置中的特殊字符破坏 SVG 结构或注入属性。
+- **HTML 渲染器**：对内联样式中的颜色值做白名单净化（`sanitizeCssValue`），对 CSS 类名做字符白名单过滤，防止 `style` / `class` 属性注入。
+
 ## 许可证
 
 MIT License

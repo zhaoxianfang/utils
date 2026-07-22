@@ -2626,10 +2626,11 @@ class QrCode
         $transparent = imagecolorallocatealpha($mask, 0, 0, 0, 127);
         imagefill($mask, 0, 0, $transparent);
 
-        $white = imagecolorallocate($mask, 255, 255, 255);
+        // 遮罩内部（圆内）为不透明白，外部为全透明
+        $white = imagecolorallocatealpha($mask, 255, 255, 255, 0);
         imagefilledellipse($mask, (int)($size / 2), (int)($size / 2), $size, $size, $white);
 
-        // 应用遮罩
+        // 先将源 Logo 等比缩放到目标尺寸
         $resizedLogo = imagecreatetruecolor($size, $size);
         if ($resizedLogo === false) {
             return;
@@ -2651,12 +2652,38 @@ class QrCode
             imagesy($source)
         );
 
-        // 应用遮罩
-        imagealphablending($resizedLogo, true);
-        imagecopy($resizedLogo, $mask, 0, 0, 0, 0, $size, $size);
+        // 逐像素应用遮罩：圆内保留 Logo（保留其自身透明度），圆外置为全透明。
+        // 注意：不能用 imagecopy 把白色遮罩叠加到 Logo 上，否则会在圆内绘制白色覆盖 Logo。
+        $this->maskLogoByShape($dest, $resizedLogo, $mask, $size);
+    }
 
-        // 复制到目标
-        imagecopy($dest, $resizedLogo, 0, 0, 0, 0, $size, $size);
+    /**
+     * 依据形状遮罩把 Logo 裁剪到目标图像
+     * 遮罩不透明（alpha=0）处保留 Logo 像素，遮罩透明（alpha=127）处置为全透明
+     *
+     * @param GdImage $dest 目标图像
+     * @param GdImage $logo 已缩放的 Logo 图像（带 alpha）
+     * @param GdImage $mask 形状遮罩（内部不透明，外部透明）
+     * @param int $size 尺寸
+     */
+    private function maskLogoByShape(GdImage $dest, GdImage $logo, GdImage $mask, int $size): void
+    {
+        imagealphablending($dest, false);
+        imagesavealpha($dest, true);
+
+        for ($y = 0; $y < $size; $y++) {
+            for ($x = 0; $x < $size; $x++) {
+                $maskAlpha = (imagecolorat($mask, $x, $y) >> 24) & 0x7F;
+                $logoColor = imagecolorat($logo, $x, $y);
+                $logoAlpha = ($logoColor >> 24) & 0x7F;
+
+                // 取较大透明度：形状外部（maskAlpha=127）强制全透明；
+                // 形状内部（maskAlpha=0）保留 Logo 自身透明度
+                $finalAlpha = max($logoAlpha, $maskAlpha);
+                $newColor = ($logoColor & 0xFFFFFF) | ($finalAlpha << 24);
+                imagesetpixel($dest, $x, $y, $newColor);
+            }
+        }
     }
 
     /**
@@ -2680,8 +2707,9 @@ class QrCode
         $transparent = imagecolorallocatealpha($mask, 0, 0, 0, 127);
         imagefill($mask, 0, 0, $transparent);
 
-        $white = imagecolorallocate($mask, 255, 255, 255);
-        $r = (int)($size * $radius);
+        // 遮罩内部为不透明白，外部为全透明
+        $white = imagecolorallocatealpha($mask, 255, 255, 255, 0);
+        $r = max(0, (int)($size * $radius));
 
         // 绘制圆角矩形
         imagefilledrectangle($mask, $r, 0, $size - $r - 1, $size - 1, $white);
@@ -2691,7 +2719,7 @@ class QrCode
         imagefilledellipse($mask, $r, $size - $r - 1, $r * 2, $r * 2, $white);
         imagefilledellipse($mask, $size - $r - 1, $size - $r - 1, $r * 2, $r * 2, $white);
 
-        // 应用遮罩
+        // 先将源 Logo 等比缩放到目标尺寸
         $resizedLogo = imagecreatetruecolor($size, $size);
         if ($resizedLogo === false) {
             return;
@@ -2713,12 +2741,8 @@ class QrCode
             imagesy($source)
         );
 
-        // 应用遮罩
-        imagealphablending($resizedLogo, true);
-        imagecopy($resizedLogo, $mask, 0, 0, 0, 0, $size, $size);
-
-        // 复制到目标
-        imagecopy($dest, $resizedLogo, 0, 0, 0, 0, $size, $size);
+        // 逐像素应用遮罩：圆角矩形内保留 Logo，外部置为全透明
+        $this->maskLogoByShape($dest, $resizedLogo, $mask, $size);
     }
 
     /**

@@ -342,8 +342,26 @@ class QrCodeHelper
      */
     public static function generateWifiString(string $ssid, string $password = '', string $encryption = 'WPA', bool $hidden = false): string
     {
-        $hiddenStr = $hidden ? 'H:true' : '';
-        return sprintf('WIFI:T:%s;S:%s;P:%s;%s;', $encryption, $ssid, $password, $hiddenStr);
+        $enc = self::escapeWifi($encryption);
+        $s = self::escapeWifi($ssid);
+        $p = self::escapeWifi($password);
+        $hiddenStr = $hidden ? ';H:true' : '';
+        return sprintf('WIFI:T:%s;S:%s;P:%s%s;', $enc, $s, $p, $hiddenStr);
+    }
+
+    /**
+     * 转义 WIFI 配置中的特殊字符
+     *
+     * WIFI:T:...; 格式中，分号 `;` 与反斜杠 `\` 是字段/转义分隔符，
+     * 冒号 `:`、逗号 `,`、双引号 `"` 也会被部分扫描器当作保留字符。
+     * 若不转义，含这些字符的 SSID / 密码会导致手机无法正确解析。
+     *
+     * @param string $value 原始值
+     * @return string 转义后的值
+     */
+    private static function escapeWifi(string $value): string
+    {
+        return preg_replace_callback('/([\\\\;,":])/', fn($m) => '\\' . $m[1], $value);
     }
 
     /**
@@ -355,31 +373,48 @@ class QrCodeHelper
     public static function generateVCardString(array $data): string
     {
         $vcard = "BEGIN:VCARD\nVERSION:3.0\n";
-        
+
         if (isset($data['name'])) {
-            $vcard .= 'FN:' . $data['name'] . "\n";
+            $vcard .= 'FN:' . self::escapeVCard($data['name']) . "\n";
         }
         if (isset($data['title'])) {
-            $vcard .= 'TITLE:' . $data['title'] . "\n";
+            $vcard .= 'TITLE:' . self::escapeVCard($data['title']) . "\n";
         }
         if (isset($data['phone'])) {
-            $vcard .= 'TEL;TYPE=CELL:' . $data['phone'] . "\n";
+            $vcard .= 'TEL;TYPE=CELL:' . self::escapeVCard($data['phone']) . "\n";
         }
         if (isset($data['email'])) {
-            $vcard .= 'EMAIL:' . $data['email'] . "\n";
+            $vcard .= 'EMAIL:' . self::escapeVCard($data['email']) . "\n";
         }
         if (isset($data['url'])) {
-            $vcard .= 'URL:' . $data['url'] . "\n";
+            $vcard .= 'URL:' . self::escapeVCard($data['url']) . "\n";
         }
         if (isset($data['address'])) {
-            $vcard .= 'ADR:' . $data['address'] . "\n";
+            $vcard .= 'ADR:' . self::escapeVCard($data['address']) . "\n";
         }
         if (isset($data['company'])) {
-            $vcard .= 'ORG:' . $data['company'] . "\n";
+            $vcard .= 'ORG:' . self::escapeVCard($data['company']) . "\n";
         }
-        
+
         $vcard .= "END:VCARD";
         return $vcard;
+    }
+
+    /**
+     * 转义 VCard / iCalendar 值中的特殊字符
+     *
+     * 按 RFC 2426 / RFC 5545：反斜杠必须最先转义，其后转义逗号 `,`、
+     * 分号 `;` 与换行，避免字段被错误截断或注入。
+     *
+     * @param string $value 原始值
+     * @return string 转义后的值
+     */
+    private static function escapeVCard(string $value): string
+    {
+        $value = str_replace('\\', '\\\\', $value);
+        $value = str_replace(',', '\,', $value);
+        $value = str_replace(';', '\;', $value);
+        return str_replace(["\r\n", "\n", "\r"], '\\n', $value);
     }
 
     /**
@@ -462,15 +497,15 @@ class QrCodeHelper
      */
     public static function generateEventString(string $title, string $start, string $end = '', string $location = '', string $description = ''): string
     {
-        $vevent = "BEGIN:VEVENT\nSUMMARY:$title\nDTSTART:$start\n";
+        $vevent = "BEGIN:VEVENT\nSUMMARY:" . self::escapeVCard($title) . "\nDTSTART:" . self::escapeVCard($start) . "\n";
         if ($end !== '') {
-            $vevent .= "DTEND:$end\n";
+            $vevent .= "DTEND:" . self::escapeVCard($end) . "\n";
         }
         if ($location !== '') {
-            $vevent .= "LOCATION:$location\n";
+            $vevent .= "LOCATION:" . self::escapeVCard($location) . "\n";
         }
         if ($description !== '') {
-            $vevent .= "DESCRIPTION:$description\n";
+            $vevent .= "DESCRIPTION:" . self::escapeVCard($description) . "\n";
         }
         $vevent .= "END:VEVENT";
         return $vevent;
@@ -479,14 +514,30 @@ class QrCodeHelper
     public static function generateMeCardString(array $data): string
     {
         $parts = ['MECARD:'];
-        if (!empty($data['name'])) $parts[] = 'N:' . $data['name'] . ';';
-        if (!empty($data['phone'])) $parts[] = 'TEL:' . $data['phone'] . ';';
-        if (!empty($data['email'])) $parts[] = 'EMAIL:' . $data['email'] . ';';
-        if (!empty($data['url'])) $parts[] = 'URL:' . $data['url'] . ';';
-        if (!empty($data['address'])) $parts[] = 'ADR:' . $data['address'] . ';';
-        if (!empty($data['memo'])) $parts[] = 'MEMO:' . $data['memo'] . ';';
+        if (!empty($data['name'])) $parts[] = 'N:' . self::escapeMeCard($data['name']) . ';';
+        if (!empty($data['phone'])) $parts[] = 'TEL:' . self::escapeMeCard($data['phone']) . ';';
+        if (!empty($data['email'])) $parts[] = 'EMAIL:' . self::escapeMeCard($data['email']) . ';';
+        if (!empty($data['url'])) $parts[] = 'URL:' . self::escapeMeCard($data['url']) . ';';
+        if (!empty($data['address'])) $parts[] = 'ADR:' . self::escapeMeCard($data['address']) . ';';
+        if (!empty($data['memo'])) $parts[] = 'MEMO:' . self::escapeMeCard($data['memo']) . ';';
         $parts[] = ';';
         return implode('', $parts);
+    }
+
+    /**
+     * 转义 MeCard 值中的特殊字符
+     *
+     * MeCard 以 `;` 分隔字段，值内的反斜杠 `\`、分号 `;`、逗号 `,`
+     * 均需转义，否则解析会错位。
+     *
+     * @param string $value 原始值
+     * @return string 转义后的值
+     */
+    private static function escapeMeCard(string $value): string
+    {
+        $value = str_replace('\\', '\\\\', $value);
+        $value = str_replace(';', '\;', $value);
+        return str_replace(',', '\,', $value);
     }
 
     public static function generateFedExString(string $trackingNumber): string

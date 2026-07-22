@@ -270,7 +270,6 @@ abstract class BaseRenderer implements RendererInterface
     /**
      * 计算长竖线位置
      *
-     * @param array<int> $barcodeData 条空模式数组
      * @return array<int> 长竖线索引数组
      */
     protected function calculateLongBarPositions(): array
@@ -394,6 +393,31 @@ abstract class BaseRenderer implements RendererInterface
         $b = $bsRGB <= 0.03928 ? $bsRGB / 12.92 : pow(($bsRGB + 0.055) / 1.055, 2.4);
 
         return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+    }
+
+    /**
+     * 转义用于 SVG/XML 属性值的字符串，防止属性注入
+     *
+     * @param string|null $value 原始值
+     * @return string 已转义的值
+     */
+    protected function escapeXmlAttr(?string $value): string
+    {
+        return htmlspecialchars((string) $value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    }
+
+    /**
+     * 转义用于 HTML/CSS 上下文的字符串
+     *
+     * 仅允许颜色 / 长度等安全字符（字母数字、# . , % ( ) 空格 - +），
+     * 其余字符一律移除，避免 style/class 属性被注入恶意内容。
+     *
+     * @param string|null $value 原始值
+     * @return string 已净化的值
+     */
+    protected function sanitizeCssValue(?string $value): string
+    {
+        return preg_replace('/[^A-Za-z0-9#\.\,\%\(\)\s\-\+]/', '', (string) $value) ?? '';
     }
 
     /**

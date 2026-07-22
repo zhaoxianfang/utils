@@ -31,6 +31,11 @@ class HtmlRenderer extends BaseRenderer
             'bearer'   => $config['bearerClass'] ?? 'barcode-bearer',
         ];
 
+        // 净化 CSS 类名，防止属性注入（仅保留字母数字、连字符、下划线与空格）
+        foreach ($cssClasses as $k => $v) {
+            $cssClasses[$k] = preg_replace('/[^A-Za-z0-9_\-\s]/', '', (string) $v) ?? '';
+        }
+
         $barcodeConfig = $config;
         foreach (array_keys($cssClasses) as $k) {
             unset($barcodeConfig[$k . 'Class']);
@@ -72,8 +77,8 @@ class HtmlRenderer extends BaseRenderer
 
         $longBarPositions = $this->calculateLongBarPositions();
 
-        $barColor = $this->config->barColor;
-        $bgColor = $this->config->bgColor;
+        $barColor = $this->sanitizeCssValue($this->config->barColor);
+        $bgColor = $this->sanitizeCssValue($this->config->bgColor);
 
         $html = '<div class="' . $cssClasses['wrapper'] . '" style="';
         $html .= 'display:inline-block;position:relative;';

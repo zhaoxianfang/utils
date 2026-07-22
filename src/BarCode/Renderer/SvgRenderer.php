@@ -130,14 +130,14 @@ class SvgRenderer extends BaseRenderer
         if ($this->enableGradient) {
             $svg .= '  <defs>' . "\n";
             $svg .= '    <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">' . "\n";
-            $svg .= '      <stop offset="0%" style="stop-color:' . $this->gradientStartColor . '"/>' . "\n";
-            $svg .= '      <stop offset="100%" style="stop-color:' . $this->gradientEndColor . '"/>' . "\n";
+            $svg .= '      <stop offset="0%" style="stop-color:' . $this->escapeXmlAttr($this->gradientStartColor) . '"/>' . "\n";
+            $svg .= '      <stop offset="100%" style="stop-color:' . $this->escapeXmlAttr($this->gradientEndColor) . '"/>' . "\n";
             $svg .= '    </linearGradient>' . "\n";
             $svg .= '  </defs>' . "\n";
         }
 
         if (!$isTransparent) {
-            $svg .= '  <rect width="100%" height="100%" fill="' . $bgColor . '"/>' . "\n";
+            $svg .= '  <rect width="100%" height="100%" fill="' . $this->escapeXmlAttr($bgColor) . '"/>' . "\n";
         }
 
         if ($this->borderWidth > 0) {
@@ -147,7 +147,7 @@ class SvgRenderer extends BaseRenderer
 
         // 绘制条码条并分析结构
         $x = $marginLeft;
-        $fillColor = $this->enableGradient ? 'url(#barGradient)' : $barColor;
+        $fillColor = $this->enableGradient ? 'url(#barGradient)' : $this->escapeXmlAttr($barColor);
         
         // 记录所有条的位置
         $bars = [];
@@ -296,7 +296,7 @@ class SvgRenderer extends BaseRenderer
             $x,
             $y,
             $fontSize,
-            $this->watermarkColor,
+            $this->escapeXmlAttr($this->watermarkColor),
             $opacity,
             $transform,
             $text
@@ -320,7 +320,7 @@ class SvgRenderer extends BaseRenderer
      */
     protected function buildSimpleText(string $data, int $marginLeft): string
     {
-        $barColor = $this->config->barColor;
+        $barColor = $this->escapeXmlAttr($this->config->barColor);
         $fontSize = $this->config->fontSize;
         $imgWidth = $this->barcodeStructure['totalWidth'] + $marginLeft + $this->config->marginRight;
 
@@ -500,7 +500,7 @@ class SvgRenderer extends BaseRenderer
             return '';
         }
         
-        $barColor = $this->config->barColor;
+        $barColor = $this->escapeXmlAttr($this->config->barColor);
         $fontSize = $this->dynamicFontSize;
         
         $textElements = '';
