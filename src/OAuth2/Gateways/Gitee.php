@@ -51,9 +51,9 @@ class Gitee extends Gateway
             'open_id' => isset($result['id']) ? $result['id'] : '',
             'union_id'=> isset($result['login']) ? $result['login'] : '',
             'channel' => ConstCode::TYPE_GITEE,
-            'nickname'=> $result['name'],
+            'nickname'=> $result['name'] ?? '',
             'gender'  => ConstCode::GENDER,
-            'avatar'  => $result['avatar_url'],
+            'avatar'  => $result['avatar_url'] ?? '',
             'birthday'=> '',
             'access_token'=> $this->token['access_token'] ?? '',
             'native'=> $result,
@@ -68,8 +68,8 @@ class Gitee extends Gateway
      */
     public function getUserInfo()
     {
-        /** 获取用户信息 */
-        $this->openid();
+        /** 获取 token（直接调 getToken，避免与 openid 互相依赖） */
+        $this->getToken();
 
         $params = [
             'access_token'=>$this->token['access_token'],
@@ -88,7 +88,9 @@ class Gitee extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
+        // Gitee token 响应无 openid，用户标识即 userinfo 响应的 id
+        $result = $this->getUserInfo();
+        return isset($result['id']) ? $result['id'] : '';
     }
 
 
@@ -98,14 +100,13 @@ class Gitee extends Gateway
     protected function getToken(){
         if (empty($this->token)) {
             /** 验证state参数 */
-            $this->CheckState();
+            $this->checkState();
 
-            /** 获取参数 */
+            /** 获取参数（参数走请求体，避免反复拼接污染 AccessTokenURL） */
             $params = $this->accessTokenParams();
 
             /** 获取access_token */
-            $this->AccessTokenURL = $this->AccessTokenURL . '?' . http_build_query($params);
-            $token =  $this->post($this->AccessTokenURL);
+            $token =  $this->post($this->AccessTokenURL, $params);
             /** 解析token值(子类实现此方法) */
             $this->token = $this->parseToken($token);
         }
@@ -123,7 +124,7 @@ class Gitee extends Gateway
         if (isset($data['access_token'])) {
             return $data;
         } else {
-            throw new OAuthException("获取Gitee ACCESS_TOKEN出错：{$data['error']}");
+            throw new OAuthException("获取Gitee ACCESS_TOKEN出错：".($data['error'] ?? 'invalid response'));
         }
     }
 

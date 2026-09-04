@@ -52,12 +52,12 @@ class Aliyun extends Gateway
      */
     public function userInfo()
     {
-        $result = $this->getUserInfo();
+        $result = $this->getUserInfo() ?? [];
         $userInfo = [
             'open_id' => isset($result['uid']) ? $result['uid'] : '',
             'union_id'=> isset($result['aid']) ? $result['aid'] : '',
             'channel' => ConstCode::TYPE_ALIYUN,
-            'nickname'=> $result['login_name'],
+            'nickname'=> $result['login_name'] ?? '',
             'gender'  => ConstCode::GENDER,
             'avatar'  => '',
             'birthday'=> '',
@@ -75,15 +75,16 @@ class Aliyun extends Gateway
      */
     public function getUserInfo()
     {
-        /** 获取用户信息 */
-        $this->openid();
+        /** 获取token（token 响应不含用户标识，openid() 需要走本方法取 uid） */
+        $this->getToken();
 
-        $headers = ['Authorization: Bearer '.$this->token['access_token']];
-        $data = $this->get($this->UserInfoURL, [],$headers);
-        if(is_string($data)){
+        $headers = ['Authorization: Bearer '.($this->token['access_token'] ?? '')];
+        $data = $this->get($this->UserInfoURL, [], $headers);
+        if (is_string($data)) {
             $data = json_decode($data, true);
         }
-        return $data;
+        $this->userInfo = is_array($data) ? $data : [];
+        return $this->userInfo;
     }
 
     /**
@@ -95,6 +96,13 @@ class Aliyun extends Gateway
     public function openid()
     {
         $this->getToken();
+
+        // token 响应本身不含用户标识（access_token/refresh_token/id_token），
+        // 必须通过 userinfo 接口获取 uid；userInfo 数据会缓存，避免重复请求
+        if (empty($this->userInfo)) {
+            $this->getUserInfo();
+        }
+        return $this->userInfo['uid'] ?? '';
     }
 
 
@@ -105,17 +113,17 @@ class Aliyun extends Gateway
     protected function getToken(){
         if (empty($this->token)) {
             /** 验证state参数 */
-            $this->CheckState();
+            $this->checkState();
 
             /** 获取参数 */
             $params = $this->accessTokenParams();
 
-            /** 获取access_token */
-            $this->AccessTokenURL = $this->AccessTokenURL . '?' . http_build_query($params);
-            $token =  $this->post($this->AccessTokenURL);
+            /** 获取access_token（参数走请求体，避免反复拼接污染 AccessTokenURL） */
+            $token =  $this->post($this->AccessTokenURL, $params);
             /** 解析token值(子类实现此方法) */
             $this->token = $this->parseToken($token);
         }
+        return $this->token;
     }
 
     /**
@@ -128,10 +136,10 @@ class Aliyun extends Gateway
     protected function parseToken($token)
     {
         $data = json_decode($token, true);
-        if (isset($data['access_token'])) {
+        if (is_array($data) && isset($data['access_token'])) {
             return $data;
         } else {
-            throw new OAuthException("获取Aliyun ACCESS_TOKEN出错：{$data['error']}");
+            throw new OAuthException("获取Aliyun ACCESS_TOKEN出错：".($data['error'] ?? 'invalid response'));
         }
     }
 

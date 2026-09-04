@@ -122,14 +122,20 @@ final class CSV
                 }
                 $row = $this->convertEncoding($row, $this->inputEncoding, $this->outputEncoding);
                 if ($this->hasHeader && $headers === null) {
+                    // 首行作为表头：同时剥离 UTF-8 BOM，否则第一列的键会带上 \u{FEFF}
                     $headers = array_map(static fn ($h) => trim((string) $h), $row);
+                    if ($headers !== []) {
+                        $headers[array_key_first($headers)] = ltrim(
+                            (string) $headers[array_key_first($headers)],
+                            "\u{FEFF}"
+                        );
+                    }
                     continue;
                 }
                 if ($headers !== null) {
-                    yield $rowNum => array_combine($headers, $row) ?: array_combine(
-                        array_slice($headers, 0, count($row)),
-                        $row
-                    );
+                    // 绝不能 yield false：列数与表头不一致时 array_combine() 返回 false，
+                    // 旧实现两次调用都失败后会 yield false，调用方 foreach 直接 TypeError。
+                    yield $rowNum => self::combineRow($headers, $row);
                 } else {
                     yield $rowNum => $row;
                 }
@@ -150,7 +156,9 @@ final class CSV
     public function write(string $path, array $data): void
     {
         $dir = dirname($path);
-        if (! is_dir($dir) && ! mkdir($dir, 0755, true)) {
+        // 末尾再判一次 is_dir()：并发下目录可能已被其他进程创建，
+        // 此时 mkdir() 返回 false 并不代表失败。
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
             throw new RuntimeException("无法创建目录: {$dir}");
         }
 
@@ -182,7 +190,7 @@ final class CSV
     public function append(string $path, array $data): void
     {
         $dir = dirname($path);
-        if (! is_dir($dir) && ! mkdir($dir, 0755, true)) {
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
             throw new RuntimeException("无法创建目录: {$dir}");
         }
 
@@ -222,6 +230,25 @@ final class CSV
     }
 
     /**
+     * 将一行数据按表头组合成关联数组（列数不一致时用空值补齐 / 丢弃多余列）
+     *
+     * @param array<int, string>       $headers 表头
+     * @param array<int, mixed>        $row     数据行
+     * @return array<string, mixed>
+     */
+    private static function combineRow(array $headers, array $row): array
+    {
+        $count = count($headers);
+        // 列数不足：用空字符串补齐，保证键完整
+        $padded = array_slice(array_values($row), 0, $count);
+        while (count($padded) < $count) {
+            $padded[] = '';
+        }
+
+        return array_combine($headers, $padded) ?: [];
+    }
+
+    /**
      * 编码转换
      */
     private function convertEncoding(array $row, string $from, string $to): array
@@ -251,7 +278,9 @@ final class CSV
             return $row;
         }
         foreach ($row as &$cell) {
-            if (is_string($cell) && $cell !== '' && str_contains('=+-@', $cell[0])) {
+            // 必须排除合法数值（如 "-5"、"1.5"），否则负数会被写成 "'-5" 造成数据污染；
+            // 危险首字符集合按 OWASP 建议补齐制表符与回车。
+            if (is_string($cell) && $cell !== '' && ! is_numeric($cell) && str_contains("=+-@\t\r", $cell[0])) {
                 $cell = "'" . $cell;
             }
         }

@@ -1662,14 +1662,49 @@ class CountryNumber
     }
 
     /**
+     * 将国家区号字段归一化为字符串数组
+     *
+     * 数据中的 `number` 目前均为字符串（部分为空串），但语义上"多个国家可共用区号"
+     * 允许其扩展为数组；此处统一归一化为 `string[]`，避免调用方因数据类型变化而崩溃。
+     *
+     * @param array<int|string>|string|null $number
+     * @return list<string>
+     */
+    private static function normalizeNumbers(array|string|null $number): array
+    {
+        if ($number === null || $number === '') {
+            return [];
+        }
+
+        $numbers = is_array($number) ? $number : [$number];
+
+        $normalized = [];
+        foreach ($numbers as $item) {
+            if (is_int($item) || is_float($item)) {
+                $item = (string) $item;
+            }
+            // 注意：不能把区号当数组键来去重（如 $map[$item] = true），
+            // PHP 会把纯十进制数字字符串键自动转为 int，导致 '86' 变成 86，
+            // 后续 in_array($number, ..., true) 严格比较将永远失败。
+            if (is_string($item) && $item !== '') {
+                $normalized[] = $item;
+            }
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /**
      * 获取所有国家号码(区号)
      *      有些区号是多个国家共用一个区号
+     *
+     * @return array<string, list<string>> 国家名 => 区号列表
      */
     public function getAllCountryNumber(): array
     {
         $countryNumber = [];
         foreach ($this->countries as $key => $value) {
-            $countryNumber[$key] = array_unique($value['number']);
+            $countryNumber[$key] = self::normalizeNumbers($value['number'] ?? null);
         }
 
         return $countryNumber;
@@ -1702,9 +1737,13 @@ class CountryNumber
      */
     public function getCountryNameByNumber(string $number): array
     {
+        if ($number === '') {
+            return [];
+        }
+
         $countryName = [];
         foreach ($this->countries as $name => $value) {
-            if (in_array($number, $value['number'])) {
+            if (in_array($number, self::normalizeNumbers($value['number'] ?? null), true)) {
                 $countryName[] = $name;
             }
         }
@@ -1734,9 +1773,13 @@ class CountryNumber
      */
     public function getCountryMobilePrefixByNumber(string $number): array
     {
+        if ($number === '') {
+            return [];
+        }
+
         $countryMobilePrefix = [];
         foreach ($this->countries as $name => $value) {
-            if (in_array($number, $value['number'])) {
+            if (in_array($number, self::normalizeNumbers($value['number'] ?? null), true)) {
                 $countryMobilePrefix[$name] = $value['prefix'];
             }
         }

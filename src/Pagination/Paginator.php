@@ -270,14 +270,22 @@ class Paginator
             $pages[] = $this->renderLink(str_replace('{page}', (string) $this->previousPage(), $urlPattern), '上一页', 'prev');
         }
 
-        // 首页
-        if ($current > $this->pageRange + 1) {
+        // 页码范围（只计算一次；两端依据窗口边界与首页/尾页的距离补省略号）
+        $rangePages = $this->getPageRange();
+        $first = $rangePages[0];
+        $last = $rangePages[count($rangePages) - 1];
+        $totalPages = $this->totalPages();
+
+        // 首页 / 前省略号：仅当窗口确实与首页拉开距离时才出现（窗口含 2 时不输出多余的 "1 ... 2"）
+        if ($first > 1) {
             $pages[] = $this->renderLink(str_replace('{page}', '1', $urlPattern), '1');
-            $pages[] = '<span class="ellipsis">...</span>';
+            if ($first > 2) {
+                $pages[] = '<span class="ellipsis">...</span>';
+            }
         }
 
         // 页码范围
-        foreach ($this->getPageRange() as $page) {
+        foreach ($rangePages as $page) {
             if ($page === $current) {
                 $pages[] = "<span class=\"current\">{$page}</span>";
             } else {
@@ -285,10 +293,12 @@ class Paginator
             }
         }
 
-        // 尾页
-        if ($current < $this->totalPages() - $this->pageRange) {
-            $pages[] = '<span class="ellipsis">...</span>';
-            $pages[] = $this->renderLink(str_replace('{page}', (string) $this->totalPages(), $urlPattern), (string) $this->totalPages());
+        // 尾页 / 尾省略号
+        if ($last < $totalPages) {
+            if ($last < $totalPages - 1) {
+                $pages[] = '<span class="ellipsis">...</span>';
+            }
+            $pages[] = $this->renderLink(str_replace('{page}', (string) $totalPages, $urlPattern), (string) $totalPages);
         }
 
         // 下一页

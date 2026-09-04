@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace zxf\Utils\Env;
 
 use InvalidArgumentException;
+use JsonException;
 use RuntimeException;
 
 /**
  * 环境变量工具类
  * 提供 .env 文件加载、类型自动转换、默认值、必填校验等功能
  * 支持字符串、整数、浮点、布尔、数组、JSON 等类型的自动转换
+ *
+ * 注意：值按「单行」解析，不支持跨行的引号值；行内注释（VALUE # comment）不会被剥离。
  *
  * @package Env
  * @version 1.0.0
@@ -41,6 +44,9 @@ class Env
         }
 
         $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            throw new RuntimeException('.env 文件无法读取: ' . $path);
+        }
         $loaded = [];
 
         foreach ($lines as $line) {
@@ -57,7 +63,20 @@ class Env
 
             [$key, $value] = explode('=', $line, 2);
             $key = trim($key);
+            // 兼容 .env 中常见的 "export KEY=value" 写法
+            if (str_starts_with($key, 'export ')) {
+                $key = trim(substr($key, 7));
+            }
             $value = trim($value);
+
+            // 变量名与值必须可控：putenv() 自身不做校验，
+            // 键中含空格/"=" 或值中含换行、NUL 都可能注入出额外的环境变量，这里统一拒绝。
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/', $key) !== 1) {
+                throw new InvalidArgumentException("非法的环境变量名: {$key}");
+            }
+            if (strpbrk($value, "\r\n\0") !== false) {
+                throw new InvalidArgumentException("环境变量 {$key} 的值不能包含换行或 NUL 字符");
+            }
 
             // 去除引号
             if (str_starts_with($value, '"') && str_ends_with($value, '"')) {
@@ -103,11 +122,13 @@ class Env
             $env = getenv($key);
             $value = ($env === false) ? null : $env;
         }
-        if ($value === null) {
-            $value = $_ENV[$key] ?? null;
+        // $_ENV / $_SERVER 里存在大量非字符串值（如 REQUEST_TIME、argv），
+        // 直接交给 cast(string) 会在 strict_types 下触发 TypeError，这里只取字符串。
+        if ($value === null && isset($_ENV[$key]) && is_string($_ENV[$key])) {
+            $value = $_ENV[$key];
         }
-        if ($value === null) {
-            $value = $_SERVER[$key] ?? null;
+        if ($value === null && isset($_SERVER[$key]) && is_string($_SERVER[$key])) {
+            $value = $_SERVER[$key];
         }
 
         if ($value === null) {
@@ -277,9 +298,24 @@ class Env
                 array_map('trim', explode(',', $value)),
                 static fn (string $v): bool => $v !== ''
             )),
-            'json'               => json_decode($value, true) ?? $value,
+            'json'               => self::decodeJson($value),
             default              => $value,
         };
+    }
+
+    /**
+     * 解码 JSON 字符串，解码失败时返回原始字符串
+     *
+     * 旧实现用 `json_decode(...) ?? $value`：合法的 JSON "null" / "false"
+     * 也会被当成失败回退成字符串，这里改用异常区分。
+     */
+    private static function decodeJson(string $value): mixed
+    {
+        try {
+            return json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return $value;
+        }
     }
 
     /**

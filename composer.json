@@ -15,7 +15,19 @@
   ],
   "require": {
     "php": ">=8.2",
-    "picqer/php-barcode-generator": "^3.2"
+    "ext-json": "*",
+    "ext-mbstring": "*"
+  },
+  "suggest": {
+    "ext-curl": "启用 Http\\Curl 与 OAuth2 各网关的网络请求能力",
+    "ext-dom": "启用 Xml\\Array2XML / Xml\\XML2Array / Security\\XssCleaner 的 DOM 解析",
+    "ext-gd": "启用图片处理（Image\\Compressor、Image\\TextToImg、QR 码 PNG 输出）",
+    "ext-imagick": "启用 Image\\ImagickTool（可选，缺省时该类会给出明确提示）",
+    "ext-openssl": "启用 Crypto\\RSA / Crypto\\ECC 等非对称加密能力",
+    "ext-simplexml": "启用 Xml 模块的 SimpleXML 相关特性",
+    "ext-zip": "启用 Files\\Archive 的压缩包读写能力",
+    "illuminate/support": "在 Laravel 中使用时自动注册 Providers\\UtilsServiceProvider",
+    "league/oauth2-client": "启用 PHPMailer\\OAuth（PHPMailer 的 XOAUTH2 鉴权支持）"
   },
   "autoload": {
     "psr-4": {
@@ -37,6 +49,10 @@
         "zxf\\Utils\\Providers\\UtilsServiceProvider"
       ]
     }
+  },
+  "scripts": {
+    "test": "php tests/run.php",
+    "lint": "php tests/lint.php"
   },
   "config": {
     "sort-packages": true,

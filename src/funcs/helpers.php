@@ -482,22 +482,35 @@ if (! function_exists('array_to_tree')) {
         ?callable $callback = null,
         ?string $sortField = null
     ): array {
-        // 构建索引
+        // 构建索引（缺失父级字段时归入根级，避免 "Undefined array key" 警告）
         $index = [];
         foreach ($array as $item) {
-            $index[$item[$pidField]][] = $item;
+            $pid = $item[$pidField] ?? $parentId;
+            if (is_scalar($pid) || $pid === null) {
+                $index[(string) $pid][] = $item;
+            }
         }
 
-        // 递归构建树
-        $buildTree = function($parentId) use (&$buildTree, $index, $keyField, $childField, $callback, $sortField) {
+        // 递归构建树。
+        // $path 记录当前递归链路上已访问过的父级 ID：
+        // 数据存在循环引用（A 的父是 B、B 的父是 A）或自引用（id === pid）时，
+        // 若不做检测会无限递归直至爆栈，此处直接切断并停止下钻。
+        $buildTree = function ($parentId, array $path = []) use (&$buildTree, $index, $keyField, $childField, $callback, $sortField) {
+            $key = (string) $parentId;
+
+            if (isset($path[$key])) {
+                return [];
+            }
+
             $tree = [];
 
-            if (isset($index[$parentId])) {
-                $children = $index[$parentId];
+            if (isset($index[$key])) {
+                $children = $index[$key];
+                $path[$key] = true;
 
                 // 排序
                 if ($sortField && !empty($children)) {
-                    usort($children, function($a, $b) use ($sortField) {
+                    usort($children, function ($a, $b) use ($sortField) {
                         return ($a[$sortField] ?? 0) <=> ($b[$sortField] ?? 0);
                     });
                 }
@@ -508,7 +521,7 @@ if (! function_exists('array_to_tree')) {
                         $node = $callback($node);
                     }
 
-                    $nodeChildren = $buildTree($child[$keyField]);
+                    $nodeChildren = $buildTree($node[$keyField] ?? null, $path);
                     if (!empty($nodeChildren)) {
                         $node[$childField] = $nodeChildren;
                     }
@@ -561,7 +574,10 @@ if (! function_exists('tree_to_array')) {
                 $currentNode = $callback($currentNode);
             }
 
+            // 子级字段可能缺失或不是数组（PHP 8 下 count() 对非 Countable 会抛 TypeError）
             $children = $currentNode[$childField] ?? [];
+            $children = is_array($children) ? array_values($children) : [];
+
             unset($currentNode[$childField]);
             unset($currentNode['_level']);
             unset($currentNode['_has_prev']);
@@ -1341,6 +1357,37 @@ if (! function_exists('url_conversion')) {
 }
 
 
+if (! function_exists('get_http_headers')) {
+    /**
+     * 获取当前请求的所有 HTTP 头（键统一为大写，便于大小写不敏感访问）
+     *
+     * `getallheaders()` 只在 Apache / FPM 等 SAPI 下存在，CLI 与部分 CGI 环境
+     * 调用会直接致命；此处做降级：从 `$_SERVER` 的 `HTTP_*` 变量重建。
+     *
+     * @return array<string, string> 请求头数组，键形如 'X-QQ-FROM'
+     */
+    function get_http_headers(): array
+    {
+        if (function_exists('getallheaders')) {
+            $headers = @getallheaders();
+            if (is_array($headers)) {
+                return array_change_key_case($headers, CASE_UPPER);
+            }
+        }
+
+        $headers = [];
+        foreach ($_SERVER as $key => $value) {
+            if (str_starts_with($key, 'HTTP_')) {
+                $headers[str_replace('_', '-', substr($key, 5))] = (string) $value;
+            } elseif (in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true)) {
+                $headers[str_replace('_', '-', $key)] = (string) $value;
+            }
+        }
+
+        return $headers;
+    }
+}
+
 if (! function_exists('is_qq_browser')) {
     /**
      * 判断来源是否为QQ浏览器
@@ -1349,11 +1396,12 @@ if (! function_exists('is_qq_browser')) {
      */
     function is_qq_browser(): bool
     {
-        // 获取所有的header信息
-        $headers = getallheaders();
+        $headers = get_http_headers();
         $http_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        return str_contains($http_user_agent, 'MQQBrowser') || str_contains($http_user_agent, 'QQ') || isset($headers['X-QQ-From']);
+        return str_contains($http_user_agent, 'MQQBrowser')
+            || str_contains($http_user_agent, 'QQ')
+            || isset($headers['X-QQ-FROM']);
     }
 }
 
@@ -1365,11 +1413,12 @@ if (! function_exists('is_wechat_browser')) {
      */
     function is_wechat_browser(): bool
     {
-        // 获取所有的header信息
-        $headers = getallheaders();
+        $headers = get_http_headers();
         $http_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        return str_contains($http_user_agent, 'MicroMessenger') || str_contains($http_user_agent, 'WeChat') || isset($headers['X-Weixin-From']);
+        return str_contains($http_user_agent, 'MicroMessenger')
+            || str_contains($http_user_agent, 'WeChat')
+            || isset($headers['X-WEIXIN-FROM']);
     }
 }
 
@@ -1381,11 +1430,10 @@ if (! function_exists('is_weibo_browser')) {
      */
     function is_weibo_browser(): bool
     {
-        // 获取所有的header信息
-        $headers = getallheaders();
+        $headers = get_http_headers();
         $http_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        return str_contains($http_user_agent, 'Weibo') || isset($headers['X-Weibo-From']);
+        return str_contains($http_user_agent, 'Weibo') || isset($headers['X-WEIBO-FROM']);
     }
 }
 
@@ -1397,11 +1445,14 @@ if (! function_exists('is_alipay_browser')) {
      */
     function is_alipay_browser(): bool
     {
-        // 获取所有的header信息
-        $headers = getallheaders();
+        $headers = get_http_headers();
         $http_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        return str_contains($http_user_agent, 'AlipayClient') || str_contains($http_user_agent, 'Alipay') || isset($headers['X-Weibo-From']);
+        // 注意：此前此处误判了 X-WEIBO-FROM（复制粘贴遗留），
+        // 会导致微博来源被同时判成支付宝来源
+        return str_contains($http_user_agent, 'AlipayClient')
+            || str_contains($http_user_agent, 'Alipay')
+            || isset($headers['X-ALIPAY-FROM']);
     }
 }
 

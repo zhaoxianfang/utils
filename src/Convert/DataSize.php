@@ -20,6 +20,8 @@ declare(strict_types=1);
 
 namespace zxf\Utils\Convert;
 
+use InvalidArgumentException;
+
 /**
  * 数据大小转换工具
  *
@@ -52,21 +54,36 @@ final class DataSize
 
     /**
      * 从字符串解析（如 "1.5GB", "1024KB"）
+     *
+     * @param string $size 数据大小字符串，如 "2.5GB"、"1024 kb"、"512"
+     *
+     * @throws InvalidArgumentException 格式非法、单位不支持或数值不合法时抛出
      */
     public static function parse(string $size): self
     {
         $size = trim($size);
+
         // 仅允许 UNITS 中实际支持的单位（B/KB/MB/GB/TB/PB），
         // 避免正则接受 EB 等未定义单位导致 “Unknown unit” 异常（与 autoFormat 支持的层级保持一致）
-        if (! preg_match('/^([\d.]+)\s*([KMGTP]?B)$/i', $size, $matches)) {
-            throw new \InvalidArgumentException('Invalid data size format: ' . $size);
+        if (! preg_match('/^(\d[\d,]*(?:\.\d+)?|\.\d+)\s*([KMGTP]?B)?$/i', $size, $matches)) {
+            throw new InvalidArgumentException('Invalid data size format: ' . $size);
         }
 
-        $value = (float) $matches[1];
-        $unit = strtoupper($matches[2]);
+        // 去掉千分位分隔符后校验为合法数字（正则已保证格式，这里防御 "1.2.3" 之类的异常输入）
+        $number = str_replace(',', '', $matches[1]);
+        if (! is_numeric($number)) {
+            throw new InvalidArgumentException('Invalid data size number: ' . $matches[1]);
+        }
+
+        $value = (float) $number;
+        $unit = strtoupper($matches[2] ?? 'B');
 
         if (! isset(self::UNITS[$unit])) {
-            throw new \InvalidArgumentException('Unknown unit: ' . $unit);
+            throw new InvalidArgumentException('Unknown unit: ' . $unit);
+        }
+
+        if ($value < 0 || is_nan($value) || is_infinite($value)) {
+            throw new InvalidArgumentException('Data size must be a finite non-negative number: ' . $size);
         }
 
         return new self((int) round($value * self::UNITS[$unit]));
@@ -97,21 +114,35 @@ final class DataSize
         return round($this->bytes / self::UNITS['TB'], $precision);
     }
 
+    public function toPb(int $precision = 2): float
+    {
+        return round($this->bytes / self::UNITS['PB'], $precision);
+    }
+
     /**
      * 自动选择最合适的单位格式化
+     *
+     * 以 1024 为进制逐级放大，字节级（B）不保留小数。
      */
     public function autoFormat(int $precision = 2): string
     {
-        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-        $value = $this->bytes;
+        $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        $lastIndex = count($units) - 1;
+
+        $value = (float) $this->bytes;
         $unitIndex = 0;
 
-        while ($value >= 1024 && $unitIndex < count($units) - 1) {
+        while ($value >= 1024 && $unitIndex < $lastIndex) {
             $value /= 1024;
             $unitIndex++;
         }
 
-        return round($value, $precision) . ' ' . $units[$unitIndex];
+        // 字节是整数单位，输出小数没有意义（如 "512.00 B"）
+        $number = $unitIndex === 0
+            ? (string) (int) round($value)
+            : (string) round($value, $precision);
+
+        return $number . ' ' . $units[$unitIndex];
     }
 
     /**
@@ -127,6 +158,9 @@ final class DataSize
         return new self($this->bytes + $other->bytes);
     }
 
+    /**
+     * 相减（结果不会为负，小于 0 时按 0 处理）
+     */
     public function subtract(self $other): self
     {
         return new self(max(0, $this->bytes - $other->bytes));

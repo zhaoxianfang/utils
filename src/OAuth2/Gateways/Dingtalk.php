@@ -23,7 +23,6 @@ class Dingtalk extends Gateway
      */
     public function getRedirectUrl()
     {
-        $this->switchAccessTokenURL();
         $params = [
             'client_id'     => $this->config['app_id'],
             'redirect_uri'  => $this->config['callback'],
@@ -40,8 +39,8 @@ class Dingtalk extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['openId'] ?? '';
+        $token = $this->getAccessToken();
+        return $token['openId'] ?? $token['unionId'] ?? '';
     }
 
     /**
@@ -70,40 +69,53 @@ class Dingtalk extends Gateway
      */
     public function getUserInfo()
     {
-        $this->getToken();
-        
+        $token = $this->getAccessToken();
+
         $headers = [
-            'x-acs-dingtalk-access-token' => $this->token['accessToken']
+            'x-acs-dingtalk-access-token' => $token['accessToken'] ?? ''
         ];
-        
+
         $data = $this->get($this->UserInfoURL, [], $headers);
-        if(is_string($data)){
+        if (is_string($data)) {
             $data = json_decode($data, true);
+        }
+        if (!is_array($data)) {
+            $data = [];
         }
         return $data;
     }
 
     /**
-     * 获取access_token
+     * 获取access_token（钉钉 v1.0 userAccessToken：body 为驼峰参数，且要求 JSON 提交，
+     * 因此不能复用父类 getToken() 的下划线参数流程；此处自带请求与缓存）
+     *
+     * @return array<string,mixed>
+     * @throws OAuthException
      */
     protected function getAccessToken()
     {
+        // 已获取过且未刷新时直接复用缓存
+        if (!empty($this->token['accessToken'])) {
+            return $this->token;
+        }
+
         $params = [
             'clientId'     => $this->config['app_id'],
             'clientSecret' => $this->config['app_secret'],
             'code'         => isset($_REQUEST['code']) ? $_REQUEST['code'] : '',
             'grantType'    => 'authorization_code'
         ];
-        
+
         $response = $this->post($this->AccessTokenURL, $params);
-        if(is_string($response)){
+        if (is_string($response)) {
             $response = json_decode($response, true);
         }
-        
-        if (!isset($response['accessToken'])) {
-            throw new OAuthException('获取钉钉 access_token 出错：' . json_encode($response));
+
+        if (!is_array($response) || !isset($response['accessToken'])) {
+            throw new OAuthException('获取钉钉 access_token 出错：' . (is_string($response) ? $response : json_encode($response)));
         }
-        return $response;
+        $this->token = $response;
+        return $this->token;
     }
 
     /**
@@ -112,15 +124,16 @@ class Dingtalk extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['accessToken'];
+            $token = $this->getAccessToken();
+            $accessToken = $accessToken ?? ($token['accessToken'] ?? '');
             $headers = [
                 'x-acs-dingtalk-access-token' => $accessToken
             ];
             $data = $this->get($this->UserInfoURL, [], $headers);
-            if(is_string($data)){
+            if (is_string($data)) {
                 $data = json_decode($data, true);
             }
-            return isset($data['nick']);
+            return is_array($data) && isset($data['nick']);
         } catch (\Exception $e) {
             return false;
         }
@@ -137,13 +150,13 @@ class Dingtalk extends Gateway
             'grantType'    => 'refresh_token',
             'refreshToken' => $refreshToken,
         ];
-        
+
         $response = $this->post($this->AccessTokenURL, $params);
-        if(is_string($response)){
+        if (is_string($response)) {
             $response = json_decode($response, true);
         }
-        
-        if (isset($response['accessToken'])) {
+
+        if (is_array($response) && isset($response['accessToken'])) {
             $this->token = $response;
             return true;
         }

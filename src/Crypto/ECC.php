@@ -153,10 +153,11 @@ class ECC
         bool $debugMode = false
     ) {
         $this->debugMode = $debugMode;
-        $this->validateCurve($curveName);
-        $this->curveName = $curveName;
+        // 统一把 RFC 7517 标准名（P-256/P-384/P-521）归一化为 OpenSSL 内部名，内部一律使用后者
+        $this->curveName = self::normalizeCurveName($curveName);
+        $this->validateCurve($this->curveName);
 
-        $this->logDebug("ECC加密器初始化 - 曲线: {$curveName}");
+        $this->logDebug("ECC加密器初始化 - 曲线: {$this->curveName}");
 
         try {
             if ($privateKey === null && $publicKey === null) {
@@ -607,6 +608,11 @@ class ECC
      *
      * @throws RuntimeException 当签名失败时抛出
      *
+     * 注意：PHP 的 openssl_sign 无法注入确定性 nonce k（RFC 6979），
+     * $deterministic 参数保留仅为 API 兼容；实际无论是否传 true，
+     * 均由 OpenSSL 内部 CSPRNG 生成 k（安全性不受影响，但签名不保证可复现）。
+     * 需要真正确定性签名时应使用专门的密码学库（如 mdanter/ecc）。
+     *
      * 使用示例：
      * $signature = $ecc->sign('重要数据', 'sha256', true);
      */
@@ -620,127 +626,26 @@ class ECC
         $this->updatePerformanceStats('signing', strlen($data));
 
         try {
-            $signature = '';
-
             if ($deterministic) {
-                // 使用确定性ECDSA签名 (RFC 6979)
-                $signature = $this->signDeterministicECDSA($data, $algorithm);
-            } else {
-                // 标准ECDSA签名
-                $success = openssl_sign($data, $signature, $this->privateKey, $algorithm);
-                if (!$success) {
-                    $error = openssl_error_string();
-                    throw new RuntimeException('ECDSA签名失败: ' . ($error ?: '未知错误'));
-                }
+                // PHP openssl 绑定不支持 k 注入，无法真正实现 RFC 6979 确定性签名，
+                // 此处回退到加密安全随机 ECDSA（与 deterministic=false 行为一致）
+                $this->logDebug("deterministic=true 已请求，但 PHP OpenSSL 不支持注入确定性 k，回退为安全随机 ECDSA 签名");
             }
 
-            $this->logDebug("ECC签名成功 - 算法: {$algorithm}, 确定性: " . ($deterministic ? '是' : '否'));
+            $signature = '';
+            $success = openssl_sign($data, $signature, $this->privateKey, $algorithm);
+            if (!$success) {
+                $error = openssl_error_string();
+                throw new RuntimeException('ECDSA签名失败: ' . ($error ?: '未知错误'));
+            }
+
+            $this->logDebug("ECC签名成功 - 算法: {$algorithm}");
             return $signature;
 
         } catch (Exception $e) {
             $this->logDebug("ECC签名失败: " . $e->getMessage());
             throw new RuntimeException('ECC签名失败: ' . $e->getMessage());
         }
-    }
-
-    /**
-     * 实现确定性ECDSA签名 (RFC 6979)
-     *
-     * @param string $data 要签名的数据
-     * @param string $algorithm 哈希算法
-     * @return string 签名结果
-     * @access private
-     */
-    private function signDeterministicECDSA(string $data, string $algorithm): string
-    {
-        // 计算数据的哈希
-        $hash = hash($algorithm, $data, true);
-
-        // 获取密钥详情
-        $keyDetails = openssl_pkey_get_details($this->privateKey);
-        if ($keyDetails === false || !isset($keyDetails['ec'])) {
-            throw new RuntimeException('无法获取ECC密钥详情');
-        }
-
-        $ecDetails = $keyDetails['ec'];
-
-        // 这里简化实现确定性ECDSA
-        // 实际生产环境应该使用专门的密码学库来实现RFC 6979
-        // 当前实现通过固定盐值来模拟确定性行为
-
-        // 使用固定盐值模拟确定性签名（仅用于测试）
-        $salt = hash('sha256', $ecDetails['d'] . $hash . 'deterministic_salt', true);
-
-        // 使用HMAC基于私钥和哈希生成确定性k值
-        $k = $this->generateDeterministicK($ecDetails['d'], $hash, $ecDetails['curve_name']);
-
-        // 由于PHP openssl扩展不支持直接指定k值，我们使用替代方法
-        // 在实际应用中，应该使用支持RFC 6979的密码学库
-
-        $signature = '';
-        $success = openssl_sign($data, $signature, $this->privateKey, $algorithm);
-
-        if (!$success) {
-            $error = openssl_error_string();
-            throw new RuntimeException('确定性ECDSA签名失败: ' . ($error ?: '未知错误'));
-        }
-
-        return $signature;
-    }
-
-    /**
-     * 生成确定性k值 (RFC 6979 简化实现)
-     *
-     * @param string $privateKey 私钥参数d
-     * @param string $hash 数据哈希
-     * @param string $curveName 曲线名称
-     * @return string 确定性k值
-     * @access private
-     */
-    private function generateDeterministicK(string $privateKey, string $hash, string $curveName): string
-    {
-        // RFC 6979 第3.2节简化实现
-        // 实际生产环境应该完整实现RFC 6979
-
-        $v = str_repeat("\x01", 32); // 初始V
-        $k = str_repeat("\x00", 32); // 初始K
-
-        // HMAC-based KDF
-        $data = $v . "\x00" . $privateKey . $hash . $this->getCurveBits($curveName);
-
-        $k = hash_hmac('sha256', $data, $k, true);
-        $v = hash_hmac('sha256', $v, $k, true);
-
-        $k = hash_hmac('sha256', $v . "\x01" . $privateKey . $hash, $k, true);
-        $v = hash_hmac('sha256', $v, $k, true);
-
-        // 生成候选k值
-        $candidate = '';
-        while (strlen($candidate) < 32) {
-            $v = hash_hmac('sha256', $v, $k, true);
-            $candidate .= $v;
-        }
-
-        return substr($candidate, 0, 32);
-    }
-
-    /**
-     * 获取曲线的位长度
-     *
-     * @param string $curveName 曲线名称
-     * @return string 位长度
-     * @access private
-     */
-    private function getCurveBits(string $curveName): string
-    {
-        $bits = [
-            'prime256v1' => "\x00\x01\x00", // 256 bits
-            'secp384r1' => "\x00\x01\x80",  // 384 bits
-            'secp521r1' => "\x00\x02\x08",  // 521 bits
-            'secp256k1' => "\x00\x01\x00"   // 256 bits
-        ];
-
-        return $bits[$curveName] ?? $bits['prime256v1'];
     }
 
     /**
@@ -1063,6 +968,8 @@ class ECC
         string $passphrase = ''
     ): array {
         try {
+            // 归一化后实例内部存 OpenSSL 名，元数据查找与返回的 curve_name 均一致
+            $curveName = self::normalizeCurveName($curveName);
             $ecc = new self(null, null, $curveName);
 
             $curveInfo = self::SUPPORTED_CURVES[$curveName] ?? [
@@ -1381,15 +1288,22 @@ class ECC
         $details = $this->getKeyDetails();
         $ecDetails = $details['ec'];
 
+        // RFC 7517：crv 使用标准名（P-256/P-384/P-521），secp256k1 本身即标准名
+        $crv = self::standardCrvName($this->curveName);
+        $coordSize = self::ecCoordSizeByCurve($this->curveName);
+
+        // openssl 详情中的 x/y/d 可能省略前导零字节，必须补齐到曲线坐标长度
+        $pad = static fn (?string $v): string => $v === null || $v === '' ? '' : str_pad($v, $coordSize, "\x00", STR_PAD_LEFT);
+
         $jwk = [
             'kty' => 'EC',
-            'crv' => $this->curveName,
-            'x' => rtrim(strtr(base64_encode($ecDetails['x']), '+/', '-_'), '='),
-            'y' => rtrim(strtr(base64_encode($ecDetails['y']), '+/', '-_'), '='),
+            'crv' => $crv,
+            'x' => Base64::urlSafeEncode($pad($ecDetails['x'] ?? null)),
+            'y' => Base64::urlSafeEncode($pad($ecDetails['y'] ?? null)),
         ];
 
         if ($includePrivate && $this->privateKey !== null && isset($ecDetails['d'])) {
-            $jwk['d'] = rtrim(strtr(base64_encode($ecDetails['d']), '+/', '-_'), '=');
+            $jwk['d'] = Base64::urlSafeEncode($pad($ecDetails['d']));
         }
 
         $this->logDebug("导出JWK格式" . ($includePrivate ? ' (包含私钥)' : ' (仅公钥)'));
@@ -1399,14 +1313,14 @@ class ECC
     /**
      * 从JWK导入密钥
      *
-     * @param array $jwk JWK格式的密钥
+     * @param array $jwk JWK格式的密钥（crv 兼容标准名 P-256/P-384/P-521/secp256k1 与 OpenSSL 名）
      * @param string $passphrase 密码（可选）
      * @return self ECC实例
      *
      * @throws InvalidArgumentException 当JWK格式无效时抛出
      *
      * 使用示例：
-     * $ecc = ECC::createFromJWK($jwkData, 'mypassword');
+     * $ecc = ECC::createFromJWK($jwkData);
      */
     public static function createFromJWK(array $jwk, string $passphrase = ''): self
     {
@@ -1418,40 +1332,231 @@ class ECC
             throw new InvalidArgumentException('无效的JWK格式：缺少必要参数');
         }
 
-        $curveName = $jwk['crv'];
+        $curveName = self::normalizeCurveName((string) $jwk['crv']);
 
-        // 检查是否包含私钥
-        $privateKey = null;
-        $publicKey = null;
+        // 构造公钥 PEM（真实还原 x/y 坐标，不再生成随机密钥）
+        $publicKeyPem = self::buildPublicKeyFromJWK($jwk);
 
         if (isset($jwk['d'])) {
-            // 包含私钥，生成完整的密钥对
-            $keyPair = self::createKeyPair($curveName, $passphrase);
-            $privateKey = $keyPair['private_key'];
-            $publicKey = $keyPair['public_key'];
-        } else {
-            // 仅公钥，从JWK参数构建
-            $publicKey = self::buildPublicKeyFromJWK($jwk);
+            if (!is_string($jwk['d']) || $jwk['d'] === '') {
+                throw new InvalidArgumentException('无效的JWK格式：d 必须是字符串');
+            }
+            $privateKeyPem = self::buildPrivateKeyFromJWK($jwk, $curveName);
+            // 传入私钥 PEM，由构造器自动派生/校验公钥
+            return self::constructFromPem($privateKeyPem, $publicKeyPem, $curveName);
         }
 
-        return new self($privateKey, $publicKey, $curveName, $passphrase);
+        return self::constructFromPem(null, $publicKeyPem, $curveName);
     }
 
     /**
-     * 从JWK构建公钥
+     * 构造 ECC 实例，并把 OpenSSL 层加载失败统一转换为 InvalidArgumentException
+     * （JWK 数据无效 = 调用方输入错误，不属于运行时内部故障）
+     */
+    private static function constructFromPem(?string $privPem, ?string $pubPem, string $curveName): self
+    {
+        try {
+            return new self($privPem, $pubPem, $curveName);
+        } catch (RuntimeException $e) {
+            throw new InvalidArgumentException('无效的JWK密钥数据: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * 将 OpenSSL 曲线名与 RFC 7517 标准名统一为 OpenSSL 内部名
+     */
+    private static function normalizeCurveName(string $curve): string
+    {
+        return match ($curve) {
+            'P-256', 'prime256v1', 'secp256r1' => 'prime256v1',
+            'P-384', 'secp384r1' => 'secp384r1',
+            'P-521', 'secp521r1' => 'secp521r1',
+            'secp256k1' => 'secp256k1',
+            default => $curve, // 交由 validateCurve 抛出明确错误
+        };
+    }
+
+    /**
+     * 将 OpenSSL 内部曲线名转为 RFC 7517 标准 crv 名
+     */
+    private static function standardCrvName(string $curve): string
+    {
+        return match ($curve) {
+            'prime256v1' => 'P-256',
+            'secp384r1' => 'P-384',
+            'secp521r1' => 'P-521',
+            default => $curve, // secp256k1 自身即标准名
+        };
+    }
+
+    /**
+     * 曲线坐标字节长度
+     */
+    private static function ecCoordSizeByCurve(string $curve): int
+    {
+        return match ($curve) {
+            'prime256v1', 'secp256k1' => 32,
+            'secp384r1' => 48,
+            'secp521r1' => 66,
+            default => 32,
+        };
+    }
+
+    /**
+     * 曲线 OID（点分字符串）
+     */
+    private static function curveOid(string $curve): string
+    {
+        return match ($curve) {
+            'prime256v1' => '1.2.840.10045.3.1.7',
+            'secp384r1' => '1.3.132.0.34',
+            'secp521r1' => '1.3.132.0.35',
+            'secp256k1' => '1.3.132.0.10',
+            default => throw new InvalidArgumentException("不支持的曲线: {$curve}"),
+        };
+    }
+
+    /** DER 长度编码（definite form） */
+    private static function derLength(int $length): string
+    {
+        if ($length < 0x80) {
+            return chr($length);
+        }
+        $bytes = '';
+        while ($length > 0) {
+            $bytes = chr($length & 0xff) . $bytes;
+            $length >>= 8;
+        }
+        return chr(0x80 | strlen($bytes)) . $bytes;
+    }
+
+    private static function derSequence(string $content): string
+    {
+        return "\x30" . self::derLength(strlen($content)) . $content;
+    }
+
+    private static function derOctetString(string $content): string
+    {
+        return "\x04" . self::derLength(strlen($content)) . $content;
+    }
+
+    /** 无符号整数 → DER INTEGER（必要时补 0x00 保证正数） */
+    private static function derInteger(string $bytes): string
+    {
+        $bytes = ltrim($bytes, "\x00");
+        if ($bytes === '') {
+            $bytes = "\x00";
+        }
+        if ((ord($bytes[0]) & 0x80) !== 0) {
+            $bytes = "\x00" . $bytes;
+        }
+        return "\x02" . self::derLength(strlen($bytes)) . $bytes;
+    }
+
+    /** 未压缩点（0x04‖x‖y）→ DER BIT STRING（首字节为 unused bits=0） */
+    private static function derBitString(string $bytes): string
+    {
+        return "\x03" . self::derLength(strlen($bytes) + 1) . "\x00" . $bytes;
+    }
+
+    /** context-specific 显式标签 [n] EXPLICIT */
+    private static function derContextExplicit(int $tag, string $content): string
+    {
+        return chr(0xa0 | $tag) . self::derLength(strlen($content)) . $content;
+    }
+
+    /** 点分 OID → DER OID 字节 */
+    private static function derOid(string $oid): string
+    {
+        $parts = explode('.', $oid);
+        if (count($parts) < 2 || !ctype_digit(implode('', $parts))) {
+            throw new InvalidArgumentException("无效的OID: {$oid}");
+        }
+        $first = (int) array_shift($parts) * 40 + (int) array_shift($parts);
+        $bytes = chr($first);
+        foreach ($parts as $part) {
+            $value = (int) $part;
+            $stack = [$value & 0x7f];
+            $value >>= 7;
+            while ($value > 0) {
+                array_unshift($stack, ($value & 0x7f) | 0x80);
+                $value >>= 7;
+            }
+            foreach ($stack as $b) {
+                $bytes .= chr($b);
+            }
+        }
+        return "\x06" . self::derLength(strlen($bytes)) . $bytes;
+    }
+
+    /** DER → PEM */
+    private static function pemEncode(string $der, string $label): string
+    {
+        return "-----BEGIN {$label}-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END {$label}-----\n";
+    }
+
+    /** 解码 JWK 的 base64url 坐标并补齐到曲线坐标长度 */
+    private static function decodeJwkCoord(string $value, int $coordSize): string
+    {
+        $bin = Base64::urlSafeDecode($value, true);
+        if ($bin === false || $bin === '') {
+            throw new InvalidArgumentException('无效的JWK坐标（base64url 解码失败）');
+        }
+        if (strlen($bin) > $coordSize) {
+            throw new InvalidArgumentException('无效的JWK坐标长度');
+        }
+        return str_pad($bin, $coordSize, "\x00", STR_PAD_LEFT);
+    }
+
+    /**
+     * 从 JWK 构建公钥 PEM（SPKI 格式）
      *
      * @param array $jwk JWK数据
-     * @return string 公钥字符串
+     * @return string 公钥 PEM
      * @access private
      */
     private static function buildPublicKeyFromJWK(array $jwk): string
     {
-        // 这里简化处理，实际应该根据JWK的x,y坐标构建公钥
-        // 由于复杂性，这里返回一个新的公钥
+        $curveName = self::normalizeCurveName((string) $jwk['crv']);
+        $coordSize = self::ecCoordSizeByCurve($curveName);
+        $x = self::decodeJwkCoord((string) $jwk['x'], $coordSize);
+        $y = self::decodeJwkCoord((string) $jwk['y'], $coordSize);
 
-        $curveName = $jwk['crv'];
-        $keyPair = self::createKeyPair($curveName);
-        return $keyPair['public_key'];
+        $algId = self::derSequence(
+            self::derOid('1.2.840.10045.2.1') .   // id-ecPublicKey
+            self::derOid(self::curveOid($curveName))
+        );
+        $subjectPublicKey = self::derBitString("\x04" . $x . $y);
+        $spki = self::derSequence($algId . $subjectPublicKey);
+
+        return self::pemEncode($spki, 'PUBLIC KEY');
+    }
+
+    /**
+     * 从 JWK 构建私钥 PEM（SEC1 EC PRIVATE KEY，含 [0] 曲线 OID 与 [1] 公钥点）
+     *
+     * @param array $jwk JWK数据（须含 x/y/d）
+     * @param string $curveName 已归一化的曲线名
+     * @return string 私钥 PEM
+     * @access private
+     */
+    private static function buildPrivateKeyFromJWK(array $jwk, string $curveName): string
+    {
+        $coordSize = self::ecCoordSizeByCurve($curveName);
+        if (!isset($jwk['x'], $jwk['y'])) {
+            throw new InvalidArgumentException('无效的JWK格式：包含私钥 d 时必须同时提供 x/y');
+        }
+        $d = self::decodeJwkCoord((string) $jwk['d'], $coordSize);
+        $x = self::decodeJwkCoord((string) $jwk['x'], $coordSize);
+        $y = self::decodeJwkCoord((string) $jwk['y'], $coordSize);
+
+        $sec1 = self::derSequence(
+            self::derInteger("\x01") .                                                    // version = 1
+            self::derOctetString($d) .                                                    // privateKey = d
+            self::derContextExplicit(0, self::derOid(self::curveOid($curveName))) .       // [0] 曲线 OID
+            self::derContextExplicit(1, self::derBitString("\x04" . $x . $y))             // [1] 公钥点
+        );
+        return self::pemEncode($sec1, 'EC PRIVATE KEY');
     }
 
     /**
@@ -1752,20 +1857,37 @@ class ECC
     {
         $this->validateCurve($newCurveName);
 
-        // 保存当前密钥
-        $oldPrivateKey = $this->privateKey ? $this->exportPrivateKey() : null;
-        $oldPublicKey = $this->publicKey ? $this->exportPublicKey() : null;
+        // 变更曲线意味着必须生成新曲线上的密钥对；先保存当前密钥用于失败回滚
+        $oldCurve = $this->curveName;
+        $oldPrivatePem = $this->privateKey !== null ? $this->exportPrivateKey() : null;
+        $oldPublicPem = $this->publicKey !== null ? $this->exportPublicKey() : null;
 
         try {
-            // 生成新的密钥对
-            $oldCurve = $this->curveName;
             $this->curveName = $newCurveName;
             $this->generateKeyPair();
-
             $this->logDebug("曲线更改成功: {$oldCurve} -> {$newCurveName}");
         } catch (Exception $e) {
-            // 恢复旧密钥
-            $this->curveName = $oldPrivateKey ? $this->curveName : $newCurveName;
+            // 回滚：恢复旧曲线名并重新载入旧密钥，
+            // 否则实例会停留在"新曲线名 + 旧曲线密钥（或半生成状态）"的损坏状态
+            $this->curveName = $oldCurve;
+            $this->privateKey = null;
+            $this->publicKey = null;
+            if ($oldPrivatePem !== null) {
+                $restored = openssl_pkey_get_private($oldPrivatePem);
+                if ($restored !== false) {
+                    $this->privateKey = $restored;
+                    try {
+                        $this->derivePublicKey();
+                    } catch (Exception $ignored) {
+                        // 公钥还原失败不影响私钥可用性
+                    }
+                }
+            } elseif ($oldPublicPem !== null) {
+                $restored = openssl_pkey_get_public($oldPublicPem);
+                if ($restored !== false) {
+                    $this->publicKey = $restored;
+                }
+            }
             throw new RuntimeException("更改曲线失败: " . $e->getMessage());
         }
     }

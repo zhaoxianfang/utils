@@ -281,7 +281,7 @@ class Compressor
     private function releaseImage(): void
     {
         if ($this->image !== null) {
-                        $this->image = null;
+            $this->image = null;
         }
     }
 
@@ -482,7 +482,8 @@ class Compressor
         if (empty($this->srcInfo)) throw new Exception('先setSource');
         $this->targetWidth = $width;
         $this->targetHeight = (int)round($this->srcInfo['height'] * ($width / $this->srcInfo['width']));
-        $this->maintainRatio = true; return $this;
+        // 等比缩放不是 fill 裁切：必须切回 STRETCH 模式，否则 doResize 会按默认 CROP_FILL 走进裁切分支
+        $this->maintainRatio = true; $this->cropMode = self::CROP_STRETCH; return $this;
     }
 
     /**
@@ -498,7 +499,8 @@ class Compressor
         if (empty($this->srcInfo)) throw new Exception('先setSource');
         $this->targetHeight = $height;
         $this->targetWidth = (int)round($this->srcInfo['width'] * ($height / $this->srcInfo['height']));
-        $this->maintainRatio = true; return $this;
+        // 见 resizeByWidth 注释：等比缩放必须切回 STRETCH 模式
+        $this->maintainRatio = true; $this->cropMode = self::CROP_STRETCH; return $this;
     }
 
     /**
@@ -514,7 +516,8 @@ class Compressor
         if (empty($this->srcInfo)) throw new Exception('先setSource');
         $this->targetWidth = (int)round($this->srcInfo['width'] * $ratio);
         $this->targetHeight = (int)round($this->srcInfo['height'] * $ratio);
-        $this->maintainRatio = true; return $this;
+        // 见 resizeByWidth 注释：等比缩放必须切回 STRETCH 模式
+        $this->maintainRatio = true; $this->cropMode = self::CROP_STRETCH; return $this;
     }
 
     /**

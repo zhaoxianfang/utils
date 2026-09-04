@@ -374,7 +374,7 @@ class SiteMapGenerator
 
             foreach ($sitemapUrls as $sitemapUrl) {
                 $sitemapEntry = $xml->addChild('sitemap');
-                $sitemapEntry->addChild('loc', htmlspecialchars($sitemapUrl['loc'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+                $sitemapEntry->addChild('loc', self::xmlText($sitemapUrl['loc']));
                 $sitemapEntry->addChild('lastmod', $sitemapUrl['lastmod']);
             }
 
@@ -694,11 +694,17 @@ class SiteMapGenerator
         $errors = [];
 
         // 基本的 XML 语法验证
-        libxml_use_internal_errors(true);
-        $dom = new DOMDocument();
-        $dom->loadXML($xmlContent);
-        $xmlErrors = libxml_get_errors();
-        libxml_clear_errors();
+        // 必须恢复调用方原有的 libxml 错误处理状态，否则会影响全局行为
+        $previousInternalErrors = libxml_use_internal_errors(true);
+        try {
+            $dom = new DOMDocument();
+            // NONET/NOENT：禁止解析过程中访问网络与展开实体
+            $dom->loadXML($xmlContent, LIBXML_NONET | LIBXML_NOENT);
+            $xmlErrors = libxml_get_errors();
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousInternalErrors);
+        }
 
         foreach ($xmlErrors as $error) {
             $errors[] = "XML 语法错误: " . trim($error->message);
@@ -910,6 +916,27 @@ class SiteMapGenerator
     }
 
     /**
+     * 准备写入 XML 节点的文本内容
+     *
+     * 必须显式转义：SimpleXMLElement::addChild() 并不会转义 "&"，
+     * 传给它的 "...?a=1&b=2" 会被当成实体引用，触发
+     * “unterminated entity reference” 警告并直接丢弃内容（实测 <loc/> 为空）。
+     * 因此这里先剔除 XML 1.0 不允许的控制字符，再做 XML 实体转义。
+     *
+     * @param  mixed  $value  原始值
+     * @return string 可直接交给 addChild() 的文本
+     */
+    private static function xmlText(mixed $value): string
+    {
+        $text = is_scalar($value) ? (string) $value : '';
+
+        // 剔除 XML 1.0 非法控制字符（保留 \t \n \r），否则 addChild() 会抛 DOMException
+        $text = (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
+
+        return htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
      * 格式化 XML 字符串（美化输出）
      */
     private function formatXml(string $xml): string
@@ -928,7 +955,10 @@ class SiteMapGenerator
     private function generateSitemapUrls(): array
     {
         $urls = [];
-        $chunkCount = max(1, ceil(count($this->urls) / $this->maxUrls));
+        // 注意：addUrlItem() 在累计到 maxUrls 时会自动落盘并清空 $this->urls，
+        // 此时 count($this->urls) 为 0，必须以已生成的分片数 $this->sitemapCount 为准，
+        // 否则索引里只会剩下 1 条 sitemap 记录。
+        $chunkCount = max(1, $this->sitemapCount, (int) ceil(count($this->urls) / $this->maxUrls));
 
         for ($i = 1; $i <= $chunkCount; $i++) {
             $urls[] = [
@@ -946,7 +976,8 @@ class SiteMapGenerator
     private function addUrlToXml(SimpleXMLElement $xml, array $url): void
     {
         $urlEntry = $xml->addChild('url');
-        $urlEntry->addChild('loc', htmlspecialchars($url['loc'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+        // importFromArray() 导入的数据可能缺少 loc 键，这里做兜底避免访问未定义下标
+        $urlEntry->addChild('loc', self::xmlText($url['loc'] ?? ''));
 
         if (isset($url['lastmod'])) {
             $urlEntry->addChild('lastmod', $url['lastmod']);
@@ -962,7 +993,7 @@ class SiteMapGenerator
 
         if (!empty($url['custom'])) {
             foreach ($url['custom'] as $tag => $value) {
-                $urlEntry->addChild($tag, htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+                $urlEntry->addChild($tag, self::xmlText($value));
             }
         }
 
@@ -1008,23 +1039,23 @@ class SiteMapGenerator
         $imageElement = $urlEntry->addChild('image:image');
 
         if (!empty($image['url'])) {
-            $imageElement->addChild('image:loc', htmlspecialchars($image['url'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $imageElement->addChild('image:loc', self::xmlText($image['url']));
         }
 
         if (!empty($image['title'])) {
-            $imageElement->addChild('image:title', htmlspecialchars($image['title'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $imageElement->addChild('image:title', self::xmlText($image['title']));
         }
 
         if (!empty($image['caption'])) {
-            $imageElement->addChild('image:caption', htmlspecialchars($image['caption'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $imageElement->addChild('image:caption', self::xmlText($image['caption']));
         }
 
         if (!empty($image['geo_location'])) {
-            $imageElement->addChild('image:geo_location', htmlspecialchars($image['geo_location'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $imageElement->addChild('image:geo_location', self::xmlText($image['geo_location']));
         }
 
         if (!empty($image['license'])) {
-            $imageElement->addChild('image:license', htmlspecialchars($image['license'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $imageElement->addChild('image:license', self::xmlText($image['license']));
         }
     }
 
@@ -1036,19 +1067,19 @@ class SiteMapGenerator
         $videoElement = $urlEntry->addChild('video:video');
 
         if (!empty($video['title'])) {
-            $videoElement->addChild('video:title', htmlspecialchars($video['title'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $videoElement->addChild('video:title', self::xmlText($video['title']));
         }
 
         if (!empty($video['description'])) {
-            $videoElement->addChild('video:description', htmlspecialchars($video['description'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $videoElement->addChild('video:description', self::xmlText($video['description']));
         }
 
         if (!empty($video['thumbnail_loc'])) {
-            $videoElement->addChild('video:thumbnail_loc', htmlspecialchars($video['thumbnail_loc'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $videoElement->addChild('video:thumbnail_loc', self::xmlText($video['thumbnail_loc']));
         }
 
         if (!empty($video['url'])) {
-            $videoElement->addChild('video:content_loc', htmlspecialchars($video['url'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $videoElement->addChild('video:content_loc', self::xmlText($video['url']));
         }
 
         if (!empty($video['duration'])) {
@@ -1060,7 +1091,7 @@ class SiteMapGenerator
         }
 
         if (!empty($video['player_loc'])) {
-            $videoElement->addChild('video:player_loc', htmlspecialchars($video['player_loc'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $videoElement->addChild('video:player_loc', self::xmlText($video['player_loc']));
         }
 
         if (!empty($video['expiration_date'])) {
@@ -1098,7 +1129,7 @@ class SiteMapGenerator
         }
 
         if (!empty($news['title'])) {
-            $newsElement->addChild('news:title', htmlspecialchars($news['title'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $newsElement->addChild('news:title', self::xmlText($news['title']));
         }
 
         if (!empty($news['publication_date'])) {
@@ -1106,11 +1137,11 @@ class SiteMapGenerator
         }
 
         if (!empty($news['keywords'])) {
-            $newsElement->addChild('news:keywords', htmlspecialchars($news['keywords'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $newsElement->addChild('news:keywords', self::xmlText($news['keywords']));
         }
 
         if (!empty($news['genres'])) {
-            $newsElement->addChild('news:genres', htmlspecialchars($news['genres'], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+            $newsElement->addChild('news:genres', self::xmlText($news['genres']));
         }
     }
 
@@ -1473,7 +1504,7 @@ class SiteMapGenerator
                 $sitemapUrl = $this->baseUrl . $this->mapsDirName . '/' . $this->dateFolder . '/sitemap_' . $i . '.xml';
 
                 $sitemapEntry = $xml->addChild('sitemap');
-                $sitemapEntry->addChild('loc', htmlspecialchars($sitemapUrl, ENT_XML1 | ENT_QUOTES, 'UTF-8'));
+                $sitemapEntry->addChild('loc', self::xmlText($sitemapUrl));
                 $sitemapEntry->addChild('lastmod', date('Y-m-d'));
             }
 

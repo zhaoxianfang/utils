@@ -167,19 +167,54 @@ final class Hash
     }
 
     /**
-     * 对多个值进行一致性哈希（用于负载均衡等场景）
+     * 一致性哈希：为给定键在节点列表中选出唯一节点（用于负载均衡、分片路由等场景）
+     *
+     * 采用 HRW（Rendezvous / Highest Random Weight）算法：对每个节点计算
+     * weight = hash(key + node)，取权重**最大**的节点。该算法具备一致性哈希的核心性质：
+     * 新增或移除节点时，只会重新映射原本落在该节点上的键，不会引起全量重分布；
+     * 且无需构造虚拟节点环，实现简单、分布均匀。
+     *
+     * 权重计算取 md5 前 8 位十六进制（32 位无符号整数）。
+     * 实测 crc32 的权重分布极不均匀（3 节点下呈 50%/25%/25%），
+     * 故不使用；hexdec() 在 32 位 PHP 上会返回 float，
+     * 但 double 的 53 位精度足以精确表示 32 位整数，数值排序依然正确。
+     *
+     * @param string        $key   需要路由的键
+     * @param array<string|int> $nodes 候选节点列表（字符串或整数）
+     * @return string|int 选中的节点（保持传入时的原始类型）
+     *
+     * @throws InvalidArgumentException 节点列表为空或包含非法类型时抛出
      */
-    public static function consistent(string $key, array $nodes): string
+    public static function consistent(string $key, array $nodes): string|int
     {
         if ($nodes === []) {
             throw new InvalidArgumentException('节点列表不能为空');
         }
 
-        $hashes = [];
+        $weights = [];
+        $nodeMap = [];
+
         foreach ($nodes as $node) {
-            $hashes[$node] = hexdec(substr(self::md5($key . (string) $node), 0, 8));
+            if (! is_string($node) && ! is_int($node)) {
+                throw new InvalidArgumentException(
+                    '节点必须是字符串或整数，' . get_debug_type($node) . ' 不受支持'
+                );
+            }
+
+            $nodeKey = (string) $node;
+            if (isset($nodeMap[$nodeKey])) {
+                continue; // 节点去重
+            }
+
+            $nodeMap[$nodeKey] = $node;
+            // 使用 \0 分隔，避免 ("ab","c") 与 ("a","bc") 拼接出相同的键
+            $weights[$nodeKey] = hexdec(substr(md5($key . "\0" . $nodeKey), 0, 8));
         }
-        asort($hashes);
-        return array_key_first($hashes);
+
+        arsort($weights, SORT_NUMERIC);
+
+        $winner = array_key_first($weights);
+
+        return $nodeMap[$winner];
     }
 }

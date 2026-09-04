@@ -6,6 +6,7 @@ namespace zxf\Utils\BarCode\Generator;
 
 use zxf\Utils\BarCode\Contracts\BarcodeGeneratorInterface;
 use zxf\Utils\BarCode\DTO\BarcodeConfig;
+use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
  * 条形码生成器抽象基类
@@ -96,6 +97,17 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
     }
 
     /**
+     * 是否跳过校验位验证
+     *
+     * 默认关闭（即默认验证）。EAN-13/EAN-8/UPC-A/ITF-14/ISBN/ISSN 等带校验位类型，
+     * 当传入「数据+校验位」的完整内容时，默认会校验校验位是否正确，
+     * 防止生成校验位错误、被校验型扫码器拒绝/误读的坏码。
+     *
+     * @var bool
+     */
+    protected bool $skipChecksumValidation = false;
+
+    /**
      * 获取完整数据（含校验位等附加信息）
      * 
      * 子类可覆盖此方法以返回包含校验位的完整数据。
@@ -117,7 +129,37 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
      */
     public function setSkipChecksumValidation(bool $skip): self
     {
+        $this->skipChecksumValidation = $skip;
         return $this;
+    }
+
+    /**
+     * 校验「数据+校验位」完整输入的校验位是否正确（依赖子类 calculateChecksum）
+     *
+     * @param string $fullData 含校验位的完整数据
+     * @param string $context  条码类型名，用于错误提示（如 'EAN-13'）
+     * @return void
+     * @throws InvalidDataException 校验位不匹配时抛出
+     */
+    protected function assertCompleteChecksum(string $fullData, string $context = ''): void
+    {
+        if ($this->skipChecksumValidation || strlen($fullData) < 2) {
+            return;
+        }
+        $dataPart = substr($fullData, 0, -1);
+        $given    = strtoupper(substr($fullData, -1));
+        $expected = strtoupper((string) $this->calculateChecksum($dataPart));
+        if ($given !== $expected) {
+            throw new InvalidDataException(sprintf(
+                '%s 校验位错误：输入 "%s" 末位校验位为 %s，正确值应为 %s。'
+                . '为保证条码内容与扫码识别内容一致，请传入含正确校验位的完整数据'
+                . '（或调用 skipChecksum(true) 显式跳过校验）',
+                $context,
+                $fullData,
+                $given,
+                $expected
+            ));
+        }
     }
 
     /**

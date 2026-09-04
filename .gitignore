@@ -26,6 +26,10 @@ yarn-error.log
 ~'$'*.pptx
 ~'$'*.xls
 
+# 一维/二维码测试输出（历史遗留，现已写入系统临时目录）
+src/BarCode/test_output_*/
+src/QrCode/test_output_*/
+
 # 忽略所有 . 开头的目录
 .*/
 # 忽略所有 . 开头的文件

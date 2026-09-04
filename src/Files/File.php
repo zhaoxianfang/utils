@@ -507,7 +507,7 @@ class File
         // 设置HTTP头
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="' . ($downloadName ?? basename($filePath)) . '"');
+        header('Content-Disposition: attachment; filename="' . self::sanitizeDownloadName($downloadName ?? basename($filePath)) . '"');
         header('Content-Transfer-Encoding: binary');
         header('Expires: 0');
         header('Cache-Control: must-revalidate');
@@ -548,24 +548,42 @@ class File
         }
 
         $fileSize = filesize($filePath);
+        if ($fileSize === false) {
+            throw new RuntimeException(sprintf('无法获取文件大小: "%s"', $filePath));
+        }
         $downloadName = $downloadName ?? basename($filePath);
 
         // 处理断点续传
         $range = null;
         if (isset($_SERVER['HTTP_RANGE'])) {
-            preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
-            $start = (int)($matches[1] ?? 0);
-            $end = isset($matches[2]) ? (int)$matches[2] : $fileSize - 1;
-            $range = [$start, $end];
+            // 同时支持 "bytes=100-200" 与 "bytes=100-" 两种形式；
+            // 解析失败或区间不可满足时按 RFC 7233 返回 416，
+            // 而不是像旧实现那样带着错误的区间继续（会发出负的 Content-Length）。
+            if (preg_match('/^bytes=(\d*)-(\d*)$/', trim((string) $_SERVER['HTTP_RANGE']), $matches) !== 1) {
+                header('HTTP/1.1 416 Range Not Satisfiable');
+                header("Content-Range: bytes */{$fileSize}");
+                exit;
+            }
+
+            $start = $matches[1] === '' ? 0 : (int) $matches[1];
+            $end   = $matches[2] === '' ? $fileSize - 1 : (int) $matches[2];
+
+            if ($start > $end || $start >= $fileSize) {
+                header('HTTP/1.1 416 Range Not Satisfiable');
+                header("Content-Range: bytes */{$fileSize}");
+                exit;
+            }
+
+            $range = [$start, min($end, $fileSize - 1)];
         }
 
         // 设置HTTP头
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="' . $downloadName . '"');
+        header('Content-Disposition: attachment; filename="' . self::sanitizeDownloadName($downloadName) . '"');
         header('Accept-Ranges: bytes');
 
-        if ($range) {
-            header('HTTP/1.1 206 Partial Content');
+        if ($range !== null) {
+            http_response_code(206);
             header('Content-Range: bytes ' . $range[0] . '-' . $range[1] . '/' . $fileSize);
             header('Content-Length: ' . ($range[1] - $range[0] + 1));
         } else {
@@ -580,7 +598,10 @@ class File
 
         // 流式输出文件内容
         $handle = fopen($filePath, 'rb');
-        if ($range) {
+        if ($handle === false) {
+            throw new RuntimeException(sprintf('文件打开失败: "%s"', $filePath));
+        }
+        if ($range !== null) {
             fseek($handle, $range[0]);
             $length = $range[1] - $range[0] + 1;
         } else {
@@ -588,8 +609,11 @@ class File
         }
 
         $bytesSent = 0;
-        while (!feof($handle) && $bytesSent < $length) {
+        while ($bytesSent < $length && !feof($handle)) {
             $chunk = fread($handle, min($chunkSize, $length - $bytesSent));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
             echo $chunk;
             $bytesSent += strlen($chunk);
             flush();
@@ -1264,6 +1288,9 @@ class File
         }
 
         $stat = stat($filePath);
+        if ($stat === false) {
+            throw new RuntimeException(sprintf('无法获取文件信息: "%s"', $filePath));
+        }
         $pathInfo = pathinfo($filePath);
 
         return [
@@ -1429,8 +1456,9 @@ class File
                         // 统计文件数量
                         $node['file_count'] = count(self::findFiles($item->getPathname(),
                             fn($f) => $f->isFile(), true));
-                        $node['dir_count'] = count(self::findFiles($item->getPathname(),
-                            fn($f) => $f->isDir(), true));
+                        // 注意：findFiles() 只收集文件，用 fn($f)=>$f->isDir() 过滤恒为 0，
+                        // 这里必须单独统计子目录数量。
+                        $node['dir_count'] = self::countDirectories($item->getPathname());
                     } catch (RuntimeException $e) {
                         // 如果无法访问子目录，记录错误但继续处理其他项目
                         $node['children'] = [];
@@ -1541,15 +1569,26 @@ class File
             throw new RuntimeException(sprintf('ZIP文件创建失败: "%s"', $zipPath));
         }
 
-        $files = self::findFiles($directory, null, true);
+        $closed = false;
+        try {
+            $files = self::findFiles($directory, null, true);
 
-        foreach ($files as $file) {
-            $relativePath = substr($file, strlen($directory) + 1);
-            $zip->addFile($file, $relativePath);
-        }
+            foreach ($files as $file) {
+                $relativePath = substr($file, strlen($directory) + 1);
+                if ($zip->addFile($file, $relativePath) !== true) {
+                    throw new RuntimeException(sprintf('添加文件到ZIP失败: "%s"', $file));
+                }
+            }
 
-        if (!$zip->close()) {
-            throw new RuntimeException(sprintf('ZIP文件关闭失败: "%s"', $zipPath));
+            if (!$zip->close()) {
+                throw new RuntimeException(sprintf('ZIP文件关闭失败: "%s"', $zipPath));
+            }
+            $closed = true;
+        } finally {
+            // 中途异常时也必须释放 ZipArchive 句柄，否则底层文件锁会一直被占用
+            if (!$closed) {
+                @$zip->close();
+            }
         }
 
         return true;
@@ -1578,13 +1617,99 @@ class File
 
         self::createDirectory($extractTo);
 
-        if (!$zip->extractTo($extractTo)) {
-            $zip->close();
-            throw new RuntimeException(sprintf('ZIP文件解压失败: "%s"', $zipPath));
+        try {
+            // 防御 Zip Slip（路径穿越）：逐条校验条目名，任何会逃出 $extractTo 的
+            // 条目直接拒绝解压，绝不能直接把不可信压缩包交给 extractTo()。
+            $target = realpath($extractTo);
+            if ($target === false) {
+                throw new RuntimeException(sprintf('无法解析解压目标目录: "%s"', $extractTo));
+            }
+            $target = rtrim($target, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if ($name === false) {
+                    throw new RuntimeException(sprintf('无法读取压缩包内第 %d 个条目的名称', $i));
+                }
+                self::assertSafeEntryName($name, $target);
+            }
+
+            if (!$zip->extractTo($extractTo)) {
+                throw new RuntimeException(sprintf('ZIP文件解压失败: "%s"', $zipPath));
+            }
+        } finally {
+            @$zip->close();
         }
 
-        $zip->close();
         return true;
+    }
+
+    /**
+     * 校验压缩包条目名不会逃出解压目标目录（Zip Slip 防护）
+     *
+     * @param string $name   压缩包内条目名
+     * @param string $target 解压目标目录（已 realpath，且带尾部分隔符）
+     * @throws RuntimeException 条目名非法时抛出
+     */
+    private static function assertSafeEntryName(string $name, string $target): void
+    {
+        // 绝对路径条目（"/etc/passwd"、"C:\windows"）：不同 PHP/libzip 版本对这类
+        // 条目的处理并不一致，直接拒绝最安全。
+        if ($name === '' || str_starts_with($name, '/') || str_starts_with($name, '\\')
+            || preg_match('#^[A-Za-z]:#', $name) === 1) {
+            throw new RuntimeException(sprintf('压缩包内含非法条目名，拒绝解压以防路径穿越: "%s"', $name));
+        }
+
+        // 同时按 "/" 与 "\" 切分：Windows 下反斜杠同样是目录分隔符，
+        // 只按 "/" 切分会让 "..\..\evil.exe" 绕过校验。
+        $resolved = [];
+        foreach (preg_split('#[\\\\/]+#', $name) as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                // 越界的 ".."（如 "../../evil.txt"）一律拒绝，而不是在根目录处钳制：
+                // 真正落盘的是 extractTo()，它用的是压缩包里的原始条目名，
+                // 一旦 libzip/PHP 不自行钳制就会被写到目标目录之外。
+                if ($resolved === []) {
+                    throw new RuntimeException(sprintf('压缩包内含非法条目名，拒绝解压以防路径穿越: "%s"', $name));
+                }
+                array_pop($resolved);
+                continue;
+            }
+            $resolved[] = $part;
+        }
+
+        // 纯 ".." 之类无法解析出有效相对路径的条目一律拒绝
+        if ($resolved === []) {
+            throw new RuntimeException(sprintf('压缩包内含非法条目名，拒绝解压以防路径穿越: "%s"', $name));
+        }
+
+        if (!str_starts_with($target . implode(DIRECTORY_SEPARATOR, $resolved), $target)) {
+            throw new RuntimeException(sprintf('压缩包内含非法条目名，拒绝解压以防路径穿越: "%s"', $name));
+        }
+    }
+
+    /**
+     * 递归统计目录下的子目录数量
+     *
+     * findFiles() 只收集文件，无法用于目录计数。
+     */
+    private static function countDirectories(string $directory): int
+    {
+        $count = 0;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     /**
@@ -1840,6 +1965,22 @@ class File
     }
 
     /**
+     * 清洗下载文件名，避免破坏 Content-Disposition 头
+     *
+     * 文件名中的 CR/LF 会造成响应头注入，双引号会截断 filename="..." 属性并
+     * 注入额外的 Content-Disposition 参数，这里统一移除。
+     *
+     * @param string $name 原始文件名
+     * @return string 清洗后的文件名
+     */
+    private static function sanitizeDownloadName(string $name): string
+    {
+        $name = str_replace(["\r", "\n", '"', '\\'], '', $name);
+
+        return $name !== '' ? $name : 'download';
+    }
+
+    /**
      * 规范化路径 - 统一路径分隔符和解析相对路径
      *
      * @param string $path 原始路径
@@ -1850,17 +1991,52 @@ class File
         // 替换路径分隔符
         $path = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
 
+        // 必须先摘出并保留「根前缀」，再拆分路径段：
+        //   绝对路径 "/var/log" 拆段后首段是空串，若直接丢弃空串，
+        //   结果会变成相对路径 "var/log" —— 这会让本类所有方法无法处理绝对路径。
+        // 根前缀分三种：Unix 的 "/"、UNC 的 "\\server\share"、Windows 盘符 "C:\"
+        $prefix = '';
+
+        if (str_starts_with($path, '\\\\')) {
+            // UNC：\\server\share\rest
+            if (preg_match('|^\\\\\\\\[^\\\\]+\\\\[^\\\\]+|', $path, $m) === 1) {
+                $prefix = $m[0];
+                $path = substr($path, strlen($prefix));
+            }
+        } elseif (preg_match('|^[A-Za-z]:' . preg_quote(DIRECTORY_SEPARATOR, '|') . '|', $path, $m) === 1) {
+            $prefix = $m[0];
+            $path = substr($path, strlen($prefix));
+        } elseif (str_starts_with($path, DIRECTORY_SEPARATOR)) {
+            $prefix = DIRECTORY_SEPARATOR;
+        }
+
         // 解析相对路径
         $parts = [];
         foreach (explode(DIRECTORY_SEPARATOR, $path) as $part) {
             if ($part === '..') {
-                array_pop($parts);
+                // 绝对路径下 ".." 在根目录处被钳制（"/.." == "/"）；
+                // 相对路径下必须保留越界的 ".."，否则 "../../etc/passwd" 会被静默改写为
+                // "etc/passwd"，把本应指向外部的语义偷偷变成指向当前工作目录。
+                if ($parts !== [] && end($parts) !== '..') {
+                    array_pop($parts);
+                } elseif ($prefix === '') {
+                    $parts[] = '..';
+                }
             } elseif ($part !== '' && $part !== '.') {
                 $parts[] = $part;
             }
         }
 
-        return implode(DIRECTORY_SEPARATOR, $parts);
+        $normalized = implode(DIRECTORY_SEPARATOR, $parts);
+
+        // 绝对路径在归一化后为空时，应回退为根本身（"/a/.." => "/"）
+        if ($prefix !== '' && $normalized === '') {
+            return $prefix === DIRECTORY_SEPARATOR
+                ? DIRECTORY_SEPARATOR
+                : rtrim($prefix, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        }
+
+        return $prefix . $normalized;
     }
 
     /**
@@ -1995,8 +2171,9 @@ class File
             throw new RuntimeException(sprintf('无法打开文件: "%s"', $filePath));
         }
 
-        while (!feof($handle)) {
-            fgets($handle);
+        // 以 fgets() 的返回值作为循环条件：旧写法先判 feof() 再自增，
+        // 空文件会多计一行（返回 1）。
+        while (fgets($handle) !== false) {
             $lineCount++;
         }
 

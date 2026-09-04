@@ -36,7 +36,6 @@ class EAN13Generator extends BaseGenerator
         '1001110','1010000','1000100','1001000','1110100',
     ];
 
-    protected bool $skipChecksumValidation = false;
     protected string $currentData = '';
 
     public function generate(string $data): array
@@ -47,6 +46,9 @@ class EAN13Generator extends BaseGenerator
         }
 
         if (strlen($data) === 13) {
+            // 输入已含校验位：默认验证正确性（skipChecksum(true) 可跳过），
+            // 校验位错误时抛异常，避免生成被校验型扫码器拒绝的坏码
+            $this->assertCompleteChecksum($data, 'EAN-13');
             $this->rawData = $data;
             $this->currentData = $data;
         } else {
@@ -116,12 +118,6 @@ class EAN13Generator extends BaseGenerator
         }
         $checksum = (10 - ($sum % 10)) % 10;
         return (string) $checksum;
-    }
-
-    public function setSkipChecksumValidation(bool $skip): self
-    {
-        $this->skipChecksumValidation = $skip;
-        return $this;
     }
 
     public function getType(): string

@@ -898,15 +898,18 @@ class RSA
                 throw new RuntimeException('AES文件加密失败');
             }
 
-            // 读取加密后的内容并写入
-            $encryptedContent = file_get_contents($tempEncryptedFile);
-            if ($encryptedContent === false) {
-                throw new RuntimeException('无法读取临时加密文件');
+            // 流式拷贝加密后的内容（避免大文件全量驻留内存）
+            $tempHandle = fopen($tempEncryptedFile, 'rb');
+            if ($tempHandle === false) {
+                throw new RuntimeException('无法打开临时加密文件');
             }
-
-            $written = fwrite($outputHandle, $encryptedContent);
-            if ($written === false || $written !== strlen($encryptedContent)) {
-                throw new RuntimeException('加密内容写入失败');
+            try {
+                $copied = stream_copy_to_stream($tempHandle, $outputHandle);
+                if ($copied === false) {
+                    throw new RuntimeException('加密内容写入失败');
+                }
+            } finally {
+                fclose($tempHandle);
             }
 
             $this->logDebug("RSA文件加密完成: {$outputFile}");
@@ -1052,18 +1055,19 @@ class RSA
 
             $this->logDebug("AES密钥和IV解密成功");
 
-            // 使用AES解密剩余内容
+            // 使用AES解密剩余内容（流式写临时文件，避免大文件全量驻留内存）
             $tempOutput = $outputFile . '.tmp';
-            $remainingContent = '';
-            while (!feof($inputHandle)) {
-                $chunk = fread($inputHandle, 8192);
-                if ($chunk !== false) {
-                    $remainingContent .= $chunk;
-                }
+            $tempHandle = fopen($tempOutput, 'wb');
+            if ($tempHandle === false) {
+                throw new RuntimeException('无法创建临时文件');
             }
-
-            if (file_put_contents($tempOutput, $remainingContent) === false) {
-                throw new RuntimeException('无法写入临时文件');
+            try {
+                $copied = stream_copy_to_stream($inputHandle, $tempHandle);
+                if ($copied === false) {
+                    throw new RuntimeException('无法写入临时文件');
+                }
+            } finally {
+                fclose($tempHandle);
             }
 
             $success = $aes->decryptFile($tempOutput, $outputFile, $chunkSize);
@@ -1116,20 +1120,33 @@ class RSA
      */
     private function readFileHeader($handle): array
     {
-        $version = fread($handle, 5);
+        // 所有读取均校验实际字节数，损坏/截断文件抛出可读的业务异常，
+        // 避免对空串/不足长度数据 unpack 触发 TypeError 或意外偏移
+        $readExact = function (int $length, string $what): string {
+            $data = fread($handle, $length);
+            if ($data === false || strlen($data) !== $length) {
+                throw new RuntimeException("RSA 文件损坏或已截断：读取{$what}失败");
+            }
+            return $data;
+        };
+
+        $version = $readExact(5, '版本');
         if ($version !== self::FILE_FORMAT_VERSION) {
             throw new RuntimeException('不支持的RSA文件格式版本: ' . $version);
         }
 
-        $keySize = unpack('n', fread($handle, 2))[1];
-        $hashAlgLength = unpack('C', fread($handle, 1))[1];
-        $hashAlg = fread($handle, $hashAlgLength);
-        $timestamp = unpack('N', fread($handle, 4))[1];
-        $originalSize = unpack('N', fread($handle, 4))[1];
-        $compressed = unpack('C', fread($handle, 1))[1] === 1;
-        $integrityCheck = unpack('C', fread($handle, 1))[1] === 1;
-        $padding = fread($handle, 12);
-        $checksum = unpack('N', fread($handle, 4))[1];
+        $keySize = unpack('n', $readExact(2, '密钥大小'))[1];
+        $hashAlgLength = unpack('C', $readExact(1, '算法长度'))[1];
+        if ($hashAlgLength < 1 || $hashAlgLength > 32) {
+            throw new RuntimeException('RSA 文件头哈希算法长度非法');
+        }
+        $hashAlg = $readExact($hashAlgLength, '算法名');
+        $timestamp = unpack('N', $readExact(4, '时间戳'))[1];
+        $originalSize = unpack('N', $readExact(4, '原始大小'))[1];
+        $compressed = unpack('C', $readExact(1, '压缩标记'))[1] === 1;
+        $integrityCheck = unpack('C', $readExact(1, '完整性标记'))[1] === 1;
+        $padding = $readExact(12, '填充');
+        $checksum = unpack('N', $readExact(4, '校验和'))[1];
 
         $headerData = $version . pack('n', $keySize) . pack('C', $hashAlgLength) . $hashAlg .
             pack('N', $timestamp) . pack('N', $originalSize) .

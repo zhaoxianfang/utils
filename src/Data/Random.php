@@ -239,14 +239,20 @@ class Random
      */
     public static function pickMany(array $array, int $count): array
     {
+        if ($array === []) {
+            throw new InvalidArgumentException('数组不能为空');
+        }
         if ($count < 1 || $count > count($array)) {
             throw new InvalidArgumentException('抽取数量无效');
         }
+
         $keys = array_rand($array, $count);
-        if ($count === 1) {
-            $keys = [$keys];
-        }
-        return array_map(static fn (int $k): mixed => $array[$k], $keys);
+        // array_rand() 在 $count === 1 时返回单个键（可能是 string），
+        // 在 $count > 1 时返回键数组；且关联数组的键为 string，
+        // 因此此处不能把键约束为 int，否则对关联数组会抛 TypeError。
+        $keys = is_array($keys) ? $keys : [$keys];
+
+        return array_map(static fn (int|string $key): mixed => $array[$key], $keys);
     }
 
     /**

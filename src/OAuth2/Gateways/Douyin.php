@@ -67,10 +67,12 @@ class Douyin extends Gateway
             'redirect_uri'  => $this->config['callback'],
             'response_type' => $this->config['response_type'],
             'scope'         => $this->config['scope'],
-            'optionalScope' => $this->config['optionalScope']??'',
             'state'         => $this->config['state'],
         ];
-        if($params['state'] == 'login_id'){
+        // 以 login_id 为 scope 时走静默授权接口。
+        // 注意：判断对象必须是 scope —— state 是 CSRF 防伪随机串，
+        // 用 state 判断会误把「state 恰好为 login_id」的普通授权当成静默授权。
+        if (($params['scope'] ?? '') == 'login_id'){
             /**
              * 抖音静默获取授权码
              * https://developer.open-douyin.com/docs/resource/zh-CN/dop/develop/openapi/account-permission/douyin-default-get-permission-code
@@ -91,8 +93,11 @@ class Douyin extends Gateway
     {
         $this->getToken();
 
+        // 网页授权 token 返回 data.open_id；小程序 jscode2session 返回顶层 openid —— 两者键名不同
         if (isset($this->token['open_id'])) {
             return $this->token['open_id'];
+        } elseif (isset($this->token['openid'])) {
+            return $this->token['openid'];
         } else {
             throw new OAuthException('没有获取到抖音用户ID！');
         }
@@ -112,7 +117,8 @@ class Douyin extends Gateway
         $userInfo = [
             'open_id' => $this->openid(),
             'access_token'=> $this->token['access_token'] ?? '',
-            'union_id'=> $this->token['unionid'] ?? '',
+            // 平台字段为 union_id（部分历史响应写作 unionid），两键兼容
+            'union_id'=> $this->token['union_id'] ?? $this->token['unionid'] ?? '',
             'channel' => $this->oauth_type,
             'nickname'=> $result['nickname']??'',
             'gender'  => $result['gender'] ?? ConstCode::GENDER,
@@ -249,10 +255,10 @@ class Douyin extends Gateway
     protected function parseUserInfo($data)
     {
         $data = json_decode($data, true);
-        if (isset($data['message']) && $data['message'] == 'success') {
+        if (is_array($data) && isset($data['message']) && $data['message'] == 'success') {
             return $data['data'];
         } else {
-            throw new OAuthException("获取抖音 UserInfo 出错：{$data['data']['description']}");
+            throw new OAuthException("获取抖音 UserInfo 出错：".(is_array($data) ? json_encode($data) : (string) $data));
         }
     }
 

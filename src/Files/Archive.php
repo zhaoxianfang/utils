@@ -171,15 +171,25 @@ class Archive
 
         $files = [];
         for ($i = 0; $i < $this->zip->numFiles; $i++) {
+            // getNameIndex() 在读取失败时返回 false，直接参与字符串运算会触发 TypeError
             $name = $this->zip->getNameIndex($i);
+            if ($name === false) {
+                throw new RuntimeException("无法读取压缩包内第 {$i} 个条目的名称");
+            }
+
             // 防御 Zip Slip（路径穿越）攻击：逐个校验条目名，
             // 通过“手动解析相对路径、禁止逃出根目录”的方式确保解压目标始终落在 $baseDir 内。
+            // 注意：真正落盘的是 extractTo()，它用的是压缩包里的原始条目名，
+            // 因此这里凡是无法确定为安全相对路径的条目一律拒绝，而不是“跳过校验”。
             $resolved = [];
-            foreach (explode('/', $name) as $part) {
+            // 同时按 "/" 与 "\" 切分：Windows 下反斜杠同样是目录分隔符，
+            // 只按 "/" 切分会让 "..\..\evil.exe" 绕过校验。
+            foreach (preg_split('#[\\\\/]+#', $name) as $part) {
                 if ($part === '' || $part === '.') {
                     continue;
                 }
                 if ($part === '..') {
+                    // 越界的 ".."（如 "../../evil.txt"）直接拒绝，而不是在根目录处钳制
                     if ($resolved === []) {
                         throw new RuntimeException('压缩包内含非法路径，拒绝解压以防路径穿越: ' . $name);
                     }
@@ -188,11 +198,15 @@ class Archive
                 }
                 $resolved[] = $part;
             }
-            if ($resolved === []) {
-                // 条目是一个纯目录或非法项（如 "/foo" 绝对路径），跳过进一步校验
-                $files[] = $name;
-                continue;
+
+            // 绝对路径条目（"/etc/passwd"、"C:\windows\x.exe"）与解析后为空的条目
+            //（".."、"foo/.."）同样视为非法
+            if ($resolved === []
+                || str_starts_with($name, '/') || str_starts_with($name, '\\')
+                || preg_match('#^[A-Za-z]:#', $name) === 1) {
+                throw new RuntimeException('压缩包内含非法路径，拒绝解压以防路径穿越: ' . $name);
             }
+
             $target = $baseDir . implode(DIRECTORY_SEPARATOR, $resolved);
             if (! str_starts_with($target, $baseDir)) {
                 throw new RuntimeException('压缩包内含非法路径，拒绝解压以防路径穿越: ' . $name);
@@ -213,7 +227,11 @@ class Archive
     {
         $files = [];
         for ($i = 0; $i < $this->zip->numFiles; $i++) {
-            $files[] = $this->zip->getNameIndex($i);
+            // getNameIndex() 失败时返回 false，跳过以保证返回值是 string[]
+            $name = $this->zip->getNameIndex($i);
+            if ($name !== false) {
+                $files[] = $name;
+            }
         }
         return $files;
     }

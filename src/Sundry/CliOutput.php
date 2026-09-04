@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace zxf\Utils\Sundry;
 
+use InvalidArgumentException;
+
 /**
  * 命令行打印输出内容
  *
@@ -93,7 +95,9 @@ class CliOutput
     {
         // 检查环境
         if (PHP_SAPI != 'cli') {
-            exit('Please run under command line.');
+            // 作为库被引用时不能用 exit()：那会直接终止宿主进程且调用方无法捕获，
+            // 这里改为抛异常，由调用方自行决定如何处理。
+            throw new \RuntimeException('Please run under command line.');
         }
     }
 
@@ -133,16 +137,31 @@ class CliOutput
      * @param  int  $barLength  进度条长度，默认为 20 个占位符号。
      * @param  string  $color  颜色代码，默认为绿色。
      * @param  string  $style  样式代码，默认为重置样式。
+     *
+     * @throws InvalidArgumentException 当 $total 或 $barLength 不是正数时抛出
      */
     public function printProgress(int $current, int $total, int $barLength = 20, string $color = self::ANSI_GREEN, string $style = self::ANSI_RESET): void
     {
-        $progress = round(($current / $total) * 100);
-        $filledLength = floor($barLength * $current / $total);
+        // $total 为 0 会触发除零错误（PHP 8 为 DivisionByZeroError），必须显式拦截
+        if ($total <= 0) {
+            throw new InvalidArgumentException("总数必须大于 0，当前值: {$total}");
+        }
+        if ($barLength <= 0) {
+            throw new InvalidArgumentException("进度条长度必须大于 0，当前值: {$barLength}");
+        }
+
+        $current = max(0, min($current, $total));
+
+        $progress = (int) round(($current / $total) * 100);
+        // str_repeat() 的第二个参数必须是 int：floor()/ceil() 返回 float，
+        // 在 strict_types 下直接传入会 TypeError
+        $filledLength = (int) floor($barLength * $current / $total);
+        $filledLength = max(0, min($filledLength, $barLength));
         $bar = str_repeat('▓', $filledLength).str_repeat('░', $barLength - $filledLength);
 
         $this->printColoredText("[$bar] $progress%", $color, $style);
         echo " ($current/$total)\r";
-        if ($current == $total) {
+        if ($current === $total) {
             echo "\n"; // 当进度达到 100% 时换行
         }
     }
@@ -201,30 +220,47 @@ class CliOutput
                 if (! isset($columnWidths[$colIndex])) {
                     $columnWidths[$colIndex] = 0;
                 }
-                $cellWidth = mb_strlen($cell, 'UTF-8');
-                $cellWidth += strlen(preg_replace('/[\x{4e00}-\x{9fff}]/u', '', $cell)) * 1;
+                // 单元格可能是 int/float 等标量，必须先转字符串，
+                // 否则 mb_strlen()/preg_replace() 在 strict_types 下直接 TypeError
+                $cellWidth = self::displayWidth($cell);
                 $columnWidths[$colIndex] = max($columnWidths[$colIndex], $cellWidth);
             }
         }
 
-        $totalWidth = array_sum($columnWidths) + (count($columnWidths) + 1) * 3; // Add extra space for vertical bars
+        // 每行实际宽度 = 左侧竖线(1) + 每列(内容宽度 + 左右空格 + 竖线 = width + 3)
+        // 旧公式 (N+1)*3 会让边框比内容行多出 2 个字符，导致上下边框不对齐。
+        $totalWidth = array_sum($columnWidths) + count($columnWidths) * 3 + 1;
 
-        echo $topBorder.str_repeat($horizontal, $totalWidth - 2).$topBorder.PHP_EOL;
+        echo $topBorder.str_repeat($horizontal, max(0, $totalWidth - 2)).$topBorder.PHP_EOL;
 
         foreach ($data as $row) {
             $output = $vertical;
             foreach ($row as $colIndex => $cell) {
-                $cellWidth = mb_strlen($cell, 'UTF-8');
-                $cellWidth += strlen(preg_replace('/[\x{4e00}-\x{9fff}]/u', '', $cell)) * 1;
-                $padding = $columnWidths[$colIndex] - $cellWidth;
-                $leftPadding = floor($padding / 2);
-                $rightPadding = ceil($padding / 2);
+                $cellWidth = self::displayWidth($cell);
+                $padding = max(0, $columnWidths[$colIndex] - $cellWidth);
+                // str_repeat() 需要 int：floor()/ceil() 返回 float，必须显式转换
+                $leftPadding = (int) floor($padding / 2);
+                $rightPadding = (int) ceil($padding / 2);
 
-                $paddedCell = str_repeat(' ', $leftPadding).$cell.str_repeat(' ', $rightPadding);
+                $paddedCell = str_repeat(' ', $leftPadding).(string) $cell.str_repeat(' ', $rightPadding);
                 $output .= ' '.$paddedCell.' '.$vertical;
             }
             echo $output.PHP_EOL;
-            echo $separator.str_repeat($horizontal, $totalWidth - 2).$separator.PHP_EOL;
+            echo $separator.str_repeat($horizontal, max(0, $totalWidth - 2)).$separator.PHP_EOL;
         }
+    }
+
+    /**
+     * 计算单元格的显示宽度（中文等全角字符按 2 个英文字符宽度计）
+     *
+     * @param  mixed  $cell  单元格内容
+     */
+    private static function displayWidth(mixed $cell): int
+    {
+        $text = (string) $cell;
+        // 非中文字符按 1 个显示宽度计，中文字符按 2 个计：
+        // 即「字符数 + 中文字符个数」（旧实现只统计了非中文部分的长度，
+        // 导致纯中文单元格的宽度被少算一半，列对不齐）。
+        return mb_strlen($text, 'UTF-8') + (int) preg_match_all('/[\x{4e00}-\x{9fff}]/u', $text);
     }
 }

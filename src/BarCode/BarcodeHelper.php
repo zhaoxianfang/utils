@@ -106,6 +106,14 @@ class BarcodeHelper
                     if (is_array($item)) {
                         $data = $item['data'] ?? '';
                         $filename = $item['filename'] ?? ($prefix . $realIndex);
+                        // 文件名语义为“无扩展名的基名”：仅取 basename 并清洗目录分隔符/系统非法字符，
+                        // 防止 ../ 目录穿越或 Windows 保留字符注入到输出路径
+                        if (is_string($filename)) {
+                            $filename = preg_replace('#[/\\\\:*?"<>|]#', '_', basename(trim($filename)));
+                        }
+                        if (!is_string($filename) || $filename === '' || $filename === '.' || $filename === '..') {
+                            $filename = $prefix . $realIndex;
+                        }
                     } else {
                         $data = (string)$item;
                         $filename = $prefix . $realIndex;
@@ -317,7 +325,7 @@ class BarcodeHelper
             ],
         ];
 
-        $normalizedType = strtolower($type);
+        $normalizedType = BarcodeFactory::canonicalType($type);
         return $typeInfo[$normalizedType] ?? [
             'name' => $type,
             'description' => '未知条码类型',

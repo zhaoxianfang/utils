@@ -129,11 +129,12 @@ class Wechat extends Gateway
      */
     public function getUserInfo()
     {
-        if($this->type == 'app'){//App登录
-            if(!isset($_REQUEST['access_token']) ){
-                throw new OAuthException("Wechat APP登录 需要传输access_token参数! ");
+        if($this->type == 'app'){//App登录：App SDK 回调会携带 access_token 与 openid，userinfo 接口两者缺一不可
+            if(!isset($_REQUEST['access_token'], $_REQUEST['openid']) ){
+                throw new OAuthException("Wechat APP登录 需要传输access_token和openid参数! ");
             }
             $this->token['access_token'] = $_REQUEST['access_token'];
+            $this->token['openid'] = $_REQUEST['openid'];
         }elseif ($this->type == 'applets'){
             //小程序
             return $this->applets();
@@ -292,7 +293,7 @@ class Wechat extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $params = [
                 'access_token' => $accessToken,
                 'openid'      => $this->openid(),

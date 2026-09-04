@@ -17,6 +17,38 @@ use InvalidArgumentException;
 class StringHelper
 {
     /**
+     * 编辑距离计算的最大字符数（超出则拒绝，避免 O(n·m) 的 DP 耗尽内存）
+     */
+    private const LEVENSHTEIN_MAX_LENGTH = 2000;
+
+    /** @var string 实例持有的字符串值（供 u_str() 链式调用使用） */
+    private string $value;
+
+    /**
+     * @param string $value 实例初始字符串
+     */
+    public function __construct(string $value = '')
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * 获取实例持有的字符串
+     */
+    public function value(): string
+    {
+        return $this->value;
+    }
+
+    /**
+     * 字符串化
+     */
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+
+    /**
      * 限制字符串长度，超出部分用指定后缀截断
      *
      * @param string $string  原始字符串
@@ -26,6 +58,8 @@ class StringHelper
      */
     public static function limit(string $string, int $limit = 100, string $end = '...'): string
     {
+        // limit 小于后缀长度时按 0 处理，避免 mb_substr 收到负长度
+        $limit = max(0, $limit);
         if (mb_strlen($string) <= $limit) return $string;
         return mb_substr($string, 0, $limit) . $end;
     }
@@ -67,10 +101,13 @@ class StringHelper
      */
     public static function snake(string $value, string $delimiter = '_'): string
     {
-        if (!ctype_lower($value)) {
-            $value = preg_replace('/\s+/u', '', ucwords($value));
-            $value = mb_strtolower(preg_replace('/(.)(?=[A-Z])/u', '$1' . $delimiter, $value));
+        if (! ctype_lower($value)) {
+            // preg_replace 在正则出错时返回 null，需回退为原值，
+            // 否则后续 mb_strtolower(null) 会触发弃用警告。
+            $value = preg_replace('/\s+/u', '', ucwords($value)) ?? $value;
+            $value = mb_strtolower(preg_replace('/(.)(?=[A-Z])/u', '$1' . $delimiter, $value) ?? $value);
         }
+
         return $value;
     }
 
@@ -185,6 +222,10 @@ class StringHelper
      */
     public static function random(int $length = 16, string $charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'): string
     {
+        if ($length < 1) {
+            throw new InvalidArgumentException('生成长度必须大于 0');
+        }
+
         // 将字符集拆分为“字符”数组（按 Unicode 码点），避免含多字节字符时
         // 用 strlen 计算长度、按字节下标取字符产生乱码。
         $chars = preg_split('//u', $charset, -1, PREG_SPLIT_NO_EMPTY);
@@ -204,15 +245,90 @@ class StringHelper
      *
      * 返回值范围：0.0（完全不同）~ 1.0（完全相同）
      *
+     * 注意：原生 `levenshtein()` 按**字节**计算，且当任一参数超过 255 字节时
+     * 会直接返回 -1（不再计算距离），导致中文或长文本的相似度结果完全错误。
+     * 因此这里统一按**字符**计算距离。
+     *
      * @param string $a 第一个字符串
      * @param string $b 第二个字符串
      * @return float 相似度比例
+     *
+     * @throws InvalidArgumentException 字符串过长（超过 2000 字符）时抛出
      */
     public static function similarity(string $a, string $b): float
     {
-        $maxLen = max(mb_strlen($a), mb_strlen($b));
-        if ($maxLen === 0) return 1.0;
-        return 1.0 - (levenshtein($a, $b) / $maxLen);
+        $aLen = mb_strlen($a);
+        $bLen = mb_strlen($b);
+        $maxLen = max($aLen, $bLen);
+
+        if ($maxLen === 0) {
+            return 1.0;
+        }
+
+        $distance = self::levenshteinDistance($a, $b);
+
+        // 结果夹取到 [0, 1]：编辑距离以字符计，理论上不会超过 maxLen，
+        // 但保险起见避免浮点误差导致负值。
+        return max(0.0, min(1.0, 1.0 - ($distance / $maxLen)));
+    }
+
+    /**
+     * 按字符（而非字节）计算 Levenshtein 编辑距离
+     *
+     * 使用滚动数组的动态规划实现，空间复杂度 O(min(n, m))。
+     *
+     * @throws InvalidArgumentException 字符串过长时抛出
+     */
+    public static function levenshteinDistance(string $a, string $b): int
+    {
+        // 纯 ASCII 且长度在原生函数限制内时，直接复用 C 实现（更快）
+        if (strlen($a) <= 255 && strlen($b) <= 255 && ! preg_match('/[\x80-\xFF]/', $a . $b)) {
+            return levenshtein($a, $b);
+        }
+
+        $aChars = mb_str_split($a);
+        $bChars = mb_str_split($b);
+        $aLen = count($aChars);
+        $bLen = count($bChars);
+
+        if ($aLen === 0) {
+            return $bLen;
+        }
+        if ($bLen === 0) {
+            return $aLen;
+        }
+
+        if ($aLen > self::LEVENSHTEIN_MAX_LENGTH || $bLen > self::LEVENSHTEIN_MAX_LENGTH) {
+            throw new InvalidArgumentException(sprintf(
+                '计算编辑距离的字符串过长（上限 %d 字符），实际为 %d 与 %d',
+                self::LEVENSHTEIN_MAX_LENGTH,
+                $aLen,
+                $bLen
+            ));
+        }
+
+        // 保证内层循环较短，减少空间占用
+        if ($aLen < $bLen) {
+            [$aChars, $bChars] = [$bChars, $aChars];
+            [$aLen, $bLen] = [$bLen, $aLen];
+        }
+
+        $previous = range(0, $bLen);
+
+        for ($i = 1; $i <= $aLen; $i++) {
+            $current = [$i];
+            for ($j = 1; $j <= $bLen; $j++) {
+                $cost = $aChars[$i - 1] === $bChars[$j - 1] ? 0 : 1;
+                $current[$j] = min(
+                    $previous[$j] + 1,      // 删除
+                    $current[$j - 1] + 1,   // 插入
+                    $previous[$j - 1] + $cost // 替换/匹配
+                );
+            }
+            $previous = $current;
+        }
+
+        return $previous[$bLen];
     }
 
     /**
@@ -226,8 +342,10 @@ class StringHelper
      */
     public static function slug(string $title, string $separator = '-'): string
     {
-        $title = preg_replace('![' . preg_quote($separator) . '\s]+!u', $separator, $title);
-        $title = preg_replace('![^\pL\pN]+!u', $separator, $title);
+        // preg_replace 出错时返回 null，需回退为原值，避免 trim(null) 触发弃用警告
+        $title = preg_replace('![' . preg_quote($separator) . '\s]+!u', $separator, $title) ?? $title;
+        $title = preg_replace('![^\pL\pN]+!u', $separator, $title) ?? $title;
+
         return mb_strtolower(trim($title, $separator));
     }
 

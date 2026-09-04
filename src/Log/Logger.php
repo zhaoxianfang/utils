@@ -206,7 +206,16 @@ class Logger
         $time = date($this->timeFormat);
         // 防止日志注入：消息中的换行/CRLF 会被伪造新的日志条目，统一替换为空格。
         $message = str_replace(["\r", "\n"], ' ', $message);
-        $contextStr = empty($context) ? '' : ' ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $contextStr = '';
+        if ($context !== []) {
+            // 必须处理 json_encode() 失败：上下文含非法 UTF-8 时返回 false，
+            // 直接拼接会静默吞掉整个上下文。先尝试替换非法字符，仍失败则降级为占位提示。
+            $encoded = json_encode(
+                $context,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+            );
+            $contextStr = ' ' . ($encoded !== false ? $encoded : '"[context 序列化失败]"');
+        }
         $line = "[{$time}] [{$levelName}] {$message}{$contextStr}" . PHP_EOL;
 
         // 按级别分文件存储
@@ -276,12 +285,20 @@ class Logger
     {
         $deleted = 0;
         $now = time();
-        foreach (glob($this->logDir . '/*.log') as $file) {
-            if (is_file($file) && ($now - filemtime($file)) > $days * 86400) {
-                unlink($file);
+        $files = glob($this->logDir . '/*.log');
+        if ($files === false) {
+            return 0;
+        }
+
+        foreach ($files as $file) {
+            $mtime = is_file($file) ? filemtime($file) : false;
+            // filemtime() 失败返回 false，参与减法会退化成 $now，
+            // 导致刚写入的日志被误判为过期而删除 —— 这里显式跳过取不到时间的条目。
+            if ($mtime !== false && ($now - $mtime) > $days * 86400 && unlink($file)) {
                 $deleted++;
             }
         }
+
         return $deleted;
     }
 
@@ -339,6 +356,16 @@ class Logger
             $this->currentFile = $file;
         }
 
-        fwrite($this->fileHandle, $content);
+        // 多进程/多请求同时写同一个日志文件时必须加锁，
+        // 否则并发写入会互相覆盖、产生半行交错的日志。
+        $written = false;
+        if (flock($this->fileHandle, LOCK_EX)) {
+            $written = fwrite($this->fileHandle, $content);
+            flock($this->fileHandle, LOCK_UN);
+        }
+
+        if ($written === false) {
+            throw new RuntimeException("日志写入失败: {$file}");
+        }
     }
 }

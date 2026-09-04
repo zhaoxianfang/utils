@@ -44,7 +44,7 @@ final class XML2Array
         'encoding' => 'UTF-8',      // 默认编码
         'preserveRootNode' => false,         // 是否保留根节点
         'removeXmlDeclaration' => true,         // 是否移除XML声明
-        'libxmlOptions' => LIBXML_NOCDATA | LIBXML_NOBLANKS | LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE, // libxml解析选项
+        'libxmlOptions' => LIBXML_NOCDATA | LIBXML_NOBLANKS | LIBXML_NONET | LIBXML_COMPACT, // libxml解析选项（PARSEHUGE 属不必要的攻击面放宽，仅在确需超大文档时按需追加）
         'maxDepth' => 50,           // 最大递归深度
         'validateOnParse' => false,        // 启用XML验证
         'schemaValidation' => false,        // 使用XSD验证
@@ -114,7 +114,8 @@ final class XML2Array
 
             return $this->processResult($result);
         } finally {
-            restore_error_handler();
+            // 修复：本类从不调用 set_error_handler()，旧的 restore_error_handler()
+            // 会弹出调用方（如框架）注册的错误处理器，必须移除。
         }
     }
 
@@ -174,7 +175,6 @@ final class XML2Array
             }
         } finally {
             $reader->close();
-            restore_error_handler();
         }
     }
 
@@ -215,7 +215,8 @@ final class XML2Array
 
         $dom->preserveWhiteSpace = false;
         $dom->strictErrorChecking = false;
-        $dom->substituteEntities = true;
+        // 不展开内部实体：与 parseStream() 的 SUBST_ENTITIES=false 保持一致（防 XXE/实体放大攻击）
+        $dom->substituteEntities = false;
         $dom->recover = true;
         $dom->validateOnParse = $this->options['validateOnParse'];
 
@@ -263,7 +264,7 @@ final class XML2Array
                 $this->stats['attributes']++;
                 $attrName = $this->normalizeNodeName($attr->nodeName);
                 $output[$this->options['attributePrefix'].$attrName] =
-                    $this->processValue($attr->nodeValue);
+                    $this->processValue($attr->nodeValue ?? '');
             }
         }
 
@@ -302,12 +303,22 @@ final class XML2Array
                 if ($processedText !== '') {
                     $output[$this->options['textNodeName']] = $processedText;
                 }
-            } else {
-                $output = $processedText;
+            } elseif ($processedText !== '') {
+                if ($output === []) {
+                    // 纯文本节点：直接返回文本
+                    $output = $processedText;
+                } else {
+                    // 修复：带属性的纯文本节点（如 <a id="1">text</a>）
+                    // 旧实现会在这里用 $output = $processedText 把已收集的属性整个覆盖丢弃，
+                    // 属性改为以 #text 键名保存
+                    $output[$this->options['textNodeName']] = $processedText;
+                }
             }
         }
 
-        return $output ?: '';
+        // 注意：不能用 $output ?: ''——0 / false / null 等「合法解析值」会被当假值吞成空串
+        // 静默丢失；仅当容器确实为空（无属性、无子节点、无文本）时才返回空字符串
+        return $output === [] ? '' : $output;
     }
 
     /**
@@ -493,6 +504,7 @@ final class XML2Array
         $this->stats = [
             'nodes' => 0,
             'attributes' => 0,
+            'comments' => 0,
             'depth' => 0,
             'memory' => 0,
             'parseTime' => 0,

@@ -42,7 +42,7 @@ abstract class BaseRenderer implements RendererInterface
     /** @var array<int> 长竖线（保护符）在条空模式中的索引位置 */
     protected array $longBarPositions = [];
 
-    /** @var float 长竖线相对于普通条的高度比例（默认 1.15） */
+    /** @var float 长竖线相对于普通条的高度比例（基类兜底 1.15；实际以 config.longBarRatio 为准，其默认 1.1） */
     protected float $longBarHeightRatio = 1.15;
 
     /** @var array<string, mixed> 条码结构分析结果，包含各区域边界 */
@@ -79,7 +79,7 @@ abstract class BaseRenderer implements RendererInterface
     protected int $bearerBarWidth = 2;
 
     /** @var int 当前渲染使用的模块大小（像素） */
-    protected int $renderModuleSize = 2;
+    protected int $renderModuleSize = 4;
 
     /** @var int 边框宽度（像素），0 表示无边框 */
     protected int $borderWidth = 0;
@@ -90,6 +90,10 @@ abstract class BaseRenderer implements RendererInterface
     public function __construct(?BarcodeConfig $config = null)
     {
         $this->config = $config ?? new BarcodeConfig();
+        // 长竖线比例以配置为准（config 默认 1.1），无配置时保持基类默认值
+        if ($this->config->longBarRatio > 0) {
+            $this->longBarHeightRatio = $this->config->longBarRatio;
+        }
     }
 
     public function getType(): string
@@ -132,15 +136,6 @@ abstract class BaseRenderer implements RendererInterface
         $this->enableGradient = true;
         $this->gradientStartColor = $startColor;
         $this->gradientEndColor = $endColor;
-        return $this;
-    }
-
-    /**
-     * 禁用渐变效果
-     */
-    public function disableGradient(): self
-    {
-        $this->enableGradient = false;
         return $this;
     }
 
@@ -210,15 +205,6 @@ abstract class BaseRenderer implements RendererInterface
     }
 
     /**
-     * 禁用 Bearer Bar
-     */
-    public function disableBearerBar(): self
-    {
-        $this->bearerBarEnabled = false;
-        return $this;
-    }
-
-    /**
      * 设置边框
      *
      * @param int $width 边框宽度（像素）
@@ -239,7 +225,7 @@ abstract class BaseRenderer implements RendererInterface
      * 1. config->moduleSize（内部已计算）
      * 2. config->width / totalModules（内容总宽度 / 总模块数）
      * 3. config->width 本身（旧版兼容，当 width 是模块宽度时）
-     * 4. 默认值 2
+     * 4. 默认值 4（4px/模块，兼顾图片体积与手机相机直扫屏幕的稳定性）
      *
      * @param array<int> $barcodeData 条空模式数组
      * @return int 模块大小（像素）
@@ -264,7 +250,11 @@ abstract class BaseRenderer implements RendererInterface
             return $this->config->width;
         }
 
-        return 2;
+        // 默认 4px/模块：95 模块的 EAN-13 内容区输出 380px（加左右静区整图 468px）。
+        // 历史沿革：2px → 3px（2016-07，消除缩放/压缩后的 EAN 镜像码对误读）→ 4px（本版，
+        // 手机相机对屏幕直接扫码时 3px/模块仍处于对焦/采样临界区，会出现校验恰好通过的
+        // 伪解码且多帧结果不同；4px/模块下各码制留出更宽裕的解码余量）。
+        return 4;
     }
 
     /**
@@ -278,6 +268,117 @@ abstract class BaseRenderer implements RendererInterface
             return $this->longBarPositions;
         }
         return [];
+    }
+
+    /**
+     * 是否应把保护符渲染成长竖线
+     *
+     * PNG/SVG 渲染器用 config->rotateLongBars 控制，HTML 渲染器此前忽略了该开关，
+     * 此处统一判定，保证三种渲染器行为一致。
+     */
+    protected function longBarsEnabled(): bool
+    {
+        return $this->config->rotateLongBars && !empty($this->longBarPositions);
+    }
+
+    /**
+     * 把条码数据切分为按保护符区域分组的显示段（供文本渲染使用）
+     *
+     * 返回形如 [ ['text' => '6', 'region' => 'leftQuietZone', 'type' => 'single'], ... ]
+     * 的列表；不适用分段的条码类型返回空数组，由调用方回退为整段文本。
+     *
+     * 【注意】data 可能是补齐校验位后的完整条码（如 EAN-13 的 13 位），
+     * 这里只负责「按位拆分 + 分组」，不负责显示格式的变换。
+     *
+     * @return list<array{text: string, region: string, type: string}>
+     */
+    protected function splitDisplaySegments(string $data): array
+    {
+        $length = strlen($data);
+
+        switch ($this->barcodeType) {
+            case 'EAN-13':
+            case 'ISBN':
+            case 'ISSN':
+                // ISBN 的码面是 13 位 EAN-13 结构（含 978 前缀与 EAN-13 校验位），
+                // 显示分段与 EAN-13 一致（1+6+6），否则三种渲染器会丢字/布局错位。
+                if ($length === 13) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
+                break;
+
+            case 'UPC-A':
+                if ($length === 12) {
+                    return [
+                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
+                        ['text' => substr($data, 1, 5), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 6, 5), 'region' => 'rightData', 'type' => 'multi'],
+                        ['text' => $data[11], 'region' => 'rightQuietZone', 'type' => 'single'],
+                    ];
+                }
+                break;
+
+            case 'EAN-8':
+                if ($length === 8) {
+                    return [
+                        ['text' => substr($data, 0, 4), 'region' => 'leftData', 'type' => 'multi'],
+                        ['text' => substr($data, 4, 4), 'region' => 'rightData', 'type' => 'multi'],
+                    ];
+                }
+                break;
+        }
+
+        return [];
+    }
+
+    /**
+     * 由条空模式数组构建各条/空元素的几何信息（供结构分析共用）
+     *
+     * @param array<int> $barcodeData
+     * @param int $startX 首条 x 坐标的偏移量（PNG 直接以画布坐标为基准时为 marginLeft）
+     * @return list<array{x:int,width:int,isLongBar:bool,elementIndex:int}>
+     */
+    protected function buildBarGeometries(array $barcodeData, int $startX = 0): array
+    {
+        $longBarPositions = $this->calculateLongBarPositions();
+        $moduleSize = $this->renderModuleSize ?: 1;
+        $x = $startX;
+        $bars = [];
+
+        foreach ($barcodeData as $elementIndex => $element) {
+            $isBar = $element > 0;
+            $width = abs($element) * $moduleSize;
+
+            if ($isBar) {
+                $bars[] = [
+                    'x' => $x,
+                    'width' => $width,
+                    'isLongBar' => in_array($elementIndex, $longBarPositions, true),
+                    'elementIndex' => $elementIndex,
+                ];
+            }
+
+            $x += $width;
+        }
+
+        return $bars;
+    }
+
+    /**
+     * 静区最小宽度（像素）
+     *
+     * 以配置的 quietZoneWidth（模块倍数）为准，但保证不低于
+     * EAN/UPC 规范要求的 11 个模块宽度。
+     */
+    protected function quietZoneWidthPx(): int
+    {
+        $modules = max(11, max(1, (int) $this->config->quietZoneWidth));
+
+        return $modules * max(1, $this->renderModuleSize);
     }
 
     /**
@@ -360,6 +461,32 @@ abstract class BaseRenderer implements RendererInterface
                     ($this->barcodeStructure['totalWidth'] + $marginLeft)) / 2),
             ],
         ];
+    }
+
+    /**
+     * 渐变是否可安全使用（扫码守卫）
+     *
+     * 渐变把条带从 startColor 渐变到 endColor：若任一端与背景对比不足（WCAG < 3:1），
+     * 条形浅色段会被解码器当作空白（起始符/终止符丢失），整码拒读。
+     * 两端任一非合法 hex 或对比不足时自动回退纯色条，保证可扫性优先。
+     */
+    protected function gradientUsable(): bool
+    {
+        if (!$this->enableGradient) {
+            return false;
+        }
+        $bg = $this->config->bgColor;
+        if ($bg === 'transparent') {
+            $bg = '#FFFFFF';
+        }
+        $hexPattern = '/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/';
+        if (!preg_match($hexPattern, $bg)
+            || !preg_match($hexPattern, $this->gradientStartColor)
+            || !preg_match($hexPattern, $this->gradientEndColor)) {
+            return false;
+        }
+        return $this->validateContrast($bg, $this->gradientStartColor)
+            && $this->validateContrast($bg, $this->gradientEndColor);
     }
 
     /**

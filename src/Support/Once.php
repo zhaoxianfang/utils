@@ -32,7 +32,7 @@ final class Once
 {
     private bool $executed = false;
 
-    private mixed $value;
+    private mixed $value = null;
 
     private function __construct(private Closure $callback)
     {
@@ -43,6 +43,13 @@ final class Once
         return new self($callback);
     }
 
+    /**
+     * 执行回调（仅首次真正执行），返回缓存的结果
+     *
+     * 注意：本实现**不具备跨进程/跨线程安全性**。在并发请求（多进程 FPM）
+     * 或协程环境下，多个执行流可能同时进入首次调用；需要全局唯一时请配合
+     * `zxf\Utils\Support\Locker` 等互斥机制使用。
+     */
     public function __invoke(): mixed
     {
         if (! $this->executed) {
@@ -50,6 +57,14 @@ final class Once
             $this->executed = true;
         }
 
+        return $this->value;
+    }
+
+    /**
+     * 获取缓存值；尚未执行则返回 null（不会触发执行）
+     */
+    public function value(): mixed
+    {
         return $this->value;
     }
 

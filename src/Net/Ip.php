@@ -363,22 +363,43 @@ class Ip
         }
 
         $cidrs = [];
-        while ($startLong <= $endLong) {
-            // 找到最大的CIDR块
-            $maxSize = 32;
-            while ($maxSize > 0) {
-                $mask = $maxSize === 0 ? 0 : ((0xFFFFFFFF << (32 - $maxSize)) & 0xFFFFFFFF);
-                $maskedStart = $startLong & $mask;
-                $blockSize = 1 << (32 - $maxSize);
-                $blockEnd = $maskedStart + $blockSize - 1;
-                if ($maskedStart === $startLong && $blockEnd <= $endLong) {
-                    break;
+        $cursor = $startLong;
+
+        // 每次迭代都取「能覆盖当前起始地址的最大块」，块大小受两个约束：
+        //  1. 对齐约束：起始地址必须落在块边界上，由地址末尾连续 0 的个数决定；
+        //  2. 容量约束：块不能超出结束地址，由剩余地址数量决定。
+        // 前缀长度（0~32）越小块越大，因此取两个约束的较大值。
+        //
+        // 早期实现从 /32 开始向小前缀试探、命中即停，结果永远返回 /32，
+        // 且遇到 0.0.0.0~255.255.255.255 这种大范围会生成数十亿条记录而耗尽内存。
+        while ($cursor <= $endLong) {
+            // 约束一：对齐
+            $maxByAlign = 0; // 起始地址为 0.0.0.0 时，可对齐到任意大小的块
+            if ($cursor !== 0) {
+                $lowbit = $cursor & -$cursor; // 最低位的 1，其位序即末尾连续 0 的个数
+                $bits = 0;
+                for ($tmp = $lowbit; $tmp > 1; $tmp >>= 1) {
+                    $bits++;
                 }
-                $maxSize--;
+                $maxByAlign = 32 - $bits;
             }
-            $cidrs[] = self::longToV4($startLong) . '/' . $maxSize;
-            $startLong += 1 << (32 - $maxSize);
+
+            // 约束二：容量
+            $bits = 0;
+            for ($tmp = $endLong - $cursor + 1; $tmp > 1; $tmp >>= 1) {
+                $bits++;
+            }
+            $maxBySize = 32 - $bits;
+
+            $prefix = max($maxByAlign, $maxBySize);
+
+            $cidrs[] = self::longToV4($cursor) . '/' . $prefix;
+
+            // 前进一个块。$prefix 为 0 时块大小为 2^32，必然越过结束地址，
+            // 循环随之终止（64 位整数下不会溢出）。
+            $cursor += 1 << (32 - $prefix);
         }
+
         return $cidrs;
     }
 

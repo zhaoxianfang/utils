@@ -74,7 +74,7 @@ class Coding extends Gateway
      */
     public function getUserInfo()
     {
-        $this->openid();
+        $this->getToken();
         $data = $this->get($this->UserInfoURL, [
             'access_token' => $this->token['access_token']
         ]);
@@ -95,8 +95,9 @@ class Coding extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['uid'] ?? '';
+        // Coding token 响应不含 uid，用户标识（id）需从 userinfo 接口获取
+        $result = $this->getUserInfo();
+        return $result['id'] ?? '';
     }
 
     /**

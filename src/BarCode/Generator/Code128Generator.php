@@ -39,11 +39,8 @@ class Code128Generator extends BaseGenerator
     // 停止符
     protected const STOP = 106;
 
-    /** @var int 模块宽度 */
-    protected const MODULE_WIDTH = 2;
-
-    /** @var int 静区宽度（10 模块） */
-    protected const QUIET_ZONE = 20;
+    /** @var int 静区宽度（每侧 10 模块，Code 128 标准要求 >=10x） */
+    protected const QUIET_ZONE = 10;
 
     /**
      * Code 128 编码表（每个值对应 11 个模块的条空模式）

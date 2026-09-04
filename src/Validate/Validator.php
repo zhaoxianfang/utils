@@ -292,7 +292,8 @@ class Validator
      */
     public static function isChinese(string $value, bool $pure = true): bool
     {
-        $pattern = $pure ? '/^[\x{4e00}-\x{9fa5}]+$/' : '/^[\x{4e00}-\x{9fa5}\s]+$/';
+        // 修复：\x{4e00} 等 \x{} 转义必须配合 /u 修饰符，否则 PCRE 编译失败（恒返回 false）
+        $pattern = $pure ? '/^[\x{4e00}-\x{9fa5}]+$/u' : '/^[\x{4e00}-\x{9fa5}\s]+$/u';
         return (bool) preg_match($pattern, $value);
     }
 
@@ -319,6 +320,9 @@ class Validator
      */
     public static function isAlphaNumDash(string $value, int $min = 1, int $max = 255): bool
     {
+        if ($min < 0 || $max < 1 || $min > $max) {
+            throw new InvalidArgumentException("非法的长度范围: min={$min}, max={$max}");
+        }
         return (bool) preg_match('/^[a-zA-Z0-9_-]{' . $min . ',' . $max . '}$/', $value);
     }
 
@@ -346,6 +350,17 @@ class Validator
     public static function isDateTime(string $datetime): bool
     {
         if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $datetime)) {
+            return false;
+        }
+        // date_create_from_format 会把溢出分量滚动归一化（如 2024-13-40 → 2025-02-09），
+        // 因此必须先按真实日历校验日期分量，否则 2024-13-01 之类会被误判为有效
+        [$datePart, $timePart] = explode(' ', $datetime);
+        [$y, $m, $d] = array_map('intval', explode('-', $datePart));
+        if (!checkdate($m, $d, $y)) {
+            return false;
+        }
+        [$h, $i, $s] = array_map('intval', explode(':', $timePart));
+        if ($h > 23 || $i > 59 || $s > 60) { // 允许 60 以兼容闰秒输入
             return false;
         }
         return (bool) date_create_from_format('Y-m-d H:i:s', $datetime);
@@ -521,7 +536,10 @@ class Validator
                 $params = [];
                 if (str_contains($rule, ':')) {
                     [$ruleName, $paramStr] = explode(':', $rule, 2);
-                    $params = explode(',', $paramStr);
+                    // 修复：regex 规则的参数是「整段正则」，其中的逗号（如量词 {2,5}、
+                    // 字符类 [a-z,0-9]）属于正则语法而非参数分隔符，必须整体保留，
+                    // 否则会被截断成非法正则导致校验恒失败；仅其它规则按逗号拆参数
+                    $params = $ruleName === 'regex' ? [$paramStr] : explode(',', $paramStr);
                 } else {
                     $ruleName = $rule;
                 }
@@ -554,7 +572,8 @@ class Validator
                     'regex'      => is_string($value) && isset($params[0]) && self::regex($value, $params[0]),
                     'alpha_num'  => is_string($value) && ctype_alnum($value),
                     'alpha_dash' => is_string($value) && self::isAlphaNumDash($value),
-                    default      => true,
+                    // 未知规则禁止静默放行：规则名拼写错误会悄悄绕过校验，必须显式报错
+                    default      => throw new InvalidArgumentException("未知的验证规则: {$ruleName}（字段 {$field}）"),
                 };
 
                 if (!$result) {

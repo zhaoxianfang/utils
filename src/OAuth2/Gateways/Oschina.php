@@ -32,7 +32,7 @@ class Oschina extends Gateway
             'access_token' => $this->token['access_token'] ?? '',
             'channel' => ConstCode::TYPE_OSCHINA,
             'nickname' => $result['name'] ?? '',
-            'gender'   => isset($result['gender']) ? ($result['gender'] == 'male' ? 1 : 2) : ConstCode::GENDER,
+            'gender'   => isset($result['gender']) ? ($result['gender'] === 'male' ? ConstCode::GENDER_MAN : ($result['gender'] === 'female' ? ConstCode::GENDER_WOMEN : ConstCode::GENDER)) : ConstCode::GENDER,
             'avatar'   => $result['avatar'] ?? '',
             // 以下是额外信息
             'email'    => $result['email'] ?? '',
@@ -43,7 +43,7 @@ class Oschina extends Gateway
 
     public function getUserInfo()
     {
-        $this->openid();
+        $this->getToken();
         $data = $this->get($this->UserInfoURL, [
             'access_token' => $this->token['access_token'],
             'dataType' => 'json'
@@ -82,8 +82,9 @@ class Oschina extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['user_id'] ?? '';
+        // 开源中国 token 响应无稳定 user_id 键，用户标识（id）以 userinfo 为准
+        $result = $this->getUserInfo();
+        return $result['id'] ?? '';
     }
 
     /**

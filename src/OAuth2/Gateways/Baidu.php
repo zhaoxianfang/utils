@@ -80,8 +80,8 @@ class Baidu extends Gateway
      */
     public function getUserInfo()
     {
-        /** 获取用户信息 */
-        $this->openid();
+        /** 获取 token（直接调 getToken，避免经由 openid 造成的语义循环） */
+        $this->getToken();
 
         $headers = ['Authorization: Bearer '.$this->token['access_token']];
         $data = $this->get($this->UserInfoURL, [], $headers);
@@ -103,8 +103,9 @@ class Baidu extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['uid'] ?? '';
+        // 百度 token 响应不含 uid，用户标识（uid）需从 userinfo 接口获取
+        $result = $this->getUserInfo();
+        return $result['uid'] ?? '';
     }
 
 
@@ -115,14 +116,13 @@ class Baidu extends Gateway
     protected function getToken(){
         if (empty($this->token)) {
             /** 验证state参数 */
-            $this->CheckState();
+            $this->checkState();
 
-            /** 获取参数 */
+            /** 获取参数（参数走请求体，避免反复拼接污染 AccessTokenURL） */
             $params = $this->accessTokenParams();
 
             /** 获取access_token */
-            $this->AccessTokenURL = $this->AccessTokenURL . '?' . http_build_query($params);
-            $token =  $this->post($this->AccessTokenURL);
+            $token =  $this->post($this->AccessTokenURL, $params);
             /** 解析token值(子类实现此方法) */
             $this->token = $this->parseToken($token);
         }
@@ -141,7 +141,7 @@ class Baidu extends Gateway
         if (isset($data['access_token'])) {
             return $data;
         } else {
-            throw new OAuthException("获取Baidu ACCESS_TOKEN出错：{$data['error']}");
+            throw new OAuthException("获取Baidu ACCESS_TOKEN出错：".($data['error'] ?? 'invalid response'));
         }
     }
 
@@ -180,7 +180,7 @@ class Baidu extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $headers = ['Authorization: Bearer ' . $accessToken];
             $data = $this->get($this->UserInfoURL, [], $headers);
             if(is_string($data)){

@@ -109,19 +109,50 @@ class Request
         $this->port = (int) ($_SERVER['SERVER_PORT'] ?? ($_SERVER['X_FORWARDED_PORT'] ?? 80));
 
         // 获取请求头信息
-        if (! function_exists('apache_request_headers')) {
-            $headersData = [];
-            $headers = headers_list();
-            foreach ($headers as $header) {
-                $header = explode(':', $header);
-                $headersData[array_shift($header)] = trim(implode(':', $header));
-            }
-            $this->headers = array_change_key_case($headersData, CASE_UPPER);
-        } else {
-            $this->headers = array_change_key_case(apache_request_headers(), CASE_UPPER);
-        }
+        $this->headers = $this->buildHeadersFromServer();
 
         return $this;
+    }
+
+    /**
+     * 从超全局变量重建请求头（键统一为大写）
+     *
+     * 优先使用 SAPI 提供的 `apache_request_headers()` / `getallheaders()`
+     * （它们能原样保留 Content-Type、Content-Length 等头）；
+     * 两者都不可用时（CLI、部分 CGI）从 `$_SERVER` 的 `HTTP_*` 变量重建。
+     *
+     * 注意：早期实现用 `headers_list()` 作为回退是**错误**的 ——
+     * `headers_list()` 返回的是**待发送的响应头**，不是请求头，
+     * 在 FPM/CLI 下会导致所有请求头丢失。
+     *
+     * @return array<string, string>
+     */
+    private function buildHeadersFromServer(): array
+    {
+        if (function_exists('apache_request_headers')) {
+            $headers = @apache_request_headers();
+            if (is_array($headers)) {
+                return array_change_key_case($headers, CASE_UPPER);
+            }
+        }
+
+        if (function_exists('getallheaders')) {
+            $headers = @getallheaders();
+            if (is_array($headers)) {
+                return array_change_key_case($headers, CASE_UPPER);
+            }
+        }
+
+        $headers = [];
+        foreach ($_SERVER as $key => $value) {
+            if (str_starts_with($key, 'HTTP_')) {
+                $headers[str_replace('_', '-', substr($key, 5))] = (string) $value;
+            } elseif (in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true)) {
+                $headers[str_replace('_', '-', $key)] = (string) $value;
+            }
+        }
+
+        return $headers;
     }
 
     /**

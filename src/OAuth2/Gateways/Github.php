@@ -49,7 +49,6 @@ class Github extends Gateway
         //存储state
         $this->saveState();
         //登录参数
-        $this->switchAccessTokenURL();
         $params = [
             'client_id'    => $this->config['app_id'],
             'redirect_uri' => $this->config['callback'],
@@ -69,12 +68,13 @@ class Github extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
+        // GitHub token 响应不含 openid，用户标识即 userinfo 的 id 字段
+        $result = $this->getUserInfo();
 
-        if (isset($this->token['openid'])) {
-            return $this->token['openid'];
+        if (isset($result['id'])) {
+            return $result['id'];
         } else {
-            throw new OAuthException('没有获取到新浪微博用户ID！');
+            throw new OAuthException('没有获取到 GitHub 用户ID！');
         }
     }
 
@@ -113,10 +113,11 @@ class Github extends Gateway
     {
         $this->getToken();
 
+        // GitHub API 强制要求非空 User-Agent，否则返回 403；application_name 缺省时给默认值
+        $ua = trim((string) ($this->config['application_name'] ?? ''));
         $headers = [
-            'User-Agent: '.$this->config['application_name'],
-            'UserModel-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36 ',
-            'Authorization: token ' . $this->token['access_token'],
+            'User-Agent: '.($ua !== '' ? $ua : 'zxf-utils-oauth'),
+            'Authorization: token ' . ($this->token['access_token'] ?? ''),
             'Accept: application/json'
         ];
         $data = $this->get($this->UserInfoURL, [], $headers);
@@ -134,11 +135,6 @@ class Github extends Gateway
      * Description:  根据第三方授权页面样式切换跳转地址
      *
      */
-    private function switchAccessTokenURL()
-    {
-        if ($this->display == 'mobile') {}
-    }
-
     /**
      * Description:  解析access_token方法请求后的返回值
      *
@@ -149,10 +145,10 @@ class Github extends Gateway
     protected function parseToken($token)
     {
         $data = json_decode($token, true);
-        if (isset($data['access_token'])) {
+        if (is_array($data) && isset($data['access_token'])) {
             return $data;
         } else {
-            throw new OAuthException("获取GitHub ACCESS_TOKEN出错：{$data['error']}");
+            throw new OAuthException("获取GitHub ACCESS_TOKEN出错：".($data['error'] ?? 'invalid response'));
         }
     }
 }

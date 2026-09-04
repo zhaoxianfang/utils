@@ -27,17 +27,17 @@ class Code39Generator extends BaseGenerator
     /** @var string Code 39支持的字符集 */
     protected const CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%';
 
-    /** @var int 窄元素宽度 */
-    protected const NARROW_WIDTH = 2;
+    /** @var int 窄元素宽度（模块级：1 模块 = renderer 的 moduleSize 像素） */
+    protected const NARROW_WIDTH = 1;
     
-    /** @var int 宽元素宽度 */
-    protected const WIDE_WIDTH = 6;
+    /** @var int 宽元素宽度（宽:窄 = 3:1，AIM USS 规范） */
+    protected const WIDE_WIDTH = 3;
     
-    /** @var int 字符间分隔空宽度 */
-    protected const INTER_CHAR_GAP = 2;
+    /** @var int 字符间分隔空宽度（= 1 个窄宽，1 模块） */
+    protected const INTER_CHAR_GAP = 1;
     
-    /** @var int 静区宽度 */
-    protected const QUIET_ZONE = 20;
+    /** @var int 每侧静区宽度（10 个窄宽，标准要求 >=10x） */
+    protected const QUIET_ZONE = 10;
 
     /**
      * Code 39标准编码表（AIM USS规范）
@@ -76,50 +76,46 @@ class Code39Generator extends BaseGenerator
     {
         $data = $this->sanitizeData($data);
         
-        // 验证数据
-        if (!$this->validate($data)) {
-            throw new InvalidDataException('Code 39 数据包含无效字符，仅支持数字、大写字母和 - . $ / + % 空格');
-        }
+        // 统一大写：Code 39 规范字符集仅含大写字母，小写输入自动转大写
+        $this->rawData = strtoupper($data);
 
-        if (strlen($data) === 0) {
+        if (strlen($this->rawData) === 0) {
             throw new InvalidDataException('Code 39 数据不能为空');
         }
 
-        $this->rawData = strtoupper($data);
+        // 验证数据
+        if (!$this->validate($this->rawData)) {
+            throw new InvalidDataException('Code 39 数据包含无效字符，仅支持数字、大写字母和 - . $ / + % 空格（小写字母已自动转大写）');
+        }
         $this->barcodeArray = [];
         $this->longBarPositions = [];
 
-        // 基准单位宽度
-        $baseWidth = self::NARROW_WIDTH;
+        // 左侧静区（10 模块，渲染时按 moduleSize 放大）
+        $this->barcodeArray[] = -self::QUIET_ZONE;
 
-        // 左侧静区 (使用基准宽度)
-        $this->barcodeArray[] = -(self::QUIET_ZONE / $baseWidth);
-
-        // 起始符 '*'
+        // 起始符 '*'（其后同样需要 1 模块字符间隔）
         $this->encodeCharacter('*');
-        
-        // 字符间分隔
-        $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
+        $this->barcodeArray[] = -self::INTER_CHAR_GAP;
 
         // 数据字符
         for ($i = 0; $i < strlen($this->rawData); $i++) {
             $char = $this->rawData[$i];
             $this->encodeCharacter($char);
-            
-            // 字符间分隔（最后一个字符后不需要）
+
+            // 字符间分隔（1 模块窄空；最后一个数据字符后的间隔由终止星前的分隔接管）
             if ($i < strlen($this->rawData) - 1) {
-                $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
+                $this->barcodeArray[] = -self::INTER_CHAR_GAP;
             }
         }
-        
+
         // 终止符前分隔
-        $this->barcodeArray[] = -(self::INTER_CHAR_GAP / $baseWidth);
-        
+        $this->barcodeArray[] = -self::INTER_CHAR_GAP;
+
         // 终止符 '*'
         $this->encodeCharacter('*');
 
-        // 右侧静区 (使用基准宽度)
-        $this->barcodeArray[] = -(self::QUIET_ZONE / $baseWidth);
+        // 右侧静区（10 模块）
+        $this->barcodeArray[] = -self::QUIET_ZONE;
 
         return $this->barcodeArray;
     }

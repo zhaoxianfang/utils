@@ -170,28 +170,37 @@ class Password
             $issues[] = "密码长度不能超过 {$rules['max_length']} 个字符";
         }
 
-        if ($rules['require_uppercase'] && !preg_match('/[A-Z]/', $password)) {
-            $issues[] = '密码必须包含大写字母';
-        } else {
-            $score += 15;
+        // 未启用的类别不检查也不加分（原逻辑在 require_*=false 时仍走 else 加 15 分）
+        if ($rules['require_uppercase']) {
+            if (!preg_match('/[A-Z]/', $password)) {
+                $issues[] = '密码必须包含大写字母';
+            } else {
+                $score += 15;
+            }
         }
 
-        if ($rules['require_lowercase'] && !preg_match('/[a-z]/', $password)) {
-            $issues[] = '密码必须包含小写字母';
-        } else {
-            $score += 15;
+        if ($rules['require_lowercase']) {
+            if (!preg_match('/[a-z]/', $password)) {
+                $issues[] = '密码必须包含小写字母';
+            } else {
+                $score += 15;
+            }
         }
 
-        if ($rules['require_number'] && !preg_match('/[0-9]/', $password)) {
-            $issues[] = '密码必须包含数字';
-        } else {
-            $score += 15;
+        if ($rules['require_number']) {
+            if (!preg_match('/[0-9]/', $password)) {
+                $issues[] = '密码必须包含数字';
+            } else {
+                $score += 15;
+            }
         }
 
-        if ($rules['require_special'] && !preg_match('/[^A-Za-z0-9]/', $password)) {
-            $issues[] = '密码必须包含特殊字符';
-        } else {
-            $score += 15;
+        if ($rules['require_special']) {
+            if (!preg_match('/[^A-Za-z0-9]/', $password)) {
+                $issues[] = '密码必须包含特殊字符';
+            } else {
+                $score += 15;
+            }
         }
 
         // 额外加分项
@@ -301,8 +310,9 @@ class Password
         $words = self::getWordList();
         $parts = [];
 
+        // 密码材料必须使用加密安全随机源（array_rand 基于 mt_rand，不可用于生成密码）
         for ($i = 0; $i < $wordCount; $i++) {
-            $parts[] = $words[array_rand($words)];
+            $parts[] = $words[random_int(0, count($words) - 1)];
         }
 
         if ($addNumber) {
@@ -313,7 +323,7 @@ class Password
 
         if ($addSpecial) {
             $specials = str_split(self::SPECIAL_CHARS);
-            $password .= $specials[array_rand($specials)];
+            $password .= $specials[random_int(0, count($specials) - 1)];
         }
 
         return $password;
@@ -349,17 +359,26 @@ class Password
      */
     public static function recommendBcryptCost(float $targetTime = 0.25): int
     {
+        $targetTime = max(0.01, $targetTime);
         $cost = 10;
         $password = random_bytes(32);
 
-        do {
-            $cost++;
+        // 从 cost=10 起逐个测量（原实现先自增后测量，10 从未被测过），
+        // 返回「首个单次哈希耗时 ≥ targetTime」的 cost；全部不达标时返回 31（bcrypt 上限）
+        while ($cost <= 31) {
             $start = microtime(true);
-            password_hash($password, PASSWORD_BCRYPT, ['cost' => $cost]);
-            $time = microtime(true) - $start;
-        } while ($time < $targetTime && $cost < 31);
+            $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => $cost]);
+            if ($hash === false) {
+                throw new RuntimeException("bcrypt 哈希失败 (cost={$cost})");
+            }
+            $elapsed = microtime(true) - $start;
+            if ($elapsed >= $targetTime) {
+                return $cost;
+            }
+            $cost++;
+        }
 
-        return $cost;
+        return 31;
     }
 
     /**

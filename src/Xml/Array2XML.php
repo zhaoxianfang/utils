@@ -237,11 +237,12 @@ class Array2XML
 
         // 验证模式下的严格处理
         if ($this->config['validateElementName']) {
-            // 移除非法的XML名称字符
-            $cleaned = preg_replace('/[^a-zA-Z0-9_\-\.]/', '', $name);
+            // 移除非法的XML名称字符。XML 1.0 元素名允许 Unicode 字母/数字，
+            // 旧实现 [^a-zA-Z0-9_\-\.] 会把中文键名（如“姓名”）整段剥掉 → 键名静默丢失
+            $cleaned = preg_replace('/[^\p{L}\p{N}_\-\.]/u', '', (string) $name);
 
-            // 确保名称以字母或下划线开头
-            if (! preg_match('/^[a-zA-Z_]/', $cleaned)) {
+            // 确保名称以字母或下划线开头（Unicode 字母亦视为合法起始字符）
+            if (! preg_match('/^[\p{L}_]/u', $cleaned)) {
                 $cleaned = 'element_'.$cleaned;
             }
 
@@ -550,7 +551,9 @@ class Array2XML
 
         // 布尔值处理
         if (is_bool($value)) {
-            return $this->config['booleanToString'] ? ($value ? 'true' : 'false') : (int) $value;
+            // 修复：返回类型为 string 且本文件 declare(strict_types=1)，booleanToString=false
+            // 时直接返回 (int) 会 TypeError，必须先转 string
+            return $this->config['booleanToString'] ? ($value ? 'true' : 'false') : (string) (int) $value;
         }
 
         // 数组和对象转为空字符串

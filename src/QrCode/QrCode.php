@@ -1934,23 +1934,123 @@ class QrCode
             $svg .= '  <path d="' . implode(' ', $paths) . '" fill="' . $fgHex . '"/>' . "\n";
         }
 
-        // Logo（嵌入SVG图片）
+        // Logo（嵌入SVG图片；支持圆形/圆角裁剪、阴影与背景——与 PNG 渲染能力对齐，
+        // 不再静默丢弃这些选项）
         if ($this->logoPath !== null && file_exists($this->logoPath)) {
-            $logoSize = (int)($qrContentWidth * 0.15);
-            $logoX = $contentX + (int)(($qrContentWidth - $logoSize) / 2);
-            $logoY = $contentY + (int)(($qrContentWidth - $logoSize) / 2);
-            $logoData = base64_encode(file_get_contents($this->logoPath));
-            $logoMime = match (strtolower(pathinfo($this->logoPath, PATHINFO_EXTENSION))) {
+            $logoSize = (int) ($qrContentWidth * 0.15);
+            $logoX = $contentX + (int) (($qrContentWidth - $logoSize) / 2);
+            $logoY = $contentY + (int) (($qrContentWidth - $logoSize) / 2);
+            $logoData = base64_encode((string) file_get_contents($this->logoPath));
+            $logoMime = match (strtolower((string) pathinfo($this->logoPath, PATHINFO_EXTENSION))) {
                 'png' => 'image/png',
                 'jpg', 'jpeg' => 'image/jpeg',
                 'gif' => 'image/gif',
                 'svg' => 'image/svg+xml',
                 default => 'image/png',
             };
+
+            $logoClip = $this->logoCircular || $this->logoRounded;
+            $logoIsRound = $this->logoCircular === false; // true = 圆角矩形（非圆形）
+
+            // 0) 裁剪路径先声明：部分渲染器不支持后向引用，clipPath 必须在使用之前定义
+            $clipId = '';
+            if ($logoClip) {
+                $clipId = 'qr-logo-clip-' . bin2hex(random_bytes(4));
+                if ($logoIsRound) {
+                    $clipCorner = (int) ($logoSize * $this->logoRadius);
+                    $svg .= '  <clipPath id="' . $clipId . '"><rect x="' . $logoX . '" y="' . $logoY . '"';
+                    $svg .= ' width="' . $logoSize . '" height="' . $logoSize . '" rx="' . $clipCorner . '" ry="' . $clipCorner . '"/></clipPath>' . "\n";
+                } else {
+                    $svg .= '  <clipPath id="' . $clipId . '"><circle cx="' . ($logoX + $logoSize / 2) . '"';
+                    $svg .= ' cy="' . ($logoY + $logoSize / 2) . '" r="' . ($logoSize / 2) . '"/></clipPath>' . "\n";
+                }
+            }
+
+            // 1) 阴影（垫在背景/图片下方）
+            if ($this->logoShadowColor !== null) {
+                $sh = $this->logoShadowColor;
+                $shHex = '#' . $sh->toHex();
+                $shX = $logoX + $this->logoShadowOffsetX;
+                $shY = $logoY + $this->logoShadowOffsetY;
+                if ($this->logoCircular) {
+                    $svg .= '  <circle cx="' . ($shX + $logoSize / 2) . '" cy="' . ($shY + $logoSize / 2) . '"';
+                    $svg .= ' r="' . ($logoSize / 2) . '" fill="' . $shHex . '" fill-opacity="0.35"/>' . "\n";
+                } else {
+                    $rx = $this->logoRounded ? (int) ($logoSize * $this->logoRadius) : 0;
+                    $svg .= '  <rect x="' . $shX . '" y="' . $shY . '" width="' . $logoSize . '" height="' . $logoSize . '"';
+                    if ($rx > 0) {
+                        $svg .= ' rx="' . $rx . '" ry="' . $rx . '"';
+                    }
+                    $svg .= ' fill="' . $shHex . '" fill-opacity="0.35"/>' . "\n";
+                }
+            }
+
+            // 2) 背景垫片（透明 LOGO 图片常见：PNG 渲染器也会铺一层纯色底）
+            if ($logoClip) {
+                $bgHex = '#' . ($this->logoBackgroundColor ?? new Color(255, 255, 255))->toHex();
+                if ($this->logoCircular) {
+                    $svg .= '  <circle cx="' . ($logoX + $logoSize / 2) . '" cy="' . ($logoY + $logoSize / 2) . '"';
+                    $svg .= ' r="' . ($logoSize / 2) . '" fill="' . $bgHex . '"/>' . "\n";
+                } else {
+                    $rx = (int) ($logoSize * $this->logoRadius);
+                    $svg .= '  <rect x="' . $logoX . '" y="' . $logoY . '" width="' . $logoSize . '" height="' . $logoSize . '"';
+                    $svg .= ' rx="' . $rx . '" ry="' . $rx . '" fill="' . $bgHex . '"/>' . "\n";
+                }
+            }
+
+            // 3) 图片主体（按需裁剪）
             $svg .= '  <image x="' . $logoX . '" y="' . $logoY . '"';
             $svg .= ' width="' . $logoSize . '" height="' . $logoSize . '"';
+            $svg .= ' preserveAspectRatio="xMidYMid meet"';
             $svg .= ' href="data:' . $logoMime . ';base64,' . $logoData . '"';
-            $svg .= ' preserveAspectRatio="xMidYMid meet"/>' . "\n";
+            if ($logoClip) {
+                $svg .= ' clip-path="url(#' . $clipId . ')"';
+            }
+            $svg .= '/>' . "\n";
+        }
+
+        // 水印（SVG 文本，与 PNG 的九宫格定位保持一致，不再静默丢弃）
+        if ($this->watermarkText !== null && $this->watermarkText !== '') {
+            $wmText = $this->watermarkText;
+            $wmFs = max(10, (int) $this->watermarkFontSize);
+            $wmRgb = $this->hexToRgb($this->watermarkColor);
+            $wmFill = 'rgba(' . $wmRgb[0] . ',' . $wmRgb[1] . ',' . $wmRgb[2] . ',' . ($this->watermarkOpacity / 100) . ')';
+            $wmAnchor = 'middle';
+            $wmX = $svgWidth / 2;
+            $wmY = $svgHeight / 2;
+
+            switch ($this->watermarkPosition) {
+                case 'top-left':
+                    $wmX = 10; $wmY = 14; $wmAnchor = 'start';
+                    break;
+                case 'top-right':
+                    $wmX = $svgWidth - 10; $wmY = 14; $wmAnchor = 'end';
+                    break;
+                case 'bottom-left':
+                    $wmX = 10; $wmY = $svgHeight - 10; $wmAnchor = 'start';
+                    break;
+                case 'bottom-right':
+                    $wmX = $svgWidth - 10; $wmY = $svgHeight - 10; $wmAnchor = 'end';
+                    break;
+                case 'top':
+                    $wmX = $svgWidth / 2; $wmY = 14;
+                    break;
+                case 'bottom':
+                    $wmX = $svgWidth / 2; $wmY = $svgHeight - 10;
+                    break;
+                case 'left':
+                    $wmX = 10; $wmY = $svgHeight / 2; $wmAnchor = 'start';
+                    break;
+                case 'right':
+                    $wmX = $svgWidth - 10; $wmY = $svgHeight / 2; $wmAnchor = 'end';
+                    break;
+            }
+
+            $svg .= '  <text x="' . $wmX . '" y="' . $wmY . '" text-anchor="' . $wmAnchor . '"';
+            $svg .= ' dominant-baseline="middle" font-family="sans-serif"';
+            $svg .= ' font-size="' . $wmFs . '" fill="' . $wmFill . '">';
+            $svg .= htmlspecialchars($wmText, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            $svg .= '</text>' . "\n";
         }
 
         // 标签（支持多行文本和自动换行）

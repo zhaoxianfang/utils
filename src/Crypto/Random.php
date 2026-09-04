@@ -165,7 +165,14 @@ class Random
      */
     public static function otp(int $length = 6, bool $numeric = true): string
     {
+        if ($length < 1) {
+            throw new InvalidArgumentException('长度必须大于0');
+        }
         if ($numeric) {
+            // 纯数字分支基于 random_int 生成，10^length 不得超过 PHP_INT_MAX（18 位十进制内安全）
+            if ($length > 18) {
+                throw new InvalidArgumentException('纯数字 OTP 长度不能超过 18 位');
+            }
             $min = (int) pow(10, $length - 1);
             $max = (int) pow(10, $length) - 1;
             return (string) random_int($min, $max);

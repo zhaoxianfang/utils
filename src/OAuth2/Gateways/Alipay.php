@@ -77,7 +77,7 @@ class Alipay extends Gateway
             'state'        => $this->config['state'],
         ];
 
-        if ($this->config['is_sandbox'] == true) {
+        if (($this->config['is_sandbox'] ?? false) == true) {
             //使用沙箱环境url
             $this->AuthorizeURL = str_replace("alipay", "alipaydev", $this->AuthorizeURL);
         }
@@ -95,11 +95,13 @@ class Alipay extends Gateway
     {
         $this->getToken();
 
-        if (isset($this->token['openid'])) {
-            return $this->token['openid'];
-        } else {
-            throw new OAuthException('没有获取到支付宝用户ID！');
+        // 支付宝 token 响应中的用户标识键为 user_id（不存在 openid 键，旧代码会误抛异常）
+        if (isset($this->token['user_id'])) {
+            return $this->token['user_id'];
         }
+        // App 登录的 token 只含 access_token，需回退到 userinfo 接口获取 user_id
+        $result = $this->getUserInfo();
+        return $result['user_id'] ?? '';
     }
 
     /**
@@ -109,18 +111,19 @@ class Alipay extends Gateway
      */
     public function userInfo()
     {
-        $result = $this->getUserInfo();
+        $result = $this->getUserInfo() ?? [];
 
         $userInfo = [
             'open_id'  => $this->openid(),
             'union_id'  => $this->token['union_id']??'',
             'channel' => ConstCode::TYPE_ALIPAY,
-            'nickname'    => $result['nick_name'],
+            'nickname'    => $result['nick_name'] ?? '',
             'gender'  => isset($result['gender']) ? $this->getGender($result['gender']) : ConstCode::GENDER,
-            'avatar'  => $result['avatar'],
+            'avatar'  => $result['avatar'] ?? '',
             // 拓展字段
             'access_token'  => $this->token['access_token']??'',
-            'user_id'  => $this->token['user_id'],
+            // App 模式 token 无 user_id，需回退到 userinfo 响应中的 user_id
+            'user_id'  => $this->token['user_id'] ?? ($result['user_id'] ?? ''),
             'native'   => $result,
         ];
         $userInfo['type'] = ConstCode::getTypeConst($userInfo['channel'],$this->type);
@@ -158,11 +161,17 @@ class Alipay extends Gateway
 
         $result = $this->post(self::API_BASE, $params);
         if(is_string($result)){
-            $data = mb_convert_encoding($result, 'utf-8', 'gbk');
-            $result =  json_decode($data, true);
+            $raw     = $result;
+            $decoded = json_decode($raw, true);
+            if (!is_array($decoded)) {
+                // 响应通常为 UTF-8；仅当 UTF-8 解析失败时才尝试 GBK 转码（旧版错误文案为 GBK），
+                // 无条件转码会破坏本已是 UTF-8 的 JSON（出现乱码/解析失败）
+                $decoded = json_decode(mb_convert_encoding($raw, 'utf-8', 'gbk'), true);
+            }
+            $result = $decoded;
         }
 
-        return $result['alipay_user_info_share_response'];
+        return is_array($result) ? ($result['alipay_user_info_share_response'] ?? []) : [];
     }
 
     /**
@@ -202,7 +211,9 @@ class Alipay extends Gateway
         $res    = openssl_get_privatekey($rsaKey);
         if ($res !== false) {
             $sign = '';
-            openssl_sign($str, $sign, $res, OPENSSL_ALGO_SHA256);
+            // RSA2 使用 SHA256withRSA；RSA（老式签名）使用 SHA1withRSA，两者算法不能混用
+            $algo = ($this->sign_type === 'RSA') ? OPENSSL_ALGO_SHA1 : OPENSSL_ALGO_SHA256;
+            openssl_sign($str, $sign, $res, $algo);
             openssl_free_key($res);
             return base64_encode($sign);
         }
@@ -223,18 +234,25 @@ class Alipay extends Gateway
             $header  = '-----BEGIN PUBLIC KEY-----';
             $footer  = '-----END PUBLIC KEY-----';
         } else {
+            // 私钥推荐使用 PKCS8 完整 PEM（走下方 BEGIN 原样分支）；
+            // 裸 base64 内容按常见的 PKCS1 补头尾
             $keyname = 'pem_private';
             $header  = '-----BEGIN RSA PRIVATE KEY-----';
             $footer  = '-----END RSA PRIVATE KEY-----';
         }
-        $rsa = $this->config[$keyname];
+        $rsa = $this->config[$keyname] ?? '';
         if (is_file($rsa)) {
-            $rsa = file_get_contents($rsa);
+            $rsa = (string) file_get_contents($rsa);
         }
-        if (empty($rsa)) {
+        $rsa = trim((string) $rsa);
+        if ($rsa === '') {
             throw new OAuthException('支付宝RSA密钥未配置');
         }
-        $rsa    = str_replace([PHP_EOL, $header, $footer], '', $rsa);
+        // 已含 PEM 头尾（PKCS1 / PKCS8 / 公钥均可）则原样规整换行后返回，
+        // openssl_* 函数能直接解析；仅对「裸 base64 内容」才补头尾
+        if (strpos($rsa, '-----BEGIN') !== false) {
+            return rtrim($rsa) . PHP_EOL;
+        }
         $rsaVal = $header . PHP_EOL . chunk_split($rsa, 64, PHP_EOL) . $footer;
         return $rsaVal;
     }
@@ -248,8 +266,11 @@ class Alipay extends Gateway
      */
     protected function parseToken($token)
     {
-        $token = mb_convert_encoding($token, 'utf-8', 'gbk');
         $data  = json_decode($token, true);
+        if (!is_array($data)) {
+            // 仅在 UTF-8 解析失败时尝试 GBK 转码，避免破坏已是 UTF-8 的响应
+            $data = json_decode(mb_convert_encoding($token, 'utf-8', 'gbk'), true);
+        }
 
         if (isset($data['alipay_system_oauth_token_response'])) {
             $data           = $data['alipay_system_oauth_token_response'];

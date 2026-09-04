@@ -85,11 +85,14 @@ class Command
         if (PHP_SAPI != 'cli') {
             exit('Please run under command line.');
         }
-        if (class_exists('CliInput')) {
-            $this->cliInput = new \zxf\Utils\Sundry\CliInput;
+        // 注意：字符串形式的类名不会做命名空间解析，class_exists('CliInput') 查的是全局类，
+        // 恒为 false 会让 $this->cliInput/$this->cliOutput 一直为 null，
+        // 导致 __call() 代理的 input()/info() 等方法全部抛 “method not exists”。
+        if (class_exists(CliInput::class)) {
+            $this->cliInput = new CliInput;
         }
-        if (class_exists('CliOutput')) {
-            $this->cliOutput = new \zxf\Utils\Sundry\CliOutput;
+        if (class_exists(CliOutput::class)) {
+            $this->cliOutput = new CliOutput;
         }
 
         if (! self::$isParse) {

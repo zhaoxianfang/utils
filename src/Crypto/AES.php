@@ -413,15 +413,64 @@ class AES
      */
     private function checkMemorySafety(int $additionalMemory = 0): bool
     {
+        // 修复：旧实现与 PHP ini 的 memory_limit 脱钩（写死 128MB 常量），
+        // memory_get_usage(true) 返回进程已向系统申请的内存，与 limit 比较失真。
+        // 现在以 PHP memory_limit 为上限（-1 / 无法解析视为无限制）。
+        $limit = $this->parseMemoryLimit(ini_get('memory_limit'));
+        if ($limit <= 0) {
+            return true;
+        }
+
         $currentUsage = memory_get_usage(true);
         $estimatedUsage = $currentUsage + $additionalMemory;
 
-        if ($estimatedUsage > self::MEMORY_LIMIT) {
-            $this->logDebug("内存使用预警: {$estimatedUsage}/" . self::MEMORY_LIMIT);
-            return false;
+        $this->logDebug("内存使用预警: {$estimatedUsage}/{$limit}");
+
+        return $estimatedUsage < $limit;
+    }
+
+    /**
+     * 解析 php.ini memory_limit（如 128M / 1G / -1）为字节数；无限制或无法解析返回 -1
+     */
+    private function parseMemoryLimit(string|false $limitIni): int
+    {
+        if ($limitIni === false || trim($limitIni) === '' || strtolower(trim($limitIni)) === '-1') {
+            return -1;
         }
 
-        return true;
+        $limitIni = strtolower(trim($limitIni));
+        if (preg_match('/^(\d+)([kmgt]?)$/', $limitIni, $m)) {
+            $bytes = (int) $m[1];
+
+            return (int) ($bytes * match ($m[2]) {
+                'k' => 1024,
+                'm' => 1024 * 1024,
+                'g' => 1024 * 1024 * 1024,
+                't' => 1024 * 1024 * 1024 * 1024,
+                default => 1,
+            });
+        }
+
+        return -1;
+    }
+
+    /**
+     * 分块加密时为每个数据块派生独立 IV：
+     * 在基础 IV 的末尾 4 字节上异或块号（小端），保证块间 IV 不重复。
+     * IV 不足 4 字节（ECB 等无 IV 模式不会走到这里）时原样返回。
+     */
+    private function deriveBlockIv(int $blockIndex): string
+    {
+        $iv = $this->iv;
+        $len = strlen($iv);
+        if ($len < 4) {
+            return $iv;
+        }
+
+        $head = substr($iv, 0, $len - 4);
+        $tail = substr($iv, $len - 4, 4) ^ pack('V', $blockIndex & 0xFFFFFFFF);
+
+        return $head . $tail;
     }
 
     /**
@@ -453,8 +502,23 @@ class AES
         $this->updatePerformanceStats('encryption', strlen($data));
 
         // 检查内存安全
-        if (!$this->checkMemorySafety(strlen($data) * 3)) {
-            $this->logDebug("内存预警，尝试分块处理");
+        $dataLength = strlen($data);
+        // 一次性 openssl_encrypt + base64 打包的瞬时额外需求接近 3.5x 输入
+        // （注意 memory_get_usage(true) 已包含入参 data，此处按 3.5x 保守判定，
+        // 避免「判定可一次性完成」后在 base64 打包阶段 OOM）
+        if (! $this->checkMemorySafety((int) ceil($dataLength * 3.5))) {
+            // 一次性加密空间不足 → 尝试分块：
+            // 分块路径峰值 ≈ 输入常驻 + base64 输出(≈1.37x) + 单块临时缓冲，
+            // 按 2.2x 输入 + 4MB 预留仍不足时给出可操作错误，避免 OOM 直接崩溃
+            // （旧实现此场景会以 Fatal error 形式把整个进程打挂）。
+            $this->logDebug('内存预警，尝试分块处理');
+            if (! $this->checkMemorySafety((int) ceil($dataLength * 2.2) + (4 * 1024 * 1024))) {
+                throw new RuntimeException(
+                    '数据过大（' . number_format($dataLength) . ' 字节），当前 memory_limit 下内存不足以完成加密。'
+                    . '请提高 PHP memory_limit，或改用 encryptFile() 流式加密文件。'
+                );
+            }
+
             return $this->encryptChunked($data, $options, $additionalData, $tagLength);
         }
 
@@ -510,27 +574,43 @@ class AES
         int $tagLength = 16
     ): string {
         $chunkSize = 1024 * 1024; // 1MB chunks
-        $chunks = str_split($data, $chunkSize);
-        $encryptedChunks = [];
+        $dataLength = strlen($data);
+        $blockIndex = 0;
+        $result = '';
 
-        $this->logDebug("分块加密，块大小: {$chunkSize}, 块数: " . count($chunks));
+        $this->logDebug("分块加密，块大小: {$chunkSize}, 数据长度: {$dataLength}");
 
-        foreach ($chunks as $index => $chunk) {
-            $this->logDebug("加密块 {$index}/" . count($chunks));
+        // 修复①：旧实现 str_split 会把整个大输入再复制一份进数组（内存翻倍），
+        // 内存告急时反而直接 OOM；现改为偏移切片、单块用完即释放。
+        // 修复②：结果改为逐块 .= 追加（旧实现先攒数组再 implode，
+        // 拼接瞬间 = 数组 + 结果双份输出同时驻留，峰值再翻一倍）。
+        for ($offset = 0; $offset < $dataLength; $offset += $chunkSize) {
+            $chunk = substr($data, $offset, $chunkSize);
+            $this->logDebug('加密块 ' . $blockIndex);
 
             if ($this->isAuthenticatedMode()) {
-                $encryptedChunks[] = $this->encryptAuthenticated($chunk, $options, $additionalData, $tagLength);
+                $piece = $this->encryptAuthenticated($chunk, $options, $additionalData, $tagLength, $this->deriveBlockIv($blockIndex));
             } else {
-                $encrypted = openssl_encrypt($chunk, $this->method, $this->key, $options, $this->iv);
+                $blockIv = $this->deriveBlockIv($blockIndex);
+                $encrypted = openssl_encrypt($chunk, $this->method, $this->key, $options, $blockIv);
                 if ($encrypted === false) {
                     throw new RuntimeException("分块加密失败: " . openssl_error_string());
                 }
-                $encryptedChunks[] = base64_encode($encrypted);
+                // 修复③：每块必须携带自己的 IV（decryptChunked 会按「IV+密文」拆包，
+                // 旧实现只输出纯密文导致跨实例/新随机 IV 时解密失败）；
+                // 修复④：同一 IV 在多个块间复用（GCM 下等同 IV 重用，可破坏机密性），
+                // 每块用派生的独立 IV。
+                $piece = ($this->requiresIV() && $blockIv !== '') ? base64_encode($blockIv . $encrypted) : base64_encode($encrypted);
             }
+
+            $result .= ($blockIndex > 0 ? '|' : '') . $piece;
+            unset($chunk, $encrypted, $piece);
+            $blockIndex++;
         }
 
-        $result = implode('|', $encryptedChunks);
-        $this->logDebug("分块加密完成");
+        unset($data);
+        $this->logDebug('分块加密完成');
+
         return $result;
     }
 
@@ -548,17 +628,20 @@ class AES
         string $data,
         int $options,
         ?string $additionalData = null,
-        int $tagLength = 16
+        int $tagLength = 16,
+        ?string $forcedIv = null
     ): string {
         $tag = '';
         $additionalData = $additionalData ?? '';
+        // 分块加密时每块注入派生 IV，避免同一 IV+key 在 GCM 下重用
+        $iv = $forcedIv ?? $this->iv;
 
         $encrypted = openssl_encrypt(
             $data,
             $this->method,
             $this->key,
             $options,
-            $this->iv,
+            $iv,
             $tag,
             $additionalData,
             $tagLength
@@ -570,7 +653,7 @@ class AES
         }
 
         $this->logDebug("GCM加密完成，标签长度: " . strlen($tag));
-        return base64_encode($this->iv . $tag . $encrypted);
+        return base64_encode($iv . $tag . $encrypted);
     }
 
     /**
@@ -706,25 +789,44 @@ class AES
         int $options,
         ?string $additionalData = null
     ): string {
-        $chunks = explode('|', $encryptedData);
-        $decryptedChunks = [];
+        // 修复：旧实现 explode('|') 会把整份（已 base64 膨胀的）密文再复制一份进数组，
+        // 大数据解密时瞬间双份驻留导致 OOM；改为 strpos 迭代定位分隔符、逐块切片处理。
+        $result = '';
+        $totalLength = strlen($encryptedData);
+        $start = 0;
+        $index = 0;
 
-        $this->logDebug("分块解密，块数: " . count($chunks));
-
-        foreach ($chunks as $index => $chunk) {
-            $this->logDebug("解密块 {$index}/" . count($chunks));
+        while (true) {
+            $pipePos = strpos($encryptedData, '|', $start);
+            if ($pipePos === false) {
+                $chunk = substr($encryptedData, $start);
+            } else {
+                $chunk = substr($encryptedData, $start, $pipePos - $start);
+            }
+            $this->logDebug('解密块 ' . $index);
 
             if ($this->isAuthenticatedMode()) {
                 $data = base64_decode($chunk);
-                $decryptedChunks[] = $this->decryptAuthenticated($data, $options, $additionalData);
+                $result .= $this->decryptAuthenticated($data, $options, $additionalData);
             } else {
-                $decrypted = $this->decrypt($chunk, $options, $additionalData);
-                $decryptedChunks[] = $decrypted;
+                // 非认证块自带 IV（分块加密已打包 iv.ct），decrypt 会自解包
+                $result .= $this->decrypt($chunk, $options, $additionalData);
+            }
+
+            unset($chunk, $data);
+            $index++;
+
+            if ($pipePos === false) {
+                break;
+            }
+            $start = $pipePos + 1;
+            if ($start >= $totalLength) {
+                break; // 尾部为空串（防御）
             }
         }
 
-        $result = implode('', $decryptedChunks);
-        $this->logDebug("分块解密完成");
+        $this->logDebug('分块解密完成');
+
         return $result;
     }
 

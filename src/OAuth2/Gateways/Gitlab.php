@@ -54,7 +54,7 @@ class Gitlab extends Gateway
 
     public function getUserInfo()
     {
-        $this->openid();
+        $this->getToken();
         $headers = ['Authorization: Bearer ' . $this->token['access_token']];
         $data = $this->get(static::API_BASE . $this->UserInfoURL, [], $headers);
         if(is_string($data)){
@@ -74,8 +74,9 @@ class Gitlab extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['user_id'] ?? '';
+        // GitLab token 响应不含 user_id，用户标识（id）需从 userinfo 接口获取
+        $result = $this->getUserInfo();
+        return $result['id'] ?? '';
     }
 
     /**

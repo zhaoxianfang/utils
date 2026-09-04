@@ -74,10 +74,11 @@ class Qq extends Gateway
             'union_id'=> $this->token['unionid'] ?? '',
             'access_token'=> $this->token['access_token'] ?? '',
             'channel' => ConstCode::TYPE_QQ,
-            'nickname'=> $result['nickname'],
+            'nickname'=> $result['nickname'] ?? '',
             'gender'  => isset($result['gender']) ? $this->getGender($result['gender']) : ConstCode::GENDER,
-            'avatar'  => $result['figureurl_qq_2'] ? $result['figureurl_qq_2'] : $result['figureurl_qq_1'],
-            'birthday'=> date('Y-m-d',strtotime($result['year'])),
+            'avatar'  => !empty($result['figureurl_qq_2']) ? $result['figureurl_qq_2'] : ($result['figureurl_qq_1'] ?? ''),
+            // QQ 仅返回出生年份（如 "1990"），strtotime('1990') 得 false → date() 会算出 1970-01-01，改为直接保留年份
+            'birthday'=> isset($result['year']) ? trim((string) $result['year']) : '',
             'native'   => $result,
         ];
         return $userInfo;
@@ -169,7 +170,7 @@ class Qq extends Gateway
         if (isset($data['openid'])) {
             return $data;
         } else {
-            throw new OAuthException("获取用户openid出错：" . $data['error_description']);
+            throw new OAuthException("获取用户openid出错：" . ($data['error_description'] ?? 'invalid response'));
         }
     }
 

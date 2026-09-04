@@ -82,9 +82,27 @@ class ISSNGenerator extends BaseGenerator
             $this->addonCode = str_pad($parts[1], 2, '0', STR_PAD_LEFT);
         }
         
+        // 统一大写（ISSN 校验位可为 X）
+        $issnData = strtoupper($issnData);
+
         // 验证ISSN格式
         if (!$this->validateISSN($issnData)) {
-            throw new InvalidDataException('ISSN 数据格式无效，应为7或8位数字');
+            throw new InvalidDataException('ISSN 数据格式无效，应为7位数字或8位（末位可为 X）');
+        }
+
+        // 输入为 8 位含校验位时，验证校验位正确性（默认开启，skipChecksum(true) 可跳过），
+        // 避免以错误校验位期刊号生成条码导致扫码内容与原始 ISSN 不一致
+        if (strlen($issnData) === 8 && !$this->skipChecksumValidation) {
+            $given    = substr($issnData, 7, 1);
+            $expected = strtoupper((string) $this->calculateChecksum(substr($issnData, 0, 7)));
+            if ($given !== $expected) {
+                throw new InvalidDataException(sprintf(
+                    'ISSN 校验位错误：输入 "%s" 末位为 %s，正确值应为 %s（ISSN 校验位可为数字或 X）',
+                    $issnData,
+                    $given,
+                    $expected
+                ));
+            }
         }
 
         // 转换ISSN为EAN-13格式
@@ -120,17 +138,16 @@ class ISSNGenerator extends BaseGenerator
      */
     protected function validateISSN(string $issn): bool
     {
-        // 必须是7或8位
-        if (strlen($issn) !== 7 && strlen($issn) !== 8) {
-            return false;
-        }
+        $issn = strtoupper($issn);
 
-        // 必须是纯数字
-        if (!$this->isNumeric($issn)) {
-            return false;
+        // 7 位数据：纯数字；8 位完整：前 7 位数字 + 末位数字或 X（ISSN 模 11 校验位可为 X）
+        if (strlen($issn) === 7) {
+            return $this->isNumeric($issn);
         }
-
-        return true;
+        if (strlen($issn) === 8) {
+            return (bool) preg_match('/^[0-9]{7}[0-9X]$/', $issn);
+        }
+        return false;
     }
 
     /**

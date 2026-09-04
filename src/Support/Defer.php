@@ -30,6 +30,7 @@ declare(strict_types=1);
 namespace zxf\Utils\Support;
 
 use Closure;
+use RuntimeException;
 use Throwable;
 
 final class Defer
@@ -49,10 +50,24 @@ final class Defer
 
     /**
      * 注册延迟执行的回调
+     *
+     * 回调会在 execute()（或对象销毁）时按后进先出顺序执行，
+     * 并收到一个 `Throwable|null` 参数（即 call() 中捕获到的异常，没有则为 null）。
+     *
+     * @param Closure(Throwable|null): mixed $callback
+     *
+     * @throws RuntimeException 延迟回调已执行完毕后再注册时抛出
      */
     public function add(Closure $callback): self
     {
+        // 已执行完毕后再注册会永远得不到执行，属于明显的用法错误，
+        // 直接报错好过静默丢弃。
+        if ($this->executed) {
+            throw new RuntimeException('延迟回调已执行完毕，无法再注册新的回调');
+        }
+
         $this->callbacks[] = $callback;
+
         return $this;
     }
 
@@ -86,8 +101,8 @@ final class Defer
 
         $this->executed = true;
 
-        // 后进先出
-        while ($callback = array_pop($this->callbacks)) {
+        // 后进先出；用 !== null 判断而非真值判断，避免把闭包误判为假值
+        while (($callback = array_pop($this->callbacks)) !== null) {
             try {
                 $callback($this->caught);
             } catch (Throwable) {

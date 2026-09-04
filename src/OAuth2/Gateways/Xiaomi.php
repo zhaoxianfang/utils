@@ -136,7 +136,7 @@ class Xiaomi extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $params = [
                 'clientId' => $this->config['app_id'],
                 'token'    => $accessToken,

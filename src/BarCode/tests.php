@@ -12,6 +12,8 @@ declare(strict_types=1);
  * - 校验位计算验证
  * - 特殊数据格式测试
  * - 边界情况测试
+ * - （可选）扫码验证闭环：环境装有 zbarimg 时，对生成 PNG 做真实解码，
+ *   断言「生成码面 == 标准解码器读出内容」且同一图像可重复读取
  * 
  * 运行方式: php tests.php
  */
@@ -73,11 +75,12 @@ function test($name, $callable) {
     }
 }
 
-// 创建输出目录
-$outputDir = __DIR__ . '/test_output_'.date('Ymd_Hi');
+// 创建输出目录（写入系统临时目录，避免污染包源码目录）
+$outputDir = rtrim(sys_get_temp_dir(), '/\\') . '/zxf_utils_barcode_test_' . date('Ymd_His');
 if (!is_dir($outputDir)) {
     mkdir($outputDir, 0755, true);
 }
+echo "输出目录: {$outputDir}\n";
 
 echo "【基础功能测试 - EAN-13】\n";
 echo "-------------------------\n";
@@ -87,6 +90,7 @@ test('EAN-13 基础生成 (12位自动计算校验位)', function() use ($output
     $barcode = BarcodeBuilder::create()
         ->type('ean13')
         ->data('690123456789')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean13_basic.png');
     return file_exists($outputDir . '/ean13_basic.png') ? true : '文件未生成';
 });
@@ -96,6 +100,7 @@ test('EAN-13 带校验位生成 (13位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean13')
         ->data('6901234567892')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean13_with_checksum.png');
     return file_exists($outputDir . '/ean13_with_checksum.png') ? true : '文件未生成';
 });
@@ -106,6 +111,7 @@ test('EAN-13 978前缀 (Bookland EAN)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean13')
         ->data('9780201379624')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean13_978_prefix.png');
     return file_exists($outputDir . '/ean13_978_prefix.png') ? true : '文件未生成';
 });
@@ -115,6 +121,7 @@ test('EAN-13 690前缀 (零售商品)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean13')
         ->data('6901234567892')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean13_690_prefix.png');
     return file_exists($outputDir . '/ean13_690_prefix.png') ? true : '文件未生成';
 });
@@ -135,6 +142,7 @@ test('EAN-8 生成 (7位自动计算校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean8')
         ->data('1234567')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean8_basic.png');
     return file_exists($outputDir . '/ean8_basic.png') ? true : '文件未生成';
 });
@@ -143,6 +151,7 @@ test('EAN-8 生成 (8位带校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('ean8')
         ->data('12345670')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/ean8_with_checksum.png');
     return file_exists($outputDir . '/ean8_with_checksum.png') ? true : '文件未生成';
 });
@@ -155,6 +164,7 @@ test('UPC-A 生成 (11位自动计算校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('upca')
         ->data('01234567890')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/upca_basic.png');
     return file_exists($outputDir . '/upca_basic.png') ? true : '文件未生成';
 });
@@ -163,6 +173,7 @@ test('UPC-A 生成 (12位带校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('upca')
         ->data('012345678905')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/upca_with_checksum.png');
     return file_exists($outputDir . '/upca_with_checksum.png') ? true : '文件未生成';
 });
@@ -215,6 +226,25 @@ test('Code 39 支持字符', function() use ($outputDir) {
     return file_exists($outputDir . '/code39_special.png') ? true : '文件未生成';
 });
 
+test('Code 39 小写输入自动转大写', function() use ($outputDir) {
+    $barcode = BarcodeBuilder::create()
+        ->type('code39')
+        ->data('abc-123')
+        ->savePng($outputDir . '/code39_lowercase.png');
+    return file_exists($outputDir . '/code39_lowercase.png') ? true : '文件未生成';
+});
+
+test('Code 39 无效字符拦截', function() {
+    try {
+        BarcodeFactory::create('code39')->generate('ABC_123');
+        return false; // 未抛异常 = 未拦截 = 失败
+    } catch (\zxf\Utils\BarCode\Exceptions\InvalidDataException $e) {
+        return true;
+    } catch (\Throwable $e) {
+        return '抛错类型错误: ' . get_class($e) . ': ' . $e->getMessage();
+    }
+});
+
 echo "\n【基础功能测试 - ITF-14】\n";
 echo "------------------------\n";
 
@@ -223,6 +253,7 @@ test('ITF-14 生成 (13位自动计算校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('itf14')
         ->data('1540014128876')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/itf14_basic.png');
     return file_exists($outputDir . '/itf14_basic.png') ? true : '文件未生成';
 });
@@ -231,6 +262,7 @@ test('ITF-14 生成 (14位带校验位)', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('itf14')
         ->data('15400141288763')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/itf14_with_checksum.png');
     return file_exists($outputDir . '/itf14_with_checksum.png') ? true : '文件未生成';
 });
@@ -248,11 +280,52 @@ test('ISSN 生成 (7位自动计算校验位)', function() use ($outputDir) {
 });
 
 test('ISSN 生成 (8位带校验位)', function() use ($outputDir) {
+    // 1234567 的 ISSN 模11校验位为 9（12345670 是错误校验位，应被校验拦截）
     $barcode = BarcodeBuilder::create()
         ->type('issn')
-        ->data('12345670')
+        ->data('12345679')
         ->savePng($outputDir . '/issn_with_checksum.png');
     return file_exists($outputDir . '/issn_with_checksum.png') ? true : '文件未生成';
+});
+
+echo "\n【校验位一致性 - 错误校验位必须被拦截】\n";
+echo "--------------------------------------\n";
+
+// 输入已含校验位时默认验证：校验位错误 → 抛 InvalidDataException（避免生成坏码导致扫码内容不可信）
+$checksumCases = [
+    ['ean13', '6901234567891', 'EAN-13'],
+    ['ean8',  '12345671',      'EAN-8'],
+    ['upca',  '012345678904',  'UPC-A'],
+    ['itf14', '15400141288761', 'ITF-14'],
+    ['issn',  '12345670',      'ISSN'],
+    ['issn',  '00000060',      'ISSN X校验位被数字误填'],
+];
+foreach ($checksumCases as [$type, $data, $label]) {
+    test("{$label} 错误校验位拦截 ({$data})", function() use ($type, $data) {
+        try {
+            BarcodeFactory::create($type)->generate($data);
+            return false; // 未抛异常 = 未拦截 = 失败
+        } catch (\zxf\Utils\BarCode\Exceptions\InvalidDataException $e) {
+            return true;
+        } catch (\Throwable $e) {
+            return '抛错类型错误: ' . get_class($e) . ': ' . $e->getMessage();
+        }
+    });
+}
+
+test('ISSN X 正确校验位输入通过', function() use ($outputDir) {
+    // 0000006 加权和≡1(mod11) → 校验位为 X
+    BarcodeFactory::create('issn')->generate('0000006X');
+    return true;
+});
+
+test('skipChecksum(true) 显式跳过校验位验证', function() {
+    $ok = BarcodeBuilder::create()
+        ->type('itf14')
+        ->data('15400141288761')
+        ->skipChecksum(true)
+        ->savePng(sys_get_temp_dir() . '/itf14_skip_checksum.png');
+    return file_exists(sys_get_temp_dir() . '/itf14_skip_checksum.png') ? true : '文件未生成';
 });
 
 echo "\n【基础功能测试 - Codabar】\n";
@@ -262,6 +335,7 @@ test('Codabar 基础生成', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('codabar')
         ->data('A1234567890B')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/codabar_basic.png');
     return file_exists($outputDir . '/codabar_basic.png') ? true : '文件未生成';
 });
@@ -270,6 +344,7 @@ test('Codabar 无起止符', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('codabar')
         ->data('1234567890')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/codabar_no_startstop.png');
     return file_exists($outputDir . '/codabar_no_startstop.png') ? true : '文件未生成';
 });
@@ -281,6 +356,7 @@ test('ISBN-13 基础生成', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('isbn')
         ->data('978020137962')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/isbn13_basic.png');
     return file_exists($outputDir . '/isbn13_basic.png') ? true : '文件未生成';
 });
@@ -289,6 +365,7 @@ test('ISBN-13 带校验位生成', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('isbn')
         ->data('978-3-16-148410-0')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/isbn13_full.png');
     return file_exists($outputDir . '/isbn13_full.png') ? true : '文件未生成';
 });
@@ -297,6 +374,7 @@ test('ISBN-10 转 ISBN-13 生成', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('isbn')
         ->data('0-306-40615-2')
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/isbn10_convert.png');
     return file_exists($outputDir . '/isbn10_convert.png') ? true : '文件未生成';
 });
@@ -330,6 +408,16 @@ test('Code 128 SVG 生成', function() use ($outputDir) {
         ->data('TEST123')
         ->saveSvg($outputDir . '/code128_test.svg');
     return file_exists($outputDir . '/code128_test.svg') ? true : '文件未生成';
+});
+
+test('ISBN SVG 分段文字完整输出（回归: ISBN 曾被排除在 EAN 分段之外导致 SVG 无文字）', function() {
+    $svg = BarcodeBuilder::create()
+        ->type('isbn')
+        ->data('0-306-40615-2')
+        ->toSvg();
+    $textCount = substr_count($svg, '<text');
+    // 修复前 ISBN SVG 无任何 <text>；修复后与 EAN-13 一致输出 13 个字符元素
+    return $textCount === 13 ? true : "ISBN SVG 文字元素数 {$textCount} ≠ 13（修复未生效或回归）";
 });
 
 echo "\n【HTML 输出测试】\n";
@@ -724,7 +812,8 @@ test('Code 128 长数据', function() use ($outputDir) {
     $barcode = BarcodeBuilder::create()
         ->type('code128')
         ->data($longData)
-        ->height(120)
+        ->height(200)
+        ->config(['moduleSize' => 4])
         ->savePng($outputDir . '/code128_long.png');
     return file_exists($outputDir . '/code128_long.png') ? true : '文件未生成';
 });
@@ -783,11 +872,130 @@ test('生成 EAN-13 扫码测试条码 (6901234567892)', function() use ($output
     BarcodeBuilder::create()
         ->type('ean13')
         ->data('6901234567892')
-        ->width(300)
+        ->width(400)
         ->height(100)
         ->savePng($outputDir . '/scan_test_ean13.png');
     return file_exists($outputDir . '/scan_test_ean13.png') ? true : '文件未生成';
 });
+
+echo "\n【扫码验证闭环（可选 - 需要 zbarimg）】\n";
+echo "--------------------------------------\n";
+
+/**
+ * 扫码闭环（Scan Loop）：
+ * - 用真实开源解码器 zbarimg 重新解码本库生成的 PNG，
+ *   证明「生成的码面内容 == 标准解码器读出的内容」（生成→解码闭环一致）。
+ * - 本段为可选：未安装 zbarimg（brew install zbar）时整段跳过、不计失败；
+ *   安装了但解码不符才计失败。
+ * - 每个文件解码两次：两次结果必须一致（防「同一图像不可重复读取」），
+ *   且必须等于期望值。
+ *
+ * 【期望值口径 - 重要，勿把扫码器行为当生成器 bug】：
+ * - EAN-13 / EAN-8 / ITF-14：解码即为码面 13 / 8 / 14 位数字；
+ * - UPC-A：zbar 按 EAN-13 语义输出前导 0 的 13 位（0 + 12 位），断言前剥掉前导 0 再比；
+ * - ISBN / Bookland：zbar 原样输出含 978 前缀的 13 位 EAN-13，不做 ISBN-10 转换——
+ *   手机 App 显示「丢 978 / 末位校验位改变」是 App 侧自动改造，不是生成器剥前缀；
+ * - ISSN：码面按 ISSN 规范 = 977 + 7 位 ISSN + 2 位附加码 + EAN-13 校验位的 13 位
+ *   Bookland EAN，zbar 输出即该 13 位（不是 8 位 ISSN 本身）；
+ * - Codabar：zbar 会把 A/B 起止符一并读出（如 A1234567890B），证明起止符确实编码
+ *   进了条空；手机 App 只显示中间数字属 App 行为。
+ */
+$zbarBin = trim((string) @shell_exec('command -v zbarimg 2>/dev/null'));
+if ($zbarBin === '') {
+    echo "⚠ 未检测到 zbarimg（安装: brew install zbar），跳过【扫码验证闭环】，不影响其它测试\n";
+} else {
+    $scanDir = $outputDir . '/scanloop';
+    if (!is_dir($scanDir)) {
+        mkdir($scanDir, 0755, true);
+    }
+    echo "解码器: {$zbarBin}\n";
+
+    // 解码单个 PNG：成功返回 [true, 内容]，失败返回 [false, '']（zbar 输出形如 TYPE:CONTENT）
+    $decodeOne = function (string $png) use ($zbarBin): array {
+        $raw = trim((string) shell_exec(escapeshellarg($zbarBin) . ' --quiet ' . escapeshellarg($png) . ' 2>/dev/null'));
+        if ($raw === '') {
+            return [false, ''];
+        }
+        $first = explode("\n", $raw)[0];
+        $pos = strpos($first, ':');
+        return [true, $pos === false ? $first : substr($first, $pos + 1)];
+    };
+
+    // 按类型的解码归一化（扫码器格式差异，非生成器缺陷）
+    $normalizers = [
+        'upca' => function (string $s): string {
+            return strlen($s) === 13 && $s[0] === '0' ? substr($s, 1) : $s;
+        },
+    ];
+
+    // 闭环用例矩阵：[文件名, 类型, 数据, 期望解码, 附加生成配置(可为 null), 备注]
+    $scanCases = [
+        ['ean13_basic',     'ean13',   '6901234567892',   '6901234567892',   null,
+            'EAN-13 含校验位完整输入'],
+        ['ean13_bookland',  'ean13',   '9780201379624',   '9780201379624',   null,
+            'Bookland(978)：zbar 原样输出 978 前缀，不做 ISBN-10 转换'],
+        ['ean8',            'ean8',    '12345670',        '12345670',        null,
+            'EAN-8 含校验位完整输入'],
+        ['upca',            'upca',    '012345678905',    '012345678905',    null,
+            'UPC-A：zbar 输出 0+12 位，断言时剥前导 0 再比'],
+        ['code128_text',    'code128', 'Hello123!',       'Hello123!',       null,
+            'Code128 字母数字'],
+        ['code128_digits',  'code128', '123456789012',    '123456789012',    null,
+            'Code128 长数字（自动 Set C 压缩路径）'],
+        ['code39',          'code39',  'ABC-123',         'ABC-123',         null,
+            'Code39 模块级宽窄比重建后仍可解码'],
+        ['code39_lower',    'code39',  'Abc-123',         'ABC-123',         null,
+            'Code39 小写输入自动转大写后仍可解码'],
+        ['codabar',         'codabar', 'A1234567890B',    'A1234567890B',    null,
+            'Codabar：起止符 A/B 被 zbar 一并读出，证明起止符已编码（App 丢弃属其行为）'],
+        ['itf14',           'itf14',   '1540014128876',   '15400141288763',  null,
+            'ITF-14：13 位自动补校验位；含 5/8，回归「宽位错位表曾被扫码器翻转 5↔8/6↔9」修复'],
+        ['issn',            'issn',    '1234567',         '9771234567003',   null,
+            'ISSN：码面为 977+ISSN+00+校验位的 13 位 Bookland EAN'],
+        ['isbn13',          'isbn',    '978-3-16-148410-0', '9783161484100', null,
+            'ISBN-13 连字符输入 → 码面 978... 13 位'],
+        ['isbn10',          'isbn',    '0-306-40615-2',   '9780306406157',   null,
+            'ISBN-10 自动转 ISBN-13：码面 = 978 + 9 位 + 重算校验位'],
+        ['ean13_min',       'ean13',   '000000000000',    '0000000000000',   null,
+            '全 0 边界：12 位自动补校验位 → 13 个 0'],
+        ['watermark',       'ean13',   '6901234567892',   '6901234567892',
+            function ($b) { return $b->watermark('SAMPLE', 70, 5, '#888888', 0); },
+            '带水印图（曾因 2px/module 过小导致字符误读；默认 4px/module 后可稳定解码）'],
+        ['code128_tab',     'code128', "A\tB",            "A\tB",            null,
+            'Code128 控制字符（制表符，Set A 路径）'],
+    ];
+
+    foreach ($scanCases as [$file, $type, $data, $expected, $extra, $note]) {
+        test("扫码闭环 {$file}（{$note}）", function () use (
+            $scanDir, $decodeOne, $normalizers, $file, $type, $data, $expected, $extra
+        ) {
+            $png = $scanDir . '/' . $file . '.png';
+            $builder = BarcodeBuilder::create()
+                ->type($type)
+                ->data($data)
+                ->config(['moduleSize' => 4]);
+            if ($extra !== null) {
+                $builder = $extra($builder);
+            }
+            $builder->savePng($png);
+            if (!is_file($png)) {
+                return 'PNG 未生成';
+            }
+            [$ok1, $r1] = $decodeOne($png);
+            if (!$ok1) {
+                return 'zbarimg 无法解码：生成的码面不被标准解码器识别';
+            }
+            [$ok2, $r2] = $decodeOne($png);
+            if ($r2 !== $r1) {
+                return "同一图像两次解码不一致（不可重复读取）: {$r1} vs {$r2}";
+            }
+            $norm = $normalizers[$type] ?? fn (string $s): string => $s;
+            $actual = $norm($r1);
+            return $actual === $expected ? true : "解码结果 [{$actual}] ≠ 期望 [{$expected}]";
+        });
+    }
+    echo "扫码闭环完成（需人工确认上方无 ✗ 输出）\n";
+}
 
 echo "\n========================================\n";
 echo "   测试结果汇总\n";

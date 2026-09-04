@@ -103,13 +103,22 @@ class DateTools
         $timeFormat = 'H:i';
 
         if ($diff < 0) {
-            $daysDiff = (int) floor($diff / 86400);
+            // 修复：旧实现按 floor($diff / 86400) 判断未来天数，未来 5 小时会算成
+            // floor(-18000/86400) === -1 而误显示「明天」；改按自然日边界判断。
+            $targetDay = date('Y-m-d', $timestamp);
+            $today     = date('Y-m-d');
 
-            return match (true) {
-                $daysDiff === -2 => sprintf($config['day_after_tomorrow'], date($timeFormat, $timestamp)),
-                $daysDiff === -1 => sprintf($config['tomorrow'], date($timeFormat, $timestamp)),
-                default => date($config['year_month_day'], $timestamp),
-            };
+            if ($targetDay === $today) {
+                return date('H:i', $timestamp); // 今天稍后的未来时间
+            }
+            if ($targetDay === date('Y-m-d', strtotime('+1 day'))) {
+                return sprintf($config['tomorrow'], date($timeFormat, $timestamp));
+            }
+            if ($targetDay === date('Y-m-d', strtotime('+2 days'))) {
+                return sprintf($config['day_after_tomorrow'], date($timeFormat, $timestamp));
+            }
+
+            return date($config['year_month_day'], $timestamp);
         }
 
         if ($diff <= 10) {
@@ -149,22 +158,31 @@ class DateTools
     }
 
     /**
-     * 获取当前时间的前 n 天日期列表
+     * 获取当前时间的前 n 天日期列表（含今天，共 $day 项）
+     *
+     * 修复：旧实现对 $day <= 0 生成 "+-2 days" 之类的非法表达式（strtotime 返回
+     * false → 1970 年），且用固定 86400 秒累加在夏令时切换日会漂移。现改为：
+     * - $day <= 0 抛 InvalidArgumentException（语义上“最近 N 天”的 N 必须为正）；
+     * - 用 DateTime::modify('+1 day') 逐日推进，天然处理 DST。
      */
     public static function getLastDays(int $day = 7): array
     {
-        $dayStr = $day > 0 ? '-' . ($day - 1) . ' days' : '+' . $day . ' days';
-        $begin = strtotime(date('Y-m-d', strtotime($dayStr)));
-        $now = time();
-        $daySecond = 86400;
+        if ($day <= 0) {
+            throw new \InvalidArgumentException('天数必须大于 0');
+        }
 
         $result = ['date' => [], 'weeks' => [], 'day' => []];
         $weekMap = ['日', '一', '二', '三', '四', '五', '六'];
 
-        for ($i = $begin; $i <= $now; $i += $daySecond) {
-            $result['date'][] = $i;
-            $result['weeks'][] = '星期' . $weekMap[(int) date('w', $i)];
-            $result['day'][] = date('Y-m-d', $i);
+        $cursor = new DateTime('today');
+        $cursor->modify('-' . ($day - 1) . ' days');
+
+        for ($i = 0; $i < $day; $i++) {
+            $timestamp = $cursor->getTimestamp();
+            $result['date'][] = $timestamp;
+            $result['weeks'][] = '星期' . $weekMap[(int) $cursor->format('w')];
+            $result['day'][] = $cursor->format('Y-m-d');
+            $cursor->modify('+1 day');
         }
 
         return $result;
@@ -201,11 +219,28 @@ class DateTools
 
     /**
      * 判断一个值是否为有效时间戳
+     *
+     * 修复：旧实现用 (int) 强转后做 date/strtotime 回环校验，
+     * 对 "abc" 这类非数字字符串 (int) 得 0，回环后恒为 true（假阳性）。
+     * 现先要求「纯十进制数字串 / 整数」，再做回环校验。
      */
     public static function is_timestamp(int|string $timestamp): bool
     {
+        if (is_string($timestamp) && ! preg_match('/^\d{1,12}$/', trim($timestamp))) {
+            return false;
+        }
+
         $ts = (int) $timestamp;
-        return strtotime(date('m-d-Y H:i:s', $ts)) === $ts;
+
+        // 时间戳必须在合理区间（大于 0，且未超出 date() 的可表达范围）
+        if ($ts <= 0) {
+            return false;
+        }
+
+        // 修复：旧实现用 date('m-d-Y H:i:s') 回环，但 strtotime 对 "-" 分隔按 d-m-Y 解析
+        // （如 04-08-2024 → 8 月 4 日），对多数日期（月≠日 且 月≤12）都会误判为 false；
+        // 统一使用无歧义的 'Y-m-d H:i:s' 格式回环。
+        return strtotime(date('Y-m-d H:i:s', $ts)) === $ts;
     }
 
     /**
@@ -300,31 +335,34 @@ class DateTools
 
     /**
      * 获取星座
+     *
+     * 修复：旧算法遍历起点表时条件错乱（对月份大于 2 的一切日期都提前返回首个
+     * 「水瓶座」），自 2/20 起的所有日期返回结果均错误。现改为标准的
+     * 「起始日(月*100+日) 顺序表」定位：日期编号 >= 该星座起始日即落入该星座，
+     * 1/1~1/19（小于水瓶座起始日 120）回退摩羯座。
      */
     public static function zodiac(string $birthday): string
     {
         $date = new DateTime($birthday);
-        $month = (int) $date->format('n');
-        $day = (int) $date->format('j');
+        $num = (int) $date->format('n') * 100 + (int) $date->format('j');
 
-        $zodiacs = [
-            [1, 20, '水瓶座'], [2, 19, '双鱼座'], [3, 21, '白羊座'],
-            [4, 20, '金牛座'], [5, 21, '双子座'], [6, 22, '巨蟹座'],
-            [7, 23, '狮子座'], [8, 23, '处女座'], [9, 23, '天秤座'],
-            [10, 24, '天蝎座'], [11, 23, '射手座'], [12, 22, '摩羯座'],
+        // 各星座起始日（月*100+日）
+        $starts = [
+            120 => '水瓶座', 219 => '双鱼座', 321 => '白羊座', 420 => '金牛座',
+            521 => '双子座', 622 => '巨蟹座', 723 => '狮子座', 823 => '处女座',
+            923 => '天秤座', 1024 => '天蝎座', 1123 => '射手座', 1222 => '摩羯座',
         ];
 
-        foreach ($zodiacs as [$zMonth, $zDay, $name]) {
-            if ($month === $zMonth && $day < $zDay) {
-                continue;
+        $result = '摩羯座';
+        foreach ($starts as $start => $name) {
+            if ($num >= $start) {
+                $result = $name;
+            } else {
+                break;
             }
-            if ($month < $zMonth) {
-                continue;
-            }
-            return $name;
         }
 
-        return '摩羯座';
+        return $result;
     }
 
     /**

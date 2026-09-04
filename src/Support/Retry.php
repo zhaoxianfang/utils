@@ -26,6 +26,7 @@ declare(strict_types=1);
 namespace zxf\Utils\Support;
 
 use Closure;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -161,7 +162,9 @@ final class Retry
             }
         }
 
-        throw $lastException ?? new \RuntimeException('Retry failed after ' . $this->maxAttempts . ' attempts');
+        throw $lastException ?? new RuntimeException(
+            sprintf('重试 %d 次后仍然失败', $this->maxAttempts)
+        );
     }
 
     /**
@@ -172,9 +175,19 @@ final class Retry
         $delay = $this->sleepMilliseconds * ($this->backoffMultiplier ** ($attempt - 1));
 
         if ($this->useJitter) {
-            $delay = (int) ($delay * (0.5 + random_int(0, 1000) / 2000));
+            // 抖动到基础延迟的 50% ~ 100%，避免多实例同时重试造成惊群
+            $delay *= 0.5 + random_int(0, 1000) / 2000;
         }
 
-        usleep(max(0, $delay) * 1000);
+        $delay = max(0.0, $delay);
+
+        if ($delay <= 0) {
+            return;
+        }
+
+        // 必须显式取整：usleep() 是内部函数，即使传入整数值的 float
+        // （如 100.0）在 strict_types 下也会抛 TypeError。
+        // 这一点与用户态 int 参数不同，极易踩坑。
+        usleep((int) round($delay * 1000));
     }
 }

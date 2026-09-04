@@ -77,7 +77,8 @@ class Base64
      */
     public static function urlSafeDecode(string $data, bool $strict = true): string|false
     {
-        $data = strtr($data, self::URL_SAFE_REVERSE);
+        $data = rtrim(strtr($data, self::URL_SAFE_REVERSE), '=');
+        // 兼容已带 '=' 填充的输入：先剥离再按需补齐，避免填充叠加导致严格解码失败
         $padding = 4 - (strlen($data) % 4);
         if ($padding !== 4) {
             $data .= str_repeat('=', $padding);
@@ -105,6 +106,7 @@ class Base64
      */
     public static function decodeNoPadding(string $data, bool $strict = true): string|false
     {
+        $data = rtrim($data, '=');
         $padding = 4 - (strlen($data) % 4);
         if ($padding !== 4) {
             $data .= str_repeat('=', $padding);

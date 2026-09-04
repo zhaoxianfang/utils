@@ -147,11 +147,16 @@ class Snowflake
      */
     public static function parse(int $id): array
     {
-        $timestamp = (($id >> self::TIMESTAMP_SHIFT) + self::EPOCH) / 1000;
+        // 修复：旧实现先把毫秒时间戳 /1000 取整成秒，再以 date('v') 输出毫秒，
+        // 秒级取整已把毫秒丢掉，datetime 的毫秒恒为 .000。现保留毫秒单独格式化。
+        $milliseconds = ($id >> self::TIMESTAMP_SHIFT) + self::EPOCH;
+        $seconds = intdiv($milliseconds, 1000);
+        $remainMs = $milliseconds % 1000;
+
         return [
             'id'            => $id,
-            'timestamp'     => (int) $timestamp,
-            'datetime'      => date('Y-m-d H:i:s.v', (int) $timestamp),
+            'timestamp'     => $seconds,
+            'datetime'      => date('Y-m-d H:i:s', $seconds).sprintf('.%03d', $remainMs),
             'data_center'   => ($id >> self::DATA_CENTER_SHIFT) & self::MAX_DATA_CENTER_ID,
             'worker'        => ($id >> self::WORKER_SHIFT) & self::MAX_WORKER_ID,
             'sequence'      => $id & self::MAX_SEQUENCE,

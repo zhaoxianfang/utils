@@ -95,8 +95,8 @@ function test($name, $callable) {
     }
 }
 
-// 创建输出目录
-$outputDir = __DIR__ . '/test_output_'.date('Ymd_Hi');
+// 创建输出目录（写入系统临时目录，避免污染包源码目录）
+$outputDir = sys_get_temp_dir() . '/zxf_utils_qrcode_test_' . date('Ymd_His');
 if (!is_dir($outputDir)) {
     mkdir($outputDir, 0755, true);
 }
@@ -537,6 +537,85 @@ test('开启 ECI 前缀（默认行为）', function() use ($outputDir) {
         ->prefixEci(true)
         ->save($outputDir . '/with_eci_prefix.png');
     return file_exists($outputDir . '/with_eci_prefix.png') ? true : '文件未生成';
+});
+
+echo "\n【编码一致性加固测试】\n";
+echo "----------------------\n";
+
+// 字符集别名必须归一化：若 ECI 名称查表失败（如 utf-8/UTF8/latin1 拼写差异），
+// 多字节内容会静默丢失 ECI 前缀，扫码端按猜测字符集解码 → 输入与扫码结果不一致。
+// 断言：别名与规范名的布尔矩阵逐位一致（矩阵不同即代表编码结果被别名改变）。
+test('编码别名 utf-8 与 UTF-8 矩阵一致', function() {
+    $a = QrCode::make('中文别名一致性测试 abc123')->encoding('utf-8')->getMatrix();
+    $b = QrCode::make('中文别名一致性测试 abc123')->encoding('UTF-8')->getMatrix();
+    return $a === $b ? true : '别名 utf-8 与 UTF-8 编码结果不一致（ECI 查表失败）';
+});
+
+test('编码别名 UTF8 与 UTF-8 矩阵一致', function() {
+    $a = QrCode::make('中文别名一致性测试 abc123')->encoding('UTF8')->getMatrix();
+    $b = QrCode::make('中文别名一致性测试 abc123')->encoding('UTF-8')->getMatrix();
+    return $a === $b ? true : '别名 UTF8 与 UTF-8 编码结果不一致';
+});
+
+test('编码别名 latin1 与 ISO-8859-1 矩阵一致', function() {
+    $a = QrCode::make('Plain ASCII 123')->encoding('latin1')->getMatrix();
+    $b = QrCode::make('Plain ASCII 123')->encoding('ISO-8859-1')->getMatrix();
+    return $a === $b ? true : '别名 latin1 与 ISO-8859-1 编码结果不一致';
+});
+
+test('编码别名 gbk 与 GBK 矩阵一致', function() {
+    $a = QrCode::make('中文GBK测试123')->encoding('gbk')->getMatrix();
+    $b = QrCode::make('中文GBK测试123')->encoding('GBK')->getMatrix();
+    return $a === $b ? true : '别名 gbk 与 GBK 编码结果不一致';
+});
+
+test('编码别名 shift-jis 与 Shift_JIS 矩阵一致', function() {
+    $a = QrCode::make('日本語テスト')->encoding('shift-jis')->getMatrix();
+    $b = QrCode::make('日本語テスト')->encoding('Shift_JIS')->getMatrix();
+    return $a === $b ? true : '别名 shift-jis 与 Shift_JIS 编码结果不一致';
+});
+
+// 非法 UTF-8 输入必须显式失败：同字符集 iconv 会原样透传非法字节，
+// 生成与扫码端按 UTF-8 解析结果不一致 → 静默失真。必须抛异常阻断。
+test('非法 UTF-8 输入被拒绝（抛出编码异常）', function() {
+    try {
+        QrCode::make("abc\xFF\xFEdef")->getMatrix();
+        return '非法 UTF-8 输入未抛异常（会导致扫码内容失真）';
+    } catch (\Exception $e) {
+        return stripos($e->getMessage(), 'not valid UTF-8') !== false || stripos($e->getMessage(), '编码') !== false
+            ? true
+            : '异常信息不明确: ' . $e->getMessage();
+    }
+});
+
+test('非法 UTF-8 输入（截断多字节）被拒绝', function() {
+    try {
+        QrCode::make("\xE4\xB8")->getMatrix(); // 未完成的中文 UTF-8 序列
+        return '截断多字节输入未抛异常';
+    } catch (\Exception $e) {
+        return true;
+    }
+});
+
+// 目标字符集无法表示内容时必须抛异常，而非静默丢字
+test('中文内容声明 ISO-8859-1 被拒绝', function() {
+    try {
+        QrCode::make('中文内容')->encoding('ISO-8859-1')->getMatrix();
+        return '中文内容未被 ISO-8859-1 拒绝';
+    } catch (\Exception $e) {
+        return stripos($e->getMessage(), 'ISO-8859-1') !== false ? true : '异常信息不明确: ' . $e->getMessage();
+    }
+});
+
+// 合法输入在声明字符集下正常生成（GBK/Shift_JIS 均可达）
+test('中文内容 GBK 编码可正常生成', function() use ($outputDir) {
+    QrCode::make('中文GBK编码测试')->encoding('GBK')->size(200)->margin(4)->save($outputDir . '/enc_gbk.png');
+    return file_exists($outputDir . '/enc_gbk.png') ? true : 'GBK 编码生成失败';
+});
+
+test('日文内容 Shift_JIS 编码可正常生成', function() use ($outputDir) {
+    QrCode::make('日本語のテストです')->encoding('Shift_JIS')->size(200)->margin(4)->save($outputDir . '/enc_sjis.png');
+    return file_exists($outputDir . '/enc_sjis.png') ? true : 'Shift_JIS 编码生成失败';
 });
 
 test('混合内容二维码', function() use ($outputDir) {

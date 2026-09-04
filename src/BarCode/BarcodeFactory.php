@@ -15,6 +15,7 @@ use zxf\Utils\BarCode\Generator\ITF14Generator;
 use zxf\Utils\BarCode\Generator\ISSNGenerator;
 use zxf\Utils\BarCode\Generator\CodabarGenerator;
 use zxf\Utils\BarCode\Generator\ISBNGenerator;
+use zxf\Utils\BarCode\Exceptions\BarcodeException;
 use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
@@ -52,6 +53,23 @@ class BarcodeFactory
     ];
 
     /**
+     * 别名 → 规范名映射（别名与规范名并存注册，但对外元数据/列表只暴露规范名）
+     *
+     * @var array<string, string>
+     */
+    protected static array $canonicalTypes = [
+        'ean13' => 'ean13', 'ean-13' => 'ean13',
+        'ean8' => 'ean8', 'ean-8' => 'ean8',
+        'upca' => 'upca', 'upc-a' => 'upca',
+        'code128' => 'code128', 'code-128' => 'code128',
+        'code39' => 'code39', 'code-39' => 'code39',
+        'itf14' => 'itf14', 'itf-14' => 'itf14',
+        'issn' => 'issn',
+        'codabar' => 'codabar', 'nw7' => 'codabar',
+        'isbn' => 'isbn', 'isbn-10' => 'isbn', 'isbn-13' => 'isbn',
+    ];
+
+    /**
      * 创建条码生成器
      * 
      * @param string             $type   条码类型
@@ -65,7 +83,8 @@ class BarcodeFactory
         
         if (!isset(self::$generators[$type])) {
             throw new InvalidDataException(
-                "不支持的条码类型: {$type}。支持的类型: " . implode(', ', array_keys(self::$generators))
+                "不支持的条码类型: {$type}。支持的类型: " . implode(', ', self::getSupportedTypes()),
+                BarcodeException::ERROR_UNSUPPORTED_TYPE
             );
         }
 
@@ -74,13 +93,25 @@ class BarcodeFactory
     }
 
     /**
-     * 获取支持的条码类型列表
+     * 获取支持的条码类型列表（去重后的规范名：ean13/ean8/upca/code128/code39/itf14/issn/codabar/isbn）
      * 
      * @return array<string> 支持的条码类型数组
      */
     public static function getSupportedTypes(): array
     {
-        return array_keys(self::$generators);
+        return array_values(array_unique(self::$canonicalTypes));
+    }
+
+    /**
+     * 将类型名（含别名，如 ean-13/upc-a/nw7/isbn-10）归一化为规范名
+     *
+     * @param string $type 原始类型名
+     * @return string 规范类型名；未知类型返回原样（小写）便于上层 fallback
+     */
+    public static function canonicalType(string $type): string
+    {
+        $type = strtolower(trim($type));
+        return self::$canonicalTypes[$type] ?? $type;
     }
 
     /**
@@ -106,6 +137,11 @@ class BarcodeFactory
             throw new InvalidDataException("类 {$className} 必须实现 BarcodeGeneratorInterface 接口");
         }
         
-        self::$generators[strtolower($type)] = $className;
+        $type = strtolower($type);
+        self::$generators[$type] = $className;
+        // 自定义类型无内置别名，将自身作为规范名纳入列表/归一化
+        if (!isset(self::$canonicalTypes[$type])) {
+            self::$canonicalTypes[$type] = $type;
+        }
     }
 }

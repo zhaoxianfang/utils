@@ -22,23 +22,31 @@ class CodabarGenerator extends BaseGenerator
     protected const TYPE = 'Codabar';
     protected const DATA_CHARSET = '0123456789-$:/.+';
     protected const START_STOP_CHARSET = 'ABCDabcd';
-    protected const NARROW_WIDTH = 2;
-    protected const WIDE_WIDTH = 4;
-    protected const INTER_CHAR_GAP = 2;
-    protected const QUIET_ZONE = 20;
+
+    /** @var int 窄元素宽度（模块级：1 模块 = renderer 的 moduleSize 像素） */
+    protected const NARROW_WIDTH = 1;
+
+    /** @var int 宽元素宽度（宽:窄 = 2:1） */
+    protected const WIDE_WIDTH = 2;
+
+    /** @var int 字符间分隔空宽度（= 1 个窄宽，1 模块） */
+    protected const INTER_CHAR_GAP = 1;
+
+    /** @var int 每侧静区宽度（10 模块；renderer 还会叠加静区白边） */
+    protected const QUIET_ZONE = 10;
 
     /**
-     * ANSI/AIM BC3-1995 标准 Codabar 编码表
-     * 每个字符由 7 个元素组成（4 条 + 3 空），其中 2 个宽元素、5 个窄元素
-     * 数组格式：[条宽, 空宽, 条宽, 空宽, 条宽, 空宽, 条宽]，1=窄(1模块), 2=宽(2模块)
+     * ANSI/AIM BC3-1995 标准 Codabar 编码表（经 ZXing / jsBarcode 表核验）
+     * 每个字符由 7 个元素组成（4 条 + 3 空），元素从条开始、条-空交替；
+     * 1=窄(1模块), 2=宽(2模块)。起止 A-D 为 3 宽；数据字符中 : / . 为 3 宽、+ 为 5 宽。
      */
     protected array $encoding = [
-        '0' => [1,1,1,1,1,2,2], '1' => [1,1,1,2,1,2,1], '2' => [1,1,2,1,1,2,1],
-        '3' => [2,2,1,1,1,1,1], '4' => [1,1,2,1,2,1,1], '5' => [2,1,1,1,1,2,1],
-        '6' => [1,2,1,1,1,1,2], '7' => [1,2,1,2,1,1,1], '8' => [1,2,2,1,1,1,1],
+        '0' => [1,1,1,1,1,2,2], '1' => [1,1,1,1,2,2,1], '2' => [1,1,1,2,1,1,2],
+        '3' => [2,2,1,1,1,1,1], '4' => [1,1,2,1,1,2,1], '5' => [2,1,1,1,1,2,1],
+        '6' => [1,2,1,1,1,1,2], '7' => [1,2,1,1,2,1,1], '8' => [1,2,2,1,1,1,1],
         '9' => [2,1,1,2,1,1,1], '-' => [1,1,1,2,2,1,1], '$' => [1,1,2,2,1,1,1],
         ':' => [2,1,1,1,2,1,2], '/' => [2,1,2,1,1,1,2], '.' => [2,1,2,1,2,1,1],
-        '+' => [1,1,2,1,2,1,2], 'A' => [1,1,2,2,1,2,1], 'B' => [1,2,1,2,1,1,2],
+        '+' => [1,1,2,2,2,2,2], 'A' => [1,1,2,2,1,2,1], 'B' => [1,2,1,2,1,1,2],
         'C' => [1,1,1,2,1,2,2], 'D' => [1,1,1,2,2,2,1],
     ];
 
@@ -71,7 +79,7 @@ class CodabarGenerator extends BaseGenerator
         $this->barcodeArray = [];
         $this->longBarPositions = [];
 
-        $this->barcodeArray[] = -(self::QUIET_ZONE / self::NARROW_WIDTH);
+        $this->barcodeArray[] = -self::QUIET_ZONE;
         $this->encodeCharacter($this->startChar);
         $this->barcodeArray[] = -(self::INTER_CHAR_GAP);
 
@@ -84,7 +92,7 @@ class CodabarGenerator extends BaseGenerator
 
         $this->barcodeArray[] = -(self::INTER_CHAR_GAP);
         $this->encodeCharacter($this->stopChar);
-        $this->barcodeArray[] = -(self::QUIET_ZONE / self::NARROW_WIDTH);
+        $this->barcodeArray[] = -self::QUIET_ZONE;
 
         return $this->barcodeArray;
     }

@@ -113,9 +113,23 @@ if (! function_exists('u_throw_if')) {
      */
     function u_throw_if(bool $condition, string|\Throwable $exception, string $message = ''): void
     {
-        if ($condition) {
-            throw $exception instanceof \Throwable ? $exception : new $exception($message);
+        if (! $condition) {
+            return;
         }
+
+        if ($exception instanceof \Throwable) {
+            throw $exception;
+        }
+
+        // 字符串形式必须是已存在且可抛出的类，否则给出明确错误而不是模糊的 "Class not found"
+        if (! class_exists($exception) || ! is_subclass_of($exception, \Throwable::class)) {
+            throw new \InvalidArgumentException(sprintf(
+                '异常类 "%s" 不存在或未实现 Throwable 接口',
+                $exception
+            ));
+        }
+
+        throw new $exception($message);
     }
 }
 
@@ -156,15 +170,22 @@ if (! function_exists('u_filled')) {
 
 if (! function_exists('u_str')) {
     /**
-     * 快速创建 StringHelper 实例
+     * 创建流式字符串实例，用于链式调用 StringHelper 中的方法
+     *
+     * 每次调用都以当前字符串作为首个参数；返回字符串的方法会继续返回
+     * 可链式的实例，返回其它类型（bool/int/array）的方法则直接返回结果。
+     *
+     *  u_str('foo-bar')->camel();              // 'fooBar'
+     *  u_str('Hello World')->slug()->upper();  // 'HELLO-WORLD'（upper 由 Str 转发）
+     *  u_str('abc')->contains('b');            // true
+     *  (string) u_str('foo-bar')->camel();     // 'fooBar'
+     *  u_str('13812345678')->maskMobile();     // '138****5678'
+     *
+     * @param string $value 初始字符串，默认空串
      */
-    function u_str(?string $value = null): \zxf\Utils\Str\StringHelper|string
+    function u_str(string $value = ''): \zxf\Utils\Str\Str
     {
-        if ($value === null) {
-            return new \zxf\Utils\Str\StringHelper();
-        }
-
-        return $value;
+        return new \zxf\Utils\Str\Str($value);
     }
 }
 
@@ -227,26 +248,49 @@ if (! function_exists('u_class_uses_recursive')) {
             $class = get_class($class);
         }
 
-        $results = [];
-        foreach (array_reverse(class_parents($class)) + [$class => $class] as $c) {
-            $results += u_trait_uses_recursive($c);
+        // class_parents() 对不存在的类返回 false，直接参与运算会触发 TypeError
+        if (! class_exists($class) && ! interface_exists($class)) {
+            return [];
         }
 
-        return array_unique($results);
+        $results = [];
+        $parents = class_parents($class) ?: [];
+
+        foreach (array_reverse($parents) + [$class => $class] as $c) {
+            // 子函数返回 list，此处必须用 array_merge 累积（用 += 会按下标覆盖导致漏项）
+            $results = array_merge($results, u_trait_uses_recursive($c));
+        }
+
+        return array_values(array_unique($results));
     }
 }
 
 if (! function_exists('u_trait_uses_recursive')) {
     /**
      * 递归获取 trait 使用的所有 trait
+     *
+     * @param string                  $trait   trait 或类名
+     * @param array<string, true>     $visited 已访问集合（内部递归使用，防止环与重复遍历）
+     * @return list<string>
      */
-    function u_trait_uses_recursive(string $trait): array
+    function u_trait_uses_recursive(string $trait, array $visited = []): array
     {
-        $traits = class_uses($trait) ?: [];
-        foreach ($traits as $t) {
-            $traits += u_trait_uses_recursive($t);
+        if (isset($visited[$trait])) {
+            return [];
         }
-        return $traits;
+        $visited[$trait] = true;
+
+        $traits = class_uses($trait) ?: []; // 键与值均为 trait 名称
+
+        foreach ($traits as $name) {
+            // 传递 visited 集合，避免深 trait 链被指数级重复遍历。
+            // 子结果为 list，需逐个按名写入，保证键与值始终是 trait 名称。
+            foreach (u_trait_uses_recursive($name, $visited) as $sub) {
+                $traits[$sub] = $sub;
+            }
+        }
+
+        return array_values($traits);
     }
 }
 
@@ -260,6 +304,12 @@ if (! function_exists('u_data_get')) {
             return $target;
         }
 
+        // 键本身就是完整下标且目标直接命中时，优先整体匹配，
+        // 这样含点号的键（如 "user.name" 作为字面下标）也能被正确读取。
+        if (is_array($target) && array_key_exists($key, $target)) {
+            return $target[$key];
+        }
+
         $key = is_int($key) ? $key : (string) $key;
 
         foreach (explode('.', $key) as $segment) {
@@ -267,7 +317,8 @@ if (! function_exists('u_data_get')) {
                 $target = $target[$segment];
             } elseif ($target instanceof \ArrayAccess && $target->offsetExists($segment)) {
                 $target = $target[$segment];
-            } elseif (is_object($target) && isset($target->{$segment})) {
+            } elseif (is_object($target) && property_exists($target, $segment)) {
+                // 用 property_exists 而非 isset：属性值为 null 时同样应视为命中
                 $target = $target->{$segment};
             } else {
                 return u_value($default);
@@ -284,21 +335,51 @@ if (! function_exists('u_data_set')) {
      */
     function u_data_set(mixed &$target, string $key, mixed $value, bool $overwrite = true): mixed
     {
-        $segments = explode('.', $key);
-        $segment = array_shift($segments);
-
-        if (count($segments) === 0) {
-            if ($overwrite || ! isset($target[$segment])) {
-                $target[$segment] = $value;
-            }
+        if ($key === '') {
             return $target;
         }
 
-        if (! isset($target[$segment]) || ! is_array($target[$segment])) {
-            $target[$segment] = [];
+        $segments = explode('.', $key);
+        $segment = array_shift($segments);
+
+        // 最后一段：写入最终值
+        if ($segments === []) {
+            if (is_object($target)) {
+                if ($overwrite || ! property_exists($target, $segment)) {
+                    $target->{$segment} = $value;
+                }
+
+                return $target;
+            }
+
+            if (! is_array($target)) {
+                $target = [];
+            }
+
+            if ($overwrite || ! array_key_exists($segment, $target)) {
+                $target[$segment] = $value;
+            }
+
+            return $target;
         }
 
-        u_data_set($target[$segment], implode('.', $segments), $value, $overwrite);
+        // 中间段：确保存在可继续下钻的容器
+        if (is_object($target)) {
+            if (! isset($target->{$segment}) || ! (is_array($target->{$segment}) || is_object($target->{$segment}))) {
+                $target->{$segment} = [];
+            }
+            $next = &$target->{$segment};
+        } else {
+            if (! is_array($target)) {
+                $target = [];
+            }
+            if (! array_key_exists($segment, $target) || ! is_array($target[$segment])) {
+                $target[$segment] = [];
+            }
+            $next = &$target[$segment];
+        }
+
+        u_data_set($next, implode('.', $segments), $value, $overwrite);
 
         return $target;
     }

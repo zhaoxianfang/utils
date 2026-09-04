@@ -21,8 +21,13 @@ class UtilsServiceProvider extends ServiceProvider
         ], ['utils-config']);
 
         // 把 zxf/utils 添加到 about 命令中
+        // 包未登记进 Composer 的 installed 数据（如 path 仓库、本地开发）时，
+        // getPrettyVersion() 会抛 OutOfBoundsException，导致 `about` 命令整体失败，
+        // 因此先判断再取值。
         AboutCommand::add('Extend', [
-            'zxf/utils' => fn () => InstalledVersions::getPrettyVersion('zxf/utils'),
+            'zxf/utils' => fn () => InstalledVersions::isInstalled('zxf/utils')
+                ? (InstalledVersions::getPrettyVersion('zxf/utils') ?? 'unknown')
+                : 'unknown',
         ]);
     }
 

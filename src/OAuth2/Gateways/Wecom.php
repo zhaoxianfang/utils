@@ -23,9 +23,12 @@ class Wecom extends Gateway
      */
     public function getRedirectUrl()
     {
+        // 扫码授权后回调会带 state，需先保存以便校验
+        $this->saveState();
+
         $params = [
             'appid'         => $this->config['app_id'],
-            'agentid'       => $this->config['agent_id'],
+            'agentid'       => $this->config['agent_id'] ?? '',
             'redirect_uri'  => $this->config['callback'],
             'state'         => $this->config['state'] ?: '',
         ];
@@ -67,8 +70,11 @@ class Wecom extends Gateway
      */
     public function getUserInfo()
     {
-        $this->getToken();
-        
+        // 企业微信的 access_token 由 corpid/corpsecret 换取（getAccessToken），与授权码 code 无关；
+        // 不能走父类 getToken() —— 其参数名与 state 校验流程与 qyapi 不匹配，会直接抛错
+        $access = $this->getAccessToken();
+        $this->token['access_token'] = $access['access_token'] ?? '';
+
         $params = [
             'access_token' => $this->token['access_token'],
             'code'         => isset($_REQUEST['code']) ? $_REQUEST['code'] : '',
@@ -112,7 +118,7 @@ class Wecom extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $params = [
                 'access_token' => $accessToken,
                 'code'        => 'fake_code'

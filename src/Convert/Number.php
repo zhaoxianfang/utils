@@ -175,10 +175,16 @@ final class Number
      */
     public static function roundTo(float|int $number, float|int $multiple = 1): float|int
     {
-        if ($multiple === 0) {
+        // 必须先把 multiple 转成 float 再与 0.0 比较：
+        // strict_types 下 `0.0 === 0` 恒为 false，若只判断 `$multiple === 0`，
+        // 调用 roundTo(5, 0.0) 会绕过校验并触发 DivisionByZeroError。
+        $divisor = (float) $multiple;
+
+        if ($divisor === 0.0) {
             throw new InvalidArgumentException('Multiple cannot be zero');
         }
-        return round((float) $number / (float) $multiple) * (float) $multiple;
+
+        return round((float) $number / $divisor) * $divisor;
     }
 
     /**

@@ -23,7 +23,7 @@ class Kuaishou extends Gateway
      */
     public function getRedirectUrl()
     {
-        $this->switchAccessTokenURL();
+        $this->saveState();
         $params = [
             'app_id'        => $this->config['app_id'],
             'redirect_uri'  => $this->config['callback'],
@@ -39,7 +39,9 @@ class Kuaishou extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
+        // 快手 token 响应自带 open_id；必须走 getAccessToken（快手自有的 token 流程），
+        // 父类 getToken() 的参数名与快手 openapi 不匹配
+        $this->getAccessToken();
         return $this->token['open_id'] ?? '';
     }
 
@@ -69,11 +71,11 @@ class Kuaishou extends Gateway
      */
     public function getUserInfo()
     {
-        $this->getToken();
-        
+        $this->getAccessToken();
+
         $params = [
             'app_id'       => $this->config['app_id'],
-            'access_token' => $this->token['access_token'],
+            'access_token' => $this->token['access_token'] ?? '',
         ];
         
         $data = $this->get($this->UserInfoURL, $params);
@@ -92,6 +94,11 @@ class Kuaishou extends Gateway
      */
     protected function getAccessToken()
     {
+        // 已获取且未刷新时复用缓存
+        if (!empty($this->token['access_token'])) {
+            return $this->token;
+        }
+
         $params = [
             'app_id'       => $this->config['app_id'],
             'app_secret'   => $this->config['app_secret'],
@@ -104,10 +111,11 @@ class Kuaishou extends Gateway
             $response = json_decode($response, true);
         }
         
-        if (!isset($response['access_token'])) {
+        if (!is_array($response) || !isset($response['access_token'])) {
             throw new OAuthException('获取快手 access_token 出错：' . json_encode($response));
         }
-        return $response;
+        $this->token = $response;
+        return $this->token;
     }
 
     /**
@@ -116,7 +124,7 @@ class Kuaishou extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $params = [
                 'app_id'       => $this->config['app_id'],
                 'access_token' => $accessToken,

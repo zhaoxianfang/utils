@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace zxf\Utils\Date;
 
 use DateTime;
+use DateTimeInterface;
 use DateTimeZone;
 use Exception;
 
@@ -34,18 +35,20 @@ use Exception;
  */
 class TimeZone
 {
-    private static ?self $instance = null;
+    /** @var array<class-string, static> 按调用类缓存实例 */
+    private static array $instances = [];
 
     /**
      * 初始化实例
+     *
+     * 按「实际调用类」分别缓存：旧实现用 self::$instance 单例，
+     * 子类继承后首次由父类创建会把父类实例误当作子类返回（static 返回类型 → TypeError）。
      */
-    public static function instance(): ?static
+    public static function instance(): static
     {
-        if (! isset(self::$instance) || is_null(self::$instance)) {
-            self::$instance = new static;
-        }
+        $class = static::class;
 
-        return self::$instance;
+        return self::$instances[$class] ??= new static();
     }
 
     /**
@@ -126,10 +129,15 @@ class TimeZone
         }
         // 如果是时间戳则转换为时间字符串
         if (is_numeric($datetime)) {
-            $datetime = date('Y-m-d H:i:s', $datetime);
+            // 修复：旧实现用 date('Y-m-d H:i:s', $ts)（依赖 PHP 默认时区）生成字符串，
+            // 再按 $fromTimeZone 解析——当默认时区 ≠ 源时区时整体偏移数小时（同一时刻错位）。
+            // 时间戳是绝对时刻，应直接用 @epoch（UTC）构造。
+            $dateTimeObj = new DateTime('@' . (int) $datetime);
+            $dateTimeObj->setTimezone(new DateTimeZone($fromTimeZone));
+        } else {
+            // 将时间字符串转换为 DateTime 对象（携带源时区）
+            $dateTimeObj = new DateTime($datetime, new DateTimeZone($fromTimeZone));
         }
-        // 将时间字符串转换为 DateTime 对象（携带源时区）
-        $dateTimeObj = new DateTime($datetime, new DateTimeZone($fromTimeZone));
 
         // 直接使用 DateTime 的时区转换：PHP 会基于时区数据库自动处理夏令时（DST）切换，
         // 比“固定小时偏移相减”更准确（避免跨夏令时边界时差 1 小时的错误）。
@@ -185,8 +193,8 @@ class TimeZone
      */
     public static function setTimeZone(string $timeZone = 'PRC'): bool
     {
-        // 设置默认时区为 'PRC' 中国标准时间
-        return date_default_timezone_set($timeZone ?? 'PRC');
+        // 设置默认时区（参数已带默认值 'PRC'，旧的 ?? 'PRC' 属死代码）
+        return date_default_timezone_set($timeZone);
     }
 
     /**
@@ -197,7 +205,7 @@ class TimeZone
      *
      * @throws Exception
      */
-    public function format(string|int|DateTime|array $datetime, string $format = 'Y-m-d H:i:s'): string|array
+    public function format(string|int|DateTimeInterface|array|null $datetime = null, string $format = 'Y-m-d H:i:s'): string|array
     {
         if (is_array($datetime)) {
             $result = [];
@@ -207,23 +215,25 @@ class TimeZone
 
             return $result;
         }
-        if ($datetime instanceof DateTime) {
-            $dateTimeObj = $datetime;
+        if ($datetime instanceof DateTimeInterface) {
+            // 修复：旧实现仅接受 DateTime，传 DateTimeImmutable 会因对象无法转字符串而抛
+            // "Object of class DateTimeImmutable could not be converted to string"
+            $dateTimeObj = DateTime::createFromInterface($datetime);
         } else {
-            if (empty($datetime)) {
+            if ($datetime === null || $datetime === '') {
                 // 默认为当前时间
                 $datetime = 'now';
             }
             // 如果是时间戳则转换为时间字符串
             if (is_numeric($datetime)) {
-                $datetime = date('Y-m-d H:i:s', $datetime);
+                $datetime = date('Y-m-d H:i:s', (int) $datetime);
             }
             // 将时间字符串转换为 DateTime 对象
-            $dateTimeObj = new DateTime($datetime);
+            $dateTimeObj = new DateTime((string) $datetime);
         }
 
-        // 返回目标时区的时间
-        return $dateTimeObj->format($format ?? 'Y-m-d H:i:s');
+        // 返回格式化时间
+        return $dateTimeObj->format($format ?: 'Y-m-d H:i:s');
     }
 
     // 时区差值对照表
@@ -388,8 +398,8 @@ class TimeZone
         'NDT' => -2.5,                  // 纽芬兰夏令时 (UTC-02:30)
         'GST' => 4,                     // 波斯湾标准时间 (UTC+04:00)
         'EET' => 2,                     // 东欧标准时间 (UTC+02:00)
-        'PST' => 8,                     // 太平洋标准时间 (UTC-08:00)
-        'AST' => 3,                     // 亚美尼亚标准时间 (UTC+03:00)
+        'PST' => -8,                    // 太平洋标准时间 (UTC-08:00)（修复：旧值 8 与注释矛盾，差 16 小时）
+        'AST' => 4,                     // 亚美尼亚标准时间 (UTC+04:00)（与 Asia/Yerevan 一致；修复：旧值 3 与真实偏移不符）
         'UTC' => 0,                     // 协调世界时 (UTC+00:00)
         'CET' => 1,                     // 中欧标准时间 (UTC+01:00)
         'CEST' => 2,                     // 中欧夏令时 (UTC+02:00)

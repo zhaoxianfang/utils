@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace zxf\Utils\Support;
 
 use Closure;
+use InvalidArgumentException;
 use RuntimeException;
 
 /**
@@ -36,12 +37,23 @@ class Timer
     /**
      * 创建带超时限制的计时器
      *
-     * @param float $seconds 超时时间（秒）
+     * @param float $seconds 超时时间（秒，必须 >= 0）
+     *
+     * @throws InvalidArgumentException 超时时间为负数时抛出
      */
     public static function withTimeout(float $seconds): self
     {
+        if ($seconds < 0 || is_nan($seconds)) {
+            throw new InvalidArgumentException('超时时间不能为负数或非法值');
+        }
+
+        // 纳秒值可能超出 int 范围（约 292 年），此处夹取到 PHP_INT_MAX
+        $nanoseconds = $seconds * 1e9;
         $timer = new self();
-        $timer->timeoutNs = (int) ($seconds * 1e9);
+        $timer->timeoutNs = $nanoseconds >= (float) PHP_INT_MAX
+            ? PHP_INT_MAX
+            : (int) $nanoseconds;
+
         return $timer;
     }
 
@@ -131,12 +143,67 @@ class Timer
      *
      * 使用 time_nanosleep 实现亚秒级精度睡眠。
      *
-     * @param float $seconds 睡眠时间（支持小数）
+     * 注意：如果睡眠被信号中断，time_nanosleep() 会返回剩余的纳秒数数组，
+     * 此时必须继续补足剩余时间，否则睡眠时间会远短于预期。
+     *
+     * @param float $seconds 睡眠时间（支持小数，必须 >= 0）
+     *
+     * @throws InvalidArgumentException 睡眠时间为负数时抛出
+     * @throws RuntimeException 睡眠被信号中断且无法完成时抛出
      */
     public static function sleep(float $seconds): void
     {
-        $s = (int) $seconds;
-        $ns = (int) (($seconds - $s) * 1e9);
-        time_nanosleep($s, $ns);
+        if ($seconds < 0 || is_nan($seconds) || is_infinite($seconds)) {
+            throw new InvalidArgumentException('睡眠时间不能为负数或非法值');
+        }
+
+        if ($seconds === 0.0) {
+            return;
+        }
+
+        $remainingSeconds = (int) $seconds;
+        $remainingNanos = (int) round(($seconds - $remainingSeconds) * 1e9);
+
+        // 进位修正：浮点误差可能让 nanos 恰好等于 1e9
+        if ($remainingNanos >= 1000000000) {
+            $remainingSeconds++;
+            $remainingNanos -= 1000000000;
+        }
+
+        $retries = 0;
+
+        while (true) {
+            $result = time_nanosleep($remainingSeconds, $remainingNanos);
+
+            if ($result === true) {
+                return;
+            }
+
+            if (! is_array($result)) {
+                throw new RuntimeException('高精度睡眠失败');
+            }
+
+            // 被信号中断，继续补足剩余时间
+            $remainingSeconds = (int) ($result['seconds'] ?? 0);
+            $remainingNanos = (int) ($result['nanoseconds'] ?? 0);
+
+            if ($remainingSeconds <= 0 && $remainingNanos <= 0) {
+                return;
+            }
+
+            if (++$retries > 1000) {
+                throw new RuntimeException('高精度睡眠被反复中断，无法完成');
+            }
+        }
+    }
+
+    /**
+     * 创建并立即开始的高精度睡眠别名（语义更清晰）
+     *
+     * @param float $seconds 睡眠时间（秒）
+     */
+    public static function usleep(float $seconds): void
+    {
+        self::sleep($seconds);
     }
 }

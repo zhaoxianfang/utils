@@ -10,6 +10,11 @@ use zxf\Utils\BarCode\Exceptions\InvalidDataException;
  * EAN-8 条码生成器（修复版）
  * 
  * EAN-8 是 EAN-13 的短版格式
+ *
+ * 注意：本生成器输出【模块级】条空数组（1 模块 = 1 个单位），与 EAN-13 一致，
+ * 最终像素宽度 = 模块数 × renderer 的 moduleSize。历史上曾把每个模块预展开成 2px
+ * （MODULE_WIDTH=2），导致 moduleSize 语义翻倍、同一 moduleSize 下比 EAN-13 宽一倍，
+ * 已修复为模块级输出。
  */
 class EAN8Generator extends BaseGenerator
 {
@@ -17,7 +22,6 @@ class EAN8Generator extends BaseGenerator
     protected const START_GUARD = '101';
     protected const MIDDLE_GUARD = '01010';
     protected const END_GUARD = '101';
-    protected const MODULE_WIDTH = 2;
 
     protected array $encodingA = [
         '0001101', '0011001', '0010011', '0111101', '0100011',
@@ -40,6 +44,8 @@ class EAN8Generator extends BaseGenerator
         }
 
         if (strlen($data) === 8) {
+            // 输入已含校验位：默认验证正确性，校验位错误时抛异常
+            $this->assertCompleteChecksum($data, 'EAN-8');
             $this->rawData = $data;
         } else {
             $checksum = $this->calculateChecksum($data);
@@ -54,39 +60,39 @@ class EAN8Generator extends BaseGenerator
 
         $binary = '';
 
-        // 左侧静区
-        $binary .= str_repeat('0', $this->quietZoneModules * self::MODULE_WIDTH);
+        // 左侧静区（模块级）
+        $binary .= str_repeat('0', $this->quietZoneModules);
 
         // 起始保护符
         $startGuardOffset = strlen($binary);
-        $binary .= $this->expandPattern(self::START_GUARD);
+        $binary .= self::START_GUARD;
 
         // 左侧4位（A模式）
         $leftBinary = '';
         for ($i = 0; $i < 4; $i++) {
             $digit = (int) $leftData[$i];
-            $leftBinary .= $this->expandPattern($this->encodingA[$digit]);
+            $leftBinary .= $this->encodingA[$digit];
         }
         $binary .= $leftBinary;
 
         // 中间分隔符
         $middleGuardOffset = strlen($binary);
-        $binary .= $this->expandPattern(self::MIDDLE_GUARD);
+        $binary .= self::MIDDLE_GUARD;
 
         // 右侧4位（C模式）
         $rightBinary = '';
         for ($i = 0; $i < 4; $i++) {
             $digit = (int) $rightData[$i];
-            $rightBinary .= $this->expandPattern($this->encodingC[$digit]);
+            $rightBinary .= $this->encodingC[$digit];
         }
         $binary .= $rightBinary;
 
         // 终止保护符
         $endGuardOffset = strlen($binary);
-        $binary .= $this->expandPattern(self::END_GUARD);
+        $binary .= self::END_GUARD;
 
-        // 右侧静区
-        $binary .= str_repeat('0', $this->quietZoneModules * self::MODULE_WIDTH);
+        // 右侧静区（模块级）
+        $binary .= str_repeat('0', $this->quietZoneModules);
 
         $this->barcodeArray = $this->binaryToBars($binary);
         $this->calculateLongBarPositionsFromBinary($binary, $startGuardOffset, $middleGuardOffset, $endGuardOffset);
@@ -95,7 +101,7 @@ class EAN8Generator extends BaseGenerator
     }
 
     /**
-     * 基于二进制偏移量精确计算长竖线位置
+     * 基于二进制偏移量精确计算长竖线位置（模块级偏移）
      */
     protected function calculateLongBarPositionsFromBinary(
         string $binary,
@@ -107,15 +113,15 @@ class EAN8Generator extends BaseGenerator
 
         // 起始符 '101' -> 条在偏移 +0 和 +2
         $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset);
-        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset + 2 * self::MODULE_WIDTH);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $startGuardOffset + 2);
 
         // 中间分隔符 '01010' -> 条在偏移 +1 和 +3
-        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 1 * self::MODULE_WIDTH);
-        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 3 * self::MODULE_WIDTH);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 1);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $middleGuardOffset + 3);
 
         // 终止符 '101' -> 条在偏移 +0 和 +2
         $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset);
-        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset + 2 * self::MODULE_WIDTH);
+        $this->longBarPositions[] = $this->binaryOffsetToBarIndex($binary, $endGuardOffset + 2);
 
         sort($this->longBarPositions);
     }
@@ -158,18 +164,6 @@ class EAN8Generator extends BaseGenerator
 
         $checksum = (10 - ($sum % 10)) % 10;
         return (string) $checksum;
-    }
-
-    /**
-     * 将模式按 MODULE_WIDTH 展开（保持像素尺寸兼容）
-     */
-    protected function expandPattern(string $pattern): string
-    {
-        $expanded = '';
-        for ($i = 0; $i < strlen($pattern); $i++) {
-            $expanded .= str_repeat($pattern[$i], self::MODULE_WIDTH);
-        }
-        return $expanded;
     }
 
     public function getType(): string

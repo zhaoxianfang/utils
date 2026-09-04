@@ -160,18 +160,46 @@ final class Json
 
     /**
      * 将 JSON 字符串转为 PHP 数组，确保所有对象都被转为数组
+     *
+     * 根节点为标量（如 `5`、`"str"`、`true`、`null`）时，
+     * 按 PHP 的标量转数组规则包装为单元素数组（如 `[5]`）；
+     * 直接返回标量会触发 "Return value must be of type array" 的 TypeError。
+     *
+     * @param string $json  JSON 字符串
+     * @param bool   $wrapScalar 根节点为标量时是否包装为数组；false 则抛 JsonException
+     * @return array<mixed>
+     *
+     * @throws JsonException JSON 非法且根节点为标量、同时 $wrapScalar 为 false 时抛出
      */
-    public static function toArray(string $json): array
+    public static function toArray(string $json, bool $wrapScalar = true): array
     {
-        return self::decode($json, true);
+        $decoded = self::decode($json, true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        if ($wrapScalar) {
+            return [$decoded];
+        }
+
+        throw new JsonException('JSON 根节点不是对象或数组，无法转换为数组');
     }
 
     /**
      * 将 JSON 字符串转为 stdClass 对象
+     *
+     * @param string $json JSON 字符串
+     * @return object 解码结果；根节点为标量时会得到 stdClass 转换后的对象
      */
     public static function toObject(string $json): object
     {
-        return self::decode($json, false);
+        // associative=false 时，JSON 对象会得到 stdClass，
+        // 但 JSON 数组（如 [1,2]）仍得到 PHP 数组，直接返回会触发返回类型的
+        // TypeError，因此对非对象结果统一转换为 stdClass。
+        $decoded = self::decode($json, false);
+
+        return is_object($decoded) ? $decoded : (object) $decoded;
     }
 
     /**

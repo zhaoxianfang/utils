@@ -36,6 +36,15 @@ class PngRenderer extends BaseRenderer
     /** @var int 动态计算的文本Y轴偏移量，确保文字与长竖线不重叠 */
     protected int $dynamicTextOffset = 3;
 
+    /** @var int 本次渲染实际使用的左静区宽度（因静区最小值可能被放大；不改写 config，避免实例复用残留副作用） */
+    protected int $marginLeftUsed = 0;
+
+    /** @var int 本次渲染实际使用的右静区宽度 */
+    protected int $marginRightUsed = 0;
+
+    /** @var int 水印原始像素字号（TTF 渲染路径使用，不再受 GD 位图 1-5 档限制） */
+    protected int $watermarkFontSizePx = 16;
+
     public function __construct(?BarcodeConfig $config = null)
     {
         parent::__construct($config);
@@ -50,18 +59,13 @@ class PngRenderer extends BaseRenderer
         $this->barcodeStructure = []; // 重置结构分析
         $this->renderModuleSize = $this->resolveModuleSize($barcodeData);
 
-        // 确保有足够的静区宽度
-        $moduleSize = $this->renderModuleSize;
+        // 确保有足够的静区宽度（仅作用于本次渲染，不改写 config，避免实例复用时残留副作用）
+        $this->marginLeftUsed = $this->config->marginLeft;
+        $this->marginRightUsed = $this->config->marginRight;
         if ($this->config->showQuietZone) {
-            $minQuietZone = 11 * $moduleSize;
-            $newMarginLeft = max($this->config->marginLeft, (int) $minQuietZone);
-            $newMarginRight = max($this->config->marginRight, (int) $minQuietZone);
-            if ($newMarginLeft !== $this->config->marginLeft || $newMarginRight !== $this->config->marginRight) {
-                $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), [
-                    'marginLeft' => $newMarginLeft,
-                    'marginRight' => $newMarginRight,
-                ]));
-            }
+            $minQuietZone = $this->quietZoneWidthPx();
+            $this->marginLeftUsed = max($this->config->marginLeft, (int) $minQuietZone);
+            $this->marginRightUsed = max($this->config->marginRight, (int) $minQuietZone);
         }
 
         $this->createImage($barcodeData);
@@ -112,11 +116,6 @@ class PngRenderer extends BaseRenderer
         return file_put_contents($filename, $pngData) !== false;
     }
 
-    public function getType(): string
-    {
-        return self::TYPE;
-    }
-
     /**
      * 添加水印（PNG 适配版）
      *
@@ -138,15 +137,17 @@ class PngRenderer extends BaseRenderer
     ): self {
         $this->watermarkText = $text;
         $this->watermarkOpacity = max(0, min(100, $opacity));
-        // GD 内置字体有效范围为 1-5，超过此范围的值按 3 像素/级进行映射
+        $this->watermarkColor = $color;
+        $this->watermarkAngle = max(-180, min(180, $angle));
+        // TTF 路径使用原始像素字号（与 SVG/HTML 水印字号语义一致，不再被 GD 位图 1-5 档换算放大）
+        $this->watermarkFontSizePx = max(1, $fontSize);
+        // GD 内置位图字体仅支持 1-5 级，超过此范围的值按 3 像素/级进行映射
         if ($fontSize <= 5) {
             $this->watermarkFontSize = max(1, min(5, $fontSize));
         } else {
             $mapped = (int) round($fontSize / 3);
             $this->watermarkFontSize = max(1, min(5, $mapped));
         }
-        $this->watermarkColor = $color;
-        $this->watermarkAngle = max(-180, min(180, $angle));
         return $this;
     }
 
@@ -155,16 +156,28 @@ class PngRenderer extends BaseRenderer
      */
     protected function createImage(array $barcodeData): void
     {
+        // PNG 渲染依赖 PHP GD 扩展：缺失时给出清晰错误，而非原生 Fatal
+        if (!extension_loaded('gd') || !function_exists('imagecreatetruecolor')) {
+            throw new RenderException('PngRenderer 依赖 PHP GD 扩展（imagecreatetruecolor），请先安装并启用 gd 扩展，或改用 toSvg()/toHtml()');
+        }
+
         $totalWidth = 0;
         foreach ($barcodeData as $element) {
             $totalWidth += abs($element);
         }
         
         $width = $totalWidth * $this->renderModuleSize +
-                 $this->config->marginLeft +
-                 $this->config->marginRight;
-        
-        $height = $this->config->height +
+                 $this->marginLeftUsed +
+                 $this->marginRightUsed;
+
+        // 长竖线（保护符）从 marginTop 起绘 height×ratio 的高度：
+        // 图像高度必须以“条区高度”为基准，否则 ratio>1 时延长部分会被画布裁剪
+        $barAreaHeight = $this->config->height;
+        if ($this->longBarsEnabled()) {
+            $barAreaHeight = (int) ceil($barAreaHeight * $this->longBarHeightRatio);
+        }
+
+        $height = $barAreaHeight +
                   $this->config->marginTop +
                   $this->config->marginBottom;
 
@@ -213,7 +226,7 @@ class PngRenderer extends BaseRenderer
         }
 
         $barColor = $this->hexToColor($this->config->barColor);
-        $x = $this->config->marginLeft;
+        $x = $this->marginLeftUsed;
         
         // 计算长竖线位置
         $longBarPositions = $this->calculateLongBarPositions();
@@ -244,7 +257,8 @@ class PngRenderer extends BaseRenderer
                     $barHeight = (int)($barHeight * $this->longBarHeightRatio);
                 }
                 
-                if ($this->enableGradient) {
+                // 渐变经对比度守卫：两端与背景对比不足时回退纯色，保证可扫性
+                if ($this->gradientUsable()) {
                     $this->drawGradientBar($x, $barY, $width, $barHeight);
                 } else {
                     if ($this->enableRoundedBars && $width > $this->cornerRadius * 2) {
@@ -266,7 +280,7 @@ class PngRenderer extends BaseRenderer
         }
         
         // 分析条码结构
-        $this->analyzeBarcodeStructure($bars, $x, $this->config->marginLeft);
+        $this->analyzeBarcodeStructure($bars, $x, $this->marginLeftUsed);
     }
 
 
@@ -361,63 +375,13 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 确定分段策略
-     * 
-     * 【分段规则】
-     * - EAN-13: [第1位, 左6位, 右6位]
-     * - UPC-A: [第1位, 左5位, 右5位, 校验位]
-     * - EAN-8: [左4位, 右4位]
-     * - ISSN: 同EAN-13
+     *
+     * 与 HTML 渲染器共用 BaseRenderer::splitDisplaySegments() 的实现，
+     * 保证同一数据在 PNG/HTML 两种输出下的分段完全一致。
      */
     protected function determineSegments(string $data): array
     {
-        $length = strlen($data);
-        $type = $this->barcodeType;
-        
-        // 根据条码类型和数据长度确定分段
-        switch ($type) {
-            case 'EAN-13':
-                if ($length === 13) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-                
-            case 'UPC-A':
-                if ($length === 12) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 5), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 6, 5), 'region' => 'rightData', 'type' => 'multi'],
-                        ['text' => $data[11], 'region' => 'rightQuietZone', 'type' => 'single'],
-                    ];
-                }
-                break;
-                
-            case 'EAN-8':
-                if ($length === 8) {
-                    return [
-                        ['text' => substr($data, 0, 4), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 4, 4), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-                
-            case 'ISSN':
-                // ISSN基于EAN-13，但显示格式不同
-                if ($length === 13) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-        }
-        
-        return [];
+        return $this->splitDisplaySegments($data);
     }
 
     /**
@@ -473,7 +437,10 @@ class PngRenderer extends BaseRenderer
                 $this->dynamicFontSize = $baseFontSize;
             }
         }
-        
+
+        // GD 内置字体仅支持 1-5，超出会静默回落 font5，这里显式夹取
+        $this->dynamicFontSize = max(1, min(5, $this->dynamicFontSize));
+
         // 动态计算文本偏移（根据长竖线高度和字号）
         $longBarHeight = $this->config->height * $this->longBarHeightRatio;
         $normalHeight = $this->config->height;
@@ -555,10 +522,10 @@ class PngRenderer extends BaseRenderer
 
             switch ($this->textAlign) {
                 case 'left':
-                    $x = $this->config->marginLeft;
+                    $x = $this->marginLeftUsed;
                     break;
                 case 'right':
-                    $x = $imgWidth - $this->config->marginRight - $textWidth;
+                    $x = $imgWidth - $this->marginRightUsed - $textWidth;
                     break;
                 case 'center':
                 default:
@@ -590,10 +557,10 @@ class PngRenderer extends BaseRenderer
 
             switch ($this->textAlign) {
                 case 'left':
-                    $x = $this->config->marginLeft;
+                    $x = $this->marginLeftUsed;
                     break;
                 case 'right':
-                    $x = $imgWidth - $this->config->marginRight - $textWidth;
+                    $x = $imgWidth - $this->marginRightUsed - $textWidth;
                     break;
                 case 'center':
                 default:
@@ -679,8 +646,8 @@ class PngRenderer extends BaseRenderer
         $barBottom = $barTop + $this->config->height - 1;
 
         // 内容区域左右边界（与条码静区对齐，不覆盖图像边缘额外 padding）
-        $contentLeft = $this->config->marginLeft;
-        $contentRight = imagesx($this->image) - $this->config->marginRight - 1;
+        $contentLeft = $this->marginLeftUsed;
+        $contentRight = imagesx($this->image) - $this->marginRightUsed - 1;
         if ($contentLeft >= $contentRight) {
             $contentLeft = 0;
             $contentRight = imagesx($this->image) - 1;
@@ -753,7 +720,7 @@ class PngRenderer extends BaseRenderer
             return;
         }
 
-        $fontSize = max(8, $this->watermarkFontSize * 4);
+        $fontSize = max(8, $this->watermarkFontSizePx);
         $bbox = imagettfbbox($fontSize, 0, $this->watermarkFontPath, $this->watermarkText);
         if ($bbox === false) {
             return;

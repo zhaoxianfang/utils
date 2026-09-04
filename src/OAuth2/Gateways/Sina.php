@@ -77,9 +77,9 @@ class Sina extends Gateway
             'access_token'=> $this->token['access_token'] ?? '',
             'union_id'  => $openId,
             'channel' => ConstCode::TYPE_SINA,
-            'nickname'    => $result['screen_name'],
-            'gender'  => $this->getGender($result['gender']),
-            'avatar'  => $result['avatar_hd'],
+            'nickname'    => $result['screen_name'] ?? '',
+            'gender'  => !empty($result['gender']) ? $this->getGender($result['gender']) : ConstCode::GENDER,
+            'avatar'  => $result['avatar_hd'] ?? ($result['profile_image_url'] ?? ''),
             'native'   => $result,
         ];
         return $userInfo;
@@ -100,9 +100,9 @@ class Sina extends Gateway
             $this->token['access_token'] = $_REQUEST['access_token'];
             $this->token['openid'] = $_REQUEST['uid'];
         }else{
-            /** 获取参数 */
-            $params = $this->accessTokenParams();
-            $this->AccessTokenURL = $this->AccessTokenURL. '?' . http_build_query($params);//get传参
+            /** 获取token（参数由父类 getToken 以请求体发送；
+             *  切勿在此手动拼接 URL —— 每次调用都会向 AccessTokenURL 追加一次 query，
+             *  多轮调用后 URL 会累积成 "?a=1?b=2" 的畸形地址） */
             $this->getToken();
         }
 
@@ -158,17 +158,21 @@ class Sina extends Gateway
             unset($data['uid']);
             return $data;
         } else {
-            throw new OAuthException("获取新浪微博ACCESS_TOKEN出错：{$data['error']}");
+            throw new OAuthException("获取新浪微博ACCESS_TOKEN出错：".($data['error'] ?? 'invalid response'));
         }
     }
 
     /**
      * 第三方分享到微博
-     * @param $data
+     * @param string|array $data 分享文本，或 {status, pic, ...} 参数数组
      * @return mixed
      */
     public function statusesShare($data){
-        return $this->call('statuses/share.json', json_encode($data),'POST');
+        // 兼容旧版传 JSON 字符串的用法：字符串视为分享正文
+        if (!is_array($data)) {
+            $data = ['status' => (string) $data];
+        }
+        return $this->call('statuses/share.json', $data, 'POST');
     }
 
 }

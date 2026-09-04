@@ -106,14 +106,21 @@ class JWT
 
         $payload = self::jsonDecode(Base64::urlSafeDecode($parts['payload']));
 
-        // 验证过期时间
-        if (isset($payload['exp']) && time() > $payload['exp']) {
+        // 验证过期时间（载荷来自 JSON，exp/nbf 可能是字符串/浮点，统一 (int) 归一化后再比较）
+        if (isset($payload['exp']) && is_numeric($payload['exp']) && time() > (int) $payload['exp']) {
             throw new RuntimeException('JWT已过期');
+        }
+        // 非数字 exp 视为缺失处理；nbf 同理
+        if (isset($payload['exp']) && ! is_numeric($payload['exp'])) {
+            throw new RuntimeException('JWT的exp声明必须是数值');
         }
 
         // 验证生效时间
-        if (isset($payload['nbf']) && time() < $payload['nbf']) {
+        if (isset($payload['nbf']) && is_numeric($payload['nbf']) && time() < (int) $payload['nbf']) {
             throw new RuntimeException('JWT尚未生效');
+        }
+        if (isset($payload['nbf']) && ! is_numeric($payload['nbf'])) {
+            throw new RuntimeException('JWT的nbf声明必须是数值');
         }
 
         return $payload;
@@ -148,7 +155,10 @@ class JWT
             $parts = self::split($jwt);
             $signingInput = "{$parts['header']}.{$parts['payload']}";
             return self::verify($signingInput, $parts['signature'], $secret, $algorithm);
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
+            // 注意：此处必须使用全限定名 \Exception。
+            // 本文件位于 zxf\Utils\Crypto 命名空间，裸写 Exception 会解析为
+            // zxf\Utils\Crypto\Exception（不存在），导致 catch 匹配不到、异常外泄。
             return false;
         }
     }
@@ -264,7 +274,10 @@ class JWT
         if (!openssl_sign($data, $signature, $privateKey, $algorithm)) {
             throw new RuntimeException('ECDSA签名失败: ' . openssl_error_string());
         }
-        return $signature;
+        // RFC 7518：ES256/ES384/ES512 的签名必须是定长 raw R||S（各 coordSize 字节），
+        // 而 openssl_sign 返回 DER 编码（SEQUENCE { INTEGER r, INTEGER s }），
+        // 必须转换，否则与任何标准 JWT 实现（firebase/php-jwt、jose、libraries.io 等）互不兼容。
+        return self::derToRawSignature($signature, self::ecKeyCoordSize($privateKey));
     }
 
     private static function ecdsaVerify(string $data, string $signature, string $publicKeyPem, string $algorithm): bool
@@ -273,11 +286,115 @@ class JWT
         if ($publicKey === false) {
             throw new RuntimeException('无效的ECC公钥');
         }
-        $result = openssl_verify($data, $signature, $publicKey, $algorithm);
+        $result = openssl_verify($data, self::rawToDerSignature($signature, self::ecKeyCoordSize($publicKey)), $publicKey, $algorithm);
         if ($result === -1) {
             throw new RuntimeException('ECDSA验证失败: ' . openssl_error_string());
         }
         return $result === 1;
+    }
+
+    /**
+     * 探测 EC 密钥坐标字节长度（P-256=32 / P-384=48 / P-521=66）
+     */
+    private static function ecKeyCoordSize($key): int
+    {
+        $details = openssl_pkey_get_details($key);
+        $bits = (int) ($details['bits'] ?? 0);
+        if ($bits < 1) {
+            throw new RuntimeException('无法获取ECC密钥位数');
+        }
+        return (int) ceil($bits / 8);
+    }
+
+    private static function derLength(int $length): string
+    {
+        if ($length < 0x80) {
+            return chr($length);
+        }
+        $bytes = '';
+        while ($length > 0) {
+            $bytes = chr($length & 0xff) . $bytes;
+            $length >>= 8;
+        }
+        return chr(0x80 | strlen($bytes)) . $bytes;
+    }
+
+    /** 将无符号整数二进制编码为 DER INTEGER（必要时补 0x00 保证为正数） */
+    private static function derInteger(string $value): string
+    {
+        $value = ltrim($value, "\x00");
+        if ($value === '') {
+            $value = "\x00";
+        }
+        if ((ord($value[0]) & 0x80) !== 0) {
+            $value = "\x00" . $value;
+        }
+        return "\x02" . self::derLength(strlen($value)) . $value;
+    }
+
+    /** 标准 raw R||S → OpenSSL 所需的 DER ECDSA 签名 */
+    private static function rawToDerSignature(string $raw, int $coordSize): string
+    {
+        if (strlen($raw) !== $coordSize * 2) {
+            throw new RuntimeException("无效的ECDSA签名长度: 期望 " . ($coordSize * 2) . " 字节");
+        }
+        $content = self::derInteger(substr($raw, 0, $coordSize)) . self::derInteger(substr($raw, $coordSize));
+        return "\x30" . self::derLength(strlen($content)) . $content;
+    }
+
+    /** OpenSSL DER ECDSA 签名 → 标准 raw R||S */
+    private static function derToRawSignature(string $der, int $coordSize): string
+    {
+        $derLen = strlen($der);
+        if ($derLen < 8 || $der[0] !== "\x30") {
+            throw new RuntimeException('无效的DER ECDSA签名');
+        }
+        $pos = 1;
+        $len = ord($der[$pos]);
+        $pos++;
+        if ($len & 0x80) {
+            $numBytes = $len & 0x7f;
+            if ($numBytes === 0 || $pos + $numBytes > $derLen) {
+                throw new RuntimeException('无效的DER ECDSA签名');
+            }
+            $len = 0;
+            for ($i = 0; $i < $numBytes; $i++) {
+                $len = ($len << 8) | ord($der[$pos]);
+                $pos++;
+            }
+        }
+        $end = min($pos + $len, $derLen);
+
+        $coords = [];
+        for ($i = 0; $i < 2; $i++) {
+            if ($pos + 2 > $end || $der[$pos] !== "\x02") {
+                throw new RuntimeException('无效的DER ECDSA签名');
+            }
+            $pos++;
+            $clen = ord($der[$pos]);
+            $pos++;
+            if ($clen & 0x80) {
+                $numBytes = $clen & 0x7f;
+                if ($numBytes === 0 || $pos + $numBytes > $end) {
+                    throw new RuntimeException('无效的DER ECDSA签名');
+                }
+                $clen = 0;
+                for ($j = 0; $j < $numBytes; $j++) {
+                    $clen = ($clen << 8) | ord($der[$pos]);
+                    $pos++;
+                }
+            }
+            if ($pos + $clen > $end) {
+                throw new RuntimeException('无效的DER ECDSA签名');
+            }
+            $coord = ltrim(substr($der, $pos, $clen), "\x00");
+            $pos += $clen;
+            if (strlen($coord) > $coordSize) {
+                throw new RuntimeException('ECDSA 签名分量长度非法');
+            }
+            $coords[] = str_pad($coord, $coordSize, "\x00", STR_PAD_LEFT);
+        }
+        return $coords[0] . $coords[1];
     }
 
     /**

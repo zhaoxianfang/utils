@@ -688,6 +688,13 @@ class BarcodeBuilder
             return $this->data;
         }
 
+        // 惰性生成：生成器（含补全校验位/ISBN-10→13 等转换）的完整数据
+        // 只有在 generate() 之后才可用。调用方若只问「完整数据」而不渲染，
+        // 此处自动触发一次生成，避免返回空串。
+        if ($this->barcodeData === null && $this->data !== '') {
+            $this->generate();
+        }
+
         if (method_exists($this->generator, 'getFullData')) {
             return $this->generator->getFullData();
         }

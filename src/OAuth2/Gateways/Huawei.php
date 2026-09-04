@@ -125,7 +125,7 @@ class Huawei extends Gateway
     public function validateAccessToken($accessToken = null)
     {
         try {
-            $accessToken = $accessToken ?? $this->token['access_token'];
+            $accessToken = $accessToken ?? ($this->token['access_token'] ?? '');
             $params = [
                 'method'       => 'oauth2/v3/tokeninfo',
                 'access_token' => $accessToken,

@@ -6,7 +6,6 @@ namespace zxf\Utils\Minify;
 
 use zxf\Utils\Minify\Exceptions\IOException;
 use zxf\Utils\Minify\Exceptions\PatternMatchException;
-use Psr\Cache\CacheItemInterface;
 
 /**
  * Abstract minifier class.
@@ -130,7 +129,7 @@ abstract class Minify
     /**
      * Minify the data & (optionally) saves it to a file.
      *
-     * @param string[optional] $path Path to write the data to
+     * @param string|null $path Path to write the data to
      *
      * @return string The minified data
      */
@@ -149,8 +148,8 @@ abstract class Minify
     /**
      * Minify & gzip the data & (optionally) saves it to a file.
      *
-     * @param string[optional] $path  Path to write the data to
-     * @param int[optional]    $level Compression level, from 0 to 9
+     * @param string|null $path  Path to write the data to
+     * @param int         $level Compression level, from 0 to 9
      *
      * @return string The minified & gzipped data
      */
@@ -168,13 +167,17 @@ abstract class Minify
     }
 
     /**
-     * Minify the data & write it to a CacheItemInterface object.
+     * Minify the data & write it to a PSR-6 style cache item object.
      *
-     * @param CacheItemInterface $item Cache item to write the data to
+     * 本包为「零第三方运行时依赖」的独立库，此方法不依赖 psr/cache：
+     * 参数采用鸭子类型，只需对象提供 set() 方法即可（例如任何 PSR-6
+     * 缓存实现，或本包 Cache 模块中的缓存项）。
      *
-     * @return CacheItemInterface Cache item with the minifier data
+     * @param object $item Cache item with a set(string $content) method
+     *
+     * @return object The same cache item, with the minified data stored
      */
-    public function cache(CacheItemInterface $item)
+    public function cache($item)
     {
         $content = $this->execute();
         $item->set($content);
@@ -185,7 +188,7 @@ abstract class Minify
     /**
      * Minify the data.
      *
-     * @param string[optional] $path Path to write the data to
+     * @param string|null $path Path to write the data to
      *
      * @return string The minified data
      */
@@ -409,8 +412,8 @@ abstract class Minify
      * and after doing all other minifying, we can restore the original content
      * via restoreStrings().
      *
-     * @param string[optional] $chars
-     * @param string[optional] $placeholderPrefix
+     * @param string|null $chars
+     * @param string|null $placeholderPrefix
      */
     protected function extractStrings($chars = '\'"', $placeholderPrefix = '')
     {

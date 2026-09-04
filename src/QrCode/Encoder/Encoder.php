@@ -60,6 +60,14 @@ final class Encoder
         // Barcode scanner might not be able to read the encoded message of the QR code with the prefix ECI of UTF-8
         bool $prefixEci = true
     ) : QrCode {
+        // 统一字符集别名（UTF8/utf-8/latin1/Shift-JIS/GBK…），保证：
+        //  1) chooseMode() 的 SHIFT-JIS 判定不受拼写差异影响；
+        //  2) ECI 前缀能命中 CharacterSetEci 名称表（拼写不符会静默跳过 ECI，
+        //     导致多字节内容被扫码端按猜测字符集解码而失真——这是「输入与扫码结果
+        //     不一致」的隐蔽根因之一）；
+        //  3) iconv 转码使用一致的规范名称。
+        $encoding = self::normalizeEncodingName($encoding);
+
         // Pick an encoding mode appropriate for the content. Note that this
         // will not attempt to use multiple modes / segments even if that were
         // more efficient. Would be nice.
@@ -171,7 +179,7 @@ final class Encoder
             return Mode::BYTE();
         }
 
-        if (null !== $encoding && 0 === strcasecmp($encoding, 'SHIFT-JIS')) {
+        if (null !== $encoding && 0 === strcasecmp($encoding, 'Shift_JIS')) {
             return self::isOnlyDoubleByteKanji($content) ? Mode::KANJI() : Mode::BYTE();
         }
 
@@ -623,11 +631,22 @@ final class Encoder
     /**
      * Appends regular 8-bit bytes to a bit array.
      *
-     * @throws WriterException if content cannot be encoded to target encoding
+     * 输入内容契约：始终按 UTF-8 字节序列提供（与 chooseMode/ECI 处理一致）。
+     * 若内容不是合法 UTF-8，iconv 在「源=目标同字符集」的实现下会原样透传非法字节，
+     * 造成「生成时写入的字节 ≠ 解码端按声明字符集解析的字节」的静默失真，
+     * 因此必须先显式校验；转码失败（目标字符集无法表示某字符）则抛 WriterException。
+     *
+     * @throws WriterException if content is not valid UTF-8 or cannot be encoded to target encoding
      */
     private static function append8BitBytes(string $content, BitArray $bits, string $encoding) : void
     {
-        $bytes = @iconv('utf-8', $encoding, $content);
+        if (! self::isValidUtf8($content)) {
+            throw new WriterException(
+                'Content is not valid UTF-8 and therefore cannot be encoded consistently to ' . $encoding
+            );
+        }
+
+        $bytes = @iconv('UTF-8', $encoding, $content);
 
         if (false === $bytes) {
             throw new WriterException('Could not encode content to ' . $encoding);
@@ -638,6 +657,58 @@ final class Encoder
         for ($i = 0; $i < $length; $i++) {
             $bits->appendBits(ord($bytes[$i]), 8);
         }
+    }
+
+    /**
+     * Checks whether content is a valid UTF-8 byte sequence.
+     */
+    private static function isValidUtf8(string $content) : bool
+    {
+        return false !== @preg_match('//u', $content);
+    }
+
+    /**
+     * Normalizes common character set name spellings to a canonical name
+     * that is both iconv-compatible and present in the CharacterSetEci name table.
+     * 无法识别的拼写保持原样（交给 iconv / ECI 名称表自行裁决）。
+     */
+    private static function normalizeEncodingName(string $encoding) : string
+    {
+        $map = [
+            'utf8'                  => 'UTF-8',
+            'utf-8'                 => 'UTF-8',
+            'utf_8'                 => 'UTF-8',
+            'unicode-1-1-utf-8'     => 'UTF-8',
+            'utf8mb4'               => 'UTF-8',
+            'latin1'                => 'ISO-8859-1',
+            'latin-1'               => 'ISO-8859-1',
+            'l1'                    => 'ISO-8859-1',
+            'iso8859-1'             => 'ISO-8859-1',
+            'iso88591'              => 'ISO-8859-1',
+            'iso-8859_1'            => 'ISO-8859-1',
+            'iso_8859-1'            => 'ISO-8859-1',
+            'iso_8859_1'            => 'ISO-8859-1',
+            'cp819'                 => 'ISO-8859-1',
+            'shift-jis'             => 'Shift_JIS',
+            'shift_jis'             => 'Shift_JIS',
+            'shiftjis'              => 'Shift_JIS',
+            'sjis'                  => 'Shift_JIS',
+            'ms-kanji'              => 'Shift_JIS',
+            'x-sjis'                => 'Shift_JIS',
+            'ascii'                 => 'US-ASCII',
+            'us-ascii'              => 'US-ASCII',
+            'usascii'               => 'US-ASCII',
+            'gb2312'                => 'GB2312',
+            'euc-cn'                => 'GB2312',
+            'euc_cn'                => 'GB2312',
+            'gbk'                   => 'GBK',
+            'gb18030'               => 'GB18030',
+            'euc-kr'                => 'EUC-KR',
+            'euckr'                 => 'EUC-KR',
+            'ks_c_5601-1987'        => 'EUC-KR',
+        ];
+
+        return $map[strtolower($encoding)] ?? $encoding;
     }
 
     /**

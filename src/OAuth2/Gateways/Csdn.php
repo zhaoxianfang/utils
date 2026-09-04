@@ -79,7 +79,7 @@ class Csdn extends Gateway
      */
     public function getUserInfo()
     {
-        $this->openid();
+        $this->getToken();
         $data = $this->get(static::API_BASE . $this->UserInfoURL, [
             'access_token' => $this->token['access_token']
         ]);
@@ -100,8 +100,9 @@ class Csdn extends Gateway
      */
     public function openid()
     {
-        $this->getToken();
-        return $this->token['username'] ?? '';
+        // CSDN token 响应不含 username，需从 userinfo 接口获取
+        $result = $this->getUserInfo();
+        return $result['username'] ?? '';
     }
 
     /**

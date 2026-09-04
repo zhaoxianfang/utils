@@ -49,13 +49,9 @@ class SvgRenderer extends BaseRenderer
         $marginLeft = $this->config->marginLeft;
         $marginRight = $this->config->marginRight;
         if ($this->config->showQuietZone) {
-            $minQuietZone = 11 * $moduleSize;
-            if ($marginLeft < $minQuietZone) {
-                $marginLeft = $minQuietZone;
-            }
-            if ($marginRight < $minQuietZone) {
-                $marginRight = $minQuietZone;
-            }
+            $minQuietZone = $this->quietZoneWidthPx();
+            $marginLeft = max($marginLeft, $minQuietZone);
+            $marginRight = max($marginRight, $minQuietZone);
         }
         
         $width = $barcodeWidth + $marginLeft + $marginRight;
@@ -67,6 +63,12 @@ class SvgRenderer extends BaseRenderer
 
         if ($this->bearerBarEnabled) {
             $height += $this->bearerBarWidth * 2;
+        }
+
+        // 长竖线（保护符）从 marginTop 起绘 height×ratio 的高度：
+        // viewBox 高度必须容纳向下的延长量，否则 SVG 矢量会被视口裁剪
+        if ($this->longBarsEnabled()) {
+            $height += (int) ceil($this->config->height * ($this->longBarHeightRatio - 1));
         }
 
         $longBarPositions = $this->calculateLongBarPositions();
@@ -101,15 +103,6 @@ class SvgRenderer extends BaseRenderer
     }
 
     /**
-     * 获取Base64编码的SVG
-     */
-    public function toBase64(array $barcodeData, string $data, array $config = []): string
-    {
-        $svgData = $this->render($barcodeData, $data, $config);
-        return 'data:image/svg+xml;base64,' . base64_encode($svgData);
-    }
-
-    /**
      * 构建SVG并分析条码结构
      */
     protected function buildSvg(array $barcodeData, string $data, int $width, int $height, array $longBarPositions, int $marginLeft, int $marginRight): string
@@ -127,9 +120,10 @@ class SvgRenderer extends BaseRenderer
         $svg = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
         $svg .= '<svg xmlns="http://www.w3.org/2000/svg" width="' . $width . '" height="' . $height . '" viewBox="0 0 ' . $width . ' ' . $height . '">' . "\n";
 
-        if ($this->enableGradient) {
+        if ($this->gradientUsable()) {
             $svg .= '  <defs>' . "\n";
-            $svg .= '    <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">' . "\n";
+            // 渐变统一为水平方向（与 PNG 逐列渐变、HTML linear-gradient(to right) 一致）
+            $svg .= '    <linearGradient id="barGradient" x1="0%" y1="0%" x2="100%" y2="0%">' . "\n";
             $svg .= '      <stop offset="0%" style="stop-color:' . $this->escapeXmlAttr($this->gradientStartColor) . '"/>' . "\n";
             $svg .= '      <stop offset="100%" style="stop-color:' . $this->escapeXmlAttr($this->gradientEndColor) . '"/>' . "\n";
             $svg .= '    </linearGradient>' . "\n";
@@ -141,13 +135,13 @@ class SvgRenderer extends BaseRenderer
         }
 
         if ($this->borderWidth > 0) {
-            $borderColor = htmlspecialchars($this->borderColor, ENT_XML1, 'UTF-8');
+            $borderColor = $this->escapeXmlAttr($this->borderColor);
             $svg .= '  <rect x="0" y="0" width="' . $width . '" height="' . $height . '" fill="none" stroke="' . $borderColor . '" stroke-width="' . ($this->borderWidth * 2) . '"/>' . "\n";
         }
 
         // 绘制条码条并分析结构
         $x = $marginLeft;
-        $fillColor = $this->enableGradient ? 'url(#barGradient)' : $this->escapeXmlAttr($barColor);
+        $fillColor = $this->gradientUsable() ? 'url(#barGradient)' : $this->escapeXmlAttr($barColor);
         
         // 记录所有条的位置
         $bars = [];
@@ -172,7 +166,8 @@ class SvgRenderer extends BaseRenderer
                     $barHeight = (int)($barHeight * $this->longBarHeightRatio);
                 }
                 
-                $rx = $this->enableRoundedBars ? $this->cornerRadius : 0;
+                // 与 PNG 一致：仅当条宽足够容纳两倍圆角半径时才应用圆角
+                $rx = ($this->enableRoundedBars && $barWidth > $this->cornerRadius * 2) ? $this->cornerRadius : 0;
                 
                 $svg .= '  <rect x="' . $x . '" y="' . $this->config->marginTop . '" width="' . $barWidth . '" height="' . $barHeight . '" fill="' . $fillColor . '" rx="' . $rx . '"/>' . "\n";
             }
@@ -211,7 +206,7 @@ class SvgRenderer extends BaseRenderer
         $thickness = $this->bearerBarWidth;
         $barTop = $this->config->marginTop;
         $barBottom = $barTop + $this->config->height - 1;
-        $barColor = htmlspecialchars($this->config->barColor, ENT_XML1, 'UTF-8');
+        $barColor = $this->escapeXmlAttr($this->config->barColor);
         $boxTop = max(0, $barTop - $thickness);
         $boxBottom = $barBottom + $thickness;
         $boxHeight = $boxBottom - $boxTop + 1;
@@ -237,10 +232,12 @@ class SvgRenderer extends BaseRenderer
     {
         $opacity = round($this->watermarkOpacity / 100, 2);
         $fontSize = $this->watermarkFontSize;
-        $text = htmlspecialchars($this->watermarkText ?? '', ENT_XML1, 'UTF-8');
+        // 文本宽度按原始文本估算，避免实体化（&amp; 等）导致长度虚高
+        $rawText = $this->watermarkText ?? '';
+        $text = $this->escapeXmlAttr($rawText);
 
         // 估算文本宽度（按字符宽度为字号的0.6倍）
-        $textWidth = (int) (strlen($text) * $fontSize * 0.6);
+        $textWidth = (int) (strlen($rawText) * $fontSize * 0.6);
         $textHeight = $fontSize;
 
         $x = (int) (($width - $textWidth) / 2);
@@ -312,7 +309,7 @@ class SvgRenderer extends BaseRenderer
             return $this->buildSimpleText($data, $marginLeft);
         }
         
-        return $this->buildSegmentedText($data);
+        return $this->buildSegmentedText($data, $marginLeft);
     }
 
     /**
@@ -347,22 +344,23 @@ class SvgRenderer extends BaseRenderer
                 break;
         }
 
-        return '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="' . $anchor . '">' . htmlspecialchars($data) . '</text>' . "\n";
+        return '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="' . $anchor . '">' . $this->escapeXmlAttr($data) . '</text>' . "\n";
     }
 
     /**
      * 分段文本（长竖线特征条码）
      */
-    protected function buildSegmentedText(string $data): string
+    protected function buildSegmentedText(string $data, int $marginLeft): string
     {
         $regions = $this->barcodeStructure['regions'] ?? null;
         if ($regions === null) {
-            return '';
+            // 与 PNG/HTML 一致：无区域信息时回退为整段文本，避免文字整段消失
+            return $this->buildSimpleText($data, $marginLeft);
         }
         
         $segments = $this->determineSegments($data);
         if (empty($segments)) {
-            return '';
+            return $this->buildSimpleText($data, $marginLeft);
         }
         
         $this->calculateDynamicParameters($segments, $regions);
@@ -379,56 +377,11 @@ class SvgRenderer extends BaseRenderer
     }
 
     /**
-     * 确定分段策略
+     * 确定分段策略（与 PNG/HTML 渲染器共用 BaseRenderer 的实现）
      */
     protected function determineSegments(string $data): array
     {
-        $length = strlen($data);
-        $type = $this->barcodeType;
-        
-        switch ($type) {
-            case 'EAN-13':
-                if ($length === 13) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-                
-            case 'UPC-A':
-                if ($length === 12) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 5), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 6, 5), 'region' => 'rightData', 'type' => 'multi'],
-                        ['text' => $data[11], 'region' => 'rightQuietZone', 'type' => 'single'],
-                    ];
-                }
-                break;
-                
-            case 'EAN-8':
-                if ($length === 8) {
-                    return [
-                        ['text' => substr($data, 0, 4), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 4, 4), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-                
-            case 'ISSN':
-                if ($length === 13) {
-                    return [
-                        ['text' => $data[0], 'region' => 'leftQuietZone', 'type' => 'single'],
-                        ['text' => substr($data, 1, 6), 'region' => 'leftData', 'type' => 'multi'],
-                        ['text' => substr($data, 7, 6), 'region' => 'rightData', 'type' => 'multi'],
-                    ];
-                }
-                break;
-        }
-        
-        return [];
+        return $this->splitDisplaySegments($data);
     }
 
     /**
@@ -507,14 +460,14 @@ class SvgRenderer extends BaseRenderer
         
         if ($segment['type'] === 'single' || $length === 1) {
             $centerX = $region['center'] ?? (int)(($region['left'] + $region['right']) / 2);
-            $textElements .= '  <text x="' . $centerX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . htmlspecialchars($text) . '</text>' . "\n";
+            $textElements .= '  <text x="' . $centerX . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $this->escapeXmlAttr($text) . '</text>' . "\n";
         } else {
             $regionWidth = $region['right'] - $region['left'];
             $spacing = $regionWidth / $length;
             
             for ($i = 0; $i < $length; $i++) {
                 $x = (int)($region['left'] + $spacing * $i + $spacing / 2);
-                $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . htmlspecialchars($text[$i]) . '</text>' . "\n";
+                $textElements .= '  <text x="' . $x . '" y="' . $textY . '" font-family="Arial, sans-serif" font-size="' . $fontSize . '" fill="' . $barColor . '" text-anchor="middle">' . $this->escapeXmlAttr($text[$i]) . '</text>' . "\n";
             }
         }
         

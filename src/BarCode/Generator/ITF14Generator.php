@@ -49,45 +49,47 @@ class ITF14Generator extends BaseGenerator
     protected const STOP = '1101';
 
     /**
-     * ITF-14编码表（5个元素/数字）
-     * 
+     * ITF-14 编码表（5 个元素/数字，Interleaved 2 of 5 权威表，每数字恰 2 宽）
+     *
      * 【编码规则】：
-     * - n = 窄元素（1个窄模块宽度）
-     * - w = 宽元素（2.5-3个窄模块宽度）
-     * - 每个数字：5个元素，其中2个宽元素+3个窄元素
-     * 
+     * - n = 窄元素，w = 宽元素；5 元素中恰 2 个宽元素（C(5,2)=10 恰好映射 0-9）
+     * - 与 jsBarcode / zbar / ZXing 三家实现逐位一致（均经本地实测交叉验证）
+     * - 历史缺陷：旧表在 5/6/8/9 上宽位错位，真扫码器按标准表把内容确定性翻转
+     *   （5↔8、6↔9，如 15400141288763 被 zbar/ZXing 读成 18400141255793）
+     *
      * 交错编码方式：
-     * - 第1个数字编码为5个条（条-条-条-条-条）
-     * - 第2个数字编码为5个空（空-空-空-空-空）
+     * - 第 1 个数字编码为 5 个条，第 2 个数字编码为 5 个空
      * - 两者交错：条1-空1-条2-空2-条3-空3-条4-空4-条5-空5
-     * 
+     *
      * @var array<string, string>
      */
     protected array $encoding = [
-        '0' => 'nnwwn', // 00110: 窄窄宽宽窄（2宽3窄）
-        '1' => 'wnnnw', // 10001: 宽窄窄窄宽
-        '2' => 'nwnnw', // 01001: 窄宽窄窄宽
-        '3' => 'wwnnn', // 11000: 宽宽窄窄窄
-        '4' => 'nnwnw', // 00101: 窄窄宽窄宽
-        '5' => 'wnnwn', // 10010: 宽窄窄宽窄
-        '6' => 'nwnwn', // 01010: 窄宽窄宽窄
-        '7' => 'nnnww', // 00011: 窄窄窄宽宽
-        '8' => 'wnwnn', // 10100: 宽窄宽窄窄
-        '9' => 'nwwnn', // 01100: 窄宽宽窄窄
+        '0' => 'nnwwn', // 窄窄宽宽窄 (jsBarcode 00110)
+        '1' => 'wnnnw', // 宽窄窄窄宽 (10001)
+        '2' => 'nwnnw', // 窄宽窄窄宽 (01001)
+        '3' => 'wwnnn', // 宽宽窄窄窄 (11000)
+        '4' => 'nnwnw', // 窄窄宽窄宽 (00101)
+        '5' => 'wnwnn', // 宽窄宽窄窄 (10100)
+        '6' => 'nwwnn', // 窄宽宽窄窄 (01100)
+        '7' => 'nnnww', // 窄窄窄宽宽 (00011)
+        '8' => 'wnnwn', // 宽窄窄宽窄 (10010)
+        '9' => 'nwnwn', // 窄宽窄宽窄 (01010)
     ];
 
-    /** @var float 宽条与窄条的比例（推荐2.0-3.0） */
+    /** @var float 宽条与窄条的比例（GS1 推荐 2.25-3.0） */
     protected float $wideRatio = 2.5;
     
-    /** @var int 窄模块宽度（像素，推荐2-4像素） */
-    protected int $narrowWidth = 2;
+    /**
+     * @var int 窄元素宽度（模块级：1 模块 = renderer 的 moduleSize 像素）
+     * 默认 1 模块；宽元素 = round(窄 × wideRatio) 模块。
+     * 历史实现把窄元素当像素(默认2px)后由 renderer 再按 moduleSize 放大，
+     * 导致 moduleSize 语义翻倍，已统一为模块级。
+     */
+    protected int $narrowWidth = 1;
     
     /** @var int 静区模块数（ITF-14要求至少10个窄模块） */
     protected int $quietZoneModules = 10;
-    
-    /** @var bool 是否跳过校验位验证 */
-    protected bool $skipChecksumValidation = false;
-    
+
     /** @var string 当前处理的完整数据（含校验位） */
     protected string $currentData = '';
 
@@ -117,9 +119,11 @@ class ITF14Generator extends BaseGenerator
             throw new InvalidDataException('ITF-14 数据必须是13或14位纯数字，当前数据: ' . $data);
         }
 
-        // 处理校验位 - 移除校验位验证，保证条码内容与传入内容完全一致
+        // 处理校验位
         if (strlen($data) === 14) {
-            // 直接使用传入的14位数据，不再验证校验位
+            // 输入已含校验位：默认验证正确性（skipChecksum(true) 可跳过）。
+            // 校验位错误意味着内容本身非法（扫码器会拒读），必须报错而不是静默放行
+            $this->assertCompleteChecksum($data, 'ITF-14');
             $this->rawData = $data;
             $this->currentData = $data;
         } else {
@@ -161,18 +165,18 @@ class ITF14Generator extends BaseGenerator
             for ($j = 0; $j < 5; $j++) {
                 // digit1编码为条
                 $isWide1 = ($pattern1[$j] === 'w');
-                $width1 = $isWide1 ? (int)($this->narrowWidth * $this->wideRatio) : $this->narrowWidth;
+                $width1 = $isWide1 ? $this->wideModules() : $this->narrowWidth;
                 $binary .= str_repeat('1', $width1);
 
                 // digit2编码为空
                 $isWide2 = ($pattern2[$j] === 'w');
-                $width2 = $isWide2 ? (int)($this->narrowWidth * $this->wideRatio) : $this->narrowWidth;
+                $width2 = $isWide2 ? $this->wideModules() : $this->narrowWidth;
                 $binary .= str_repeat('0', $width2);
             }
         }
 
         // 步骤4：终止符（宽条-窄空-窄条）
-        $wideWidth = (int)($this->narrowWidth * $this->wideRatio);
+        $wideWidth = $this->wideModules();
         $binary .= str_repeat('1', $wideWidth);  // 宽条
         $binary .= str_repeat('0', $this->narrowWidth); // 窄空
         $binary .= str_repeat('1', $this->narrowWidth); // 窄条
@@ -255,25 +259,19 @@ class ITF14Generator extends BaseGenerator
     }
 
     /**
-     * 设置是否跳过校验位验证
-     * 
-     * @param bool $skip 是否跳过验证
-     * @return self 支持链式调用
+     * 计算宽元素模块数：round(窄模块数 × 宽窄比)，保证宽:窄 落在 GS1 允许区间内
      */
-    public function setSkipChecksumValidation(bool $skip): self
+    protected function wideModules(): int
     {
-        $this->skipChecksumValidation = $skip;
-        return $this;
+        return max($this->narrowWidth + 1, (int) round($this->narrowWidth * $this->wideRatio));
     }
 
     /**
      * 设置宽条与窄条的比例
      * 
      * 【比例说明】：
-     * - 推荐值：2.0 到 3.0 之间
-     * - 过小（<2.0）可能导致扫描困难
-     * - 过大（>3.0）可能导致条码过宽
      * - GS1标准要求：2.25 ≤ 宽/窄比例 ≤ 3.0
+     * - 默认 2.5；由于元素宽度按模块取整，实际宽:窄可能为 2:1 或 3:1
      * 
      * @param float $ratio 宽条与窄条的比例
      * @return self 支持链式调用
@@ -285,14 +283,12 @@ class ITF14Generator extends BaseGenerator
     }
 
     /**
-     * 设置窄模块宽度
+     * 设置窄元素宽度（模块级，1 模块 = renderer 的 moduleSize 像素）
      * 
      * 【宽度说明】：
-     * - 推荐值：2-4像素（屏幕显示）或根据打印分辨率调整
-     * - 过小可能导致扫描困难
-     * - 过大可能导致条码过宽
+     * - 默认 1 模块；如需更粗的窄条可传 2（宽元素随之取整放大，宽窄比保持）
      * 
-     * @param int $width 窄模块宽度（像素）
+     * @param int $width 窄元素模块数
      * @return self 支持链式调用
      */
     public function setNarrowWidth(int $width): self

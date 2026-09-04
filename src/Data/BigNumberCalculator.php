@@ -78,6 +78,14 @@ class BigNumberCalculator
     private static array $multiplyCache = [];  // 乘法运算缓存
     private static array $tetrationCache = []; // 幂塔运算缓存
 
+    // 缓存清理重入锁
+    //
+    // 必须存在：`updateMemoryStats()` 在峰值内存超阈值时会调用 `cleanCache(true)`，
+    // 而 `cleanCache(true)` 原实现末尾又会回调 `updateMemoryStats()`。
+    // 由于 `memory_get_peak_usage()` 是**历史峰值、永不下降**，一旦进程峰值超过
+    // MEMORY_WARNING_THRESHOLD，两个方法就会无限互调直至栈溢出。
+    private static bool $cleaning = false;
+
     /************************
      * 公开接口方法
      ************************/
@@ -1091,36 +1099,61 @@ class BigNumberCalculator
      */
     private static function cleanCache(bool $force = false): void
     {
-        $cleanRatio = $force ? 0.2 : self::CACHE_CLEAN_RATIO;
-
-        foreach (['multiplyCache', 'powerCache', 'tetrationCache'] as $cacheName) {
-            $cache = &self::${$cacheName};
-            $count = count($cache);
-            if ($count > self::CACHE_LIMIT) {
-                $cache = array_slice($cache, (int)($count * $cleanRatio), null, true);
-            }
+        // 重入保护：清理过程中禁止再次进入，避免与 updateMemoryStats() 互相递归
+        if (self::$cleaning) {
+            return;
         }
 
-        if ($force && function_exists('gc_collect_cycles')) {
-            gc_collect_cycles();
-            self::updateMemoryStats();
+        self::$cleaning = true;
+
+        try {
+            $cleanRatio = $force ? 0.2 : self::CACHE_CLEAN_RATIO;
+
+            foreach (['multiplyCache', 'powerCache', 'tetrationCache'] as $cacheName) {
+                $cache = &self::${$cacheName};
+                $count = count($cache);
+                if ($count > self::CACHE_LIMIT) {
+                    $cache = array_slice($cache, (int) ($count * $cleanRatio), null, true);
+                }
+            }
+
+            if ($force && function_exists('gc_collect_cycles')) {
+                gc_collect_cycles();
+                // 仅刷新统计数值，绝不回调 updateMemoryStats()（否则无限递归）
+                self::refreshMemoryStats();
+            }
+        } finally {
+            self::$cleaning = false;
         }
     }
 
     /**
-     * 更新内存统计信息
+     * 更新内存统计信息，并在峰值超阈值时触发缓存清理
      */
     private static function updateMemoryStats(): void
+    {
+        self::refreshMemoryStats();
+
+        // 清理过程中不再触发新的清理
+        if (self::$cleaning) {
+            return;
+        }
+
+        if (memory_get_peak_usage(true) > self::MEMORY_WARNING_THRESHOLD) {
+            self::cleanCache(true);
+        }
+    }
+
+    /**
+     * 仅刷新内存统计数值（不触发任何缓存清理）
+     */
+    private static function refreshMemoryStats(): void
     {
         $current = memory_get_usage(true);
         $peak = memory_get_peak_usage(true);
 
         self::$stats['memory']['current'] = $current;
         self::$stats['memory']['peak'] = max(self::$stats['memory']['peak'], $peak);
-
-        if ($peak > self::MEMORY_WARNING_THRESHOLD) {
-            self::cleanCache(true);
-        }
     }
 
     /**
