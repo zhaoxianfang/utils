@@ -21,6 +21,7 @@ namespace zxf\Utils\Support;
 use BadMethodCallException;
 use Closure;
 use InvalidArgumentException;
+use ReflectionIntersectionType;
 use ReflectionNamedType;
 use ReflectionProperty;
 use ReflectionUnionType;
@@ -68,9 +69,11 @@ abstract class Fluent
     /**
      * 使用数组批量设置属性
      *
-     * 仅写入存在的 public 属性，未知键被忽略（便于直接传入请求参数）。
+     * 仅写入存在的 public 可写属性，未知键与私有/只读属性被忽略（便于直接传入请求参数），
+     * 每个值都会按属性声明的类型校验，任一值不合法即抛出异常。
      *
-     * @param array<string, mixed> $attributes
+     * @param array<string, mixed> $attributes 属性名 => 属性值
+     * @return static 当前实例，便于链式调用
      *
      * @throws InvalidArgumentException 值的类型与属性声明不符时抛出
      */
@@ -92,6 +95,11 @@ abstract class Fluent
 
     /**
      * 转换为数组
+     *
+     * 等价于 get_object_vars($this) 在类内部调用的效果：返回当前对象
+     * 全部已定义属性（含 private/protected），不会包含未定义属性。
+     *
+     * @return array<string, mixed> 属性名 => 当前值
      */
     public function toArray(): array
     {
@@ -100,6 +108,13 @@ abstract class Fluent
 
     /**
      * 创建实例并填充数据
+     *
+     * 使用 new static 实例化子类，再交由 fill() 批量赋值，常用于快捷构造。
+     *
+     * @param array<string, mixed> $attributes 属性名 => 属性值
+     * @return static 填充完成的新实例
+     *
+     * @throws InvalidArgumentException 值的类型与属性声明不符时抛出
      */
     public static function make(array $attributes = []): static
     {
@@ -108,6 +123,14 @@ abstract class Fluent
 
     /**
      * 条件执行
+     *
+     * 条件为真时以当前实例为参数执行 $callback，为假且有 $default 时执行之；
+     * 两个回调的返回值都会被忽略，方法始终返回当前实例。
+     *
+     * @param bool $condition 判定条件
+     * @param Closure $callback 条件成立时执行的回调，签名 `function (static $self): void`
+     * @param Closure|null $default 条件不成立时的回调，为 null 时不执行
+     * @return static 当前实例，便于链式调用
      */
     public function when(bool $condition, Closure $callback, ?Closure $default = null): static
     {
@@ -121,6 +144,12 @@ abstract class Fluent
 
     /**
      * 条件设置属性（值为 null、空字符串或空数组时跳过）
+     *
+     * 值非空时才解析并写入属性，写入前做类型校验；注意 0 与 false 不会被跳过。
+     *
+     * @param string $property 属性名
+     * @param mixed $value 待写入的值
+     * @return static 当前实例，便于链式调用
      *
      * @throws BadMethodCallException 属性不存在或不可写时抛出
      * @throws InvalidArgumentException 值的类型与属性声明不符时抛出
@@ -142,7 +171,11 @@ abstract class Fluent
     /**
      * 解析可写的 public 属性
      *
+     * 只认可 public 且非 readonly 的属性；属性不存在或不可写时按 $silent 决定返回 null 还是抛出。
+     *
+     * @param string $name 属性名
      * @param bool $silent true 时属性不存在/不可写返回 null，false 时抛异常
+     * @return ReflectionProperty|null 可写属性反射，$silent 模式下的失败场景返回 null
      *
      * @throws BadMethodCallException silent 为 false 且属性不可写时抛出
      */
@@ -179,6 +212,13 @@ abstract class Fluent
 
     /**
      * 校验值是否符合属性声明的类型
+     *
+     * 无类型声明时不做约束；null 仅在 nullable 时通过；命名类型按内置类型或
+     * instanceof 判断；交叉类型需全部满足，联合类型命中任一即可。
+     *
+     * @param ReflectionProperty $property 目标属性反射
+     * @param mixed $value 待校验的值
+     * @return void 无返回值，校验不通过时抛异常
      *
      * @throws InvalidArgumentException 类型不符时抛出
      */
@@ -232,23 +272,43 @@ abstract class Fluent
         }
 
         // 联合/交叉类型：借助反射逐个尝试
-        foreach ($type instanceof ReflectionUnionType ? $type->getTypes() : $type->getTypes() as $named) {
+        $matchType = function (string $name) use ($value): bool {
+            return match ($name) {
+                'mixed'     => true,
+                'string'    => is_string($value),
+                'int'       => is_int($value),
+                'float'     => is_float($value) || is_int($value),
+                'bool'      => is_bool($value),
+                'array'     => is_array($value),
+                'object'    => is_object($value),
+                'iterable'  => is_iterable($value),
+                default     => $value instanceof $name,
+            };
+        };
+
+        if ($type instanceof ReflectionIntersectionType) {
+            // 交叉类型（A&B）：必须全部满足
+            foreach ($type->getTypes() as $named) {
+                if (! $named instanceof ReflectionNamedType || ! $matchType($named->getName())) {
+                    throw new InvalidArgumentException(sprintf(
+                        '属性 %s::$%s 不接受类型 %s（期望交叉类型 %s）',
+                        static::class,
+                        $property->getName(),
+                        get_debug_type($value),
+                        (string) $type
+                    ));
+                }
+            }
+
+            return;
+        }
+
+        // 联合类型：命中任一即通过
+        foreach ($type->getTypes() as $named) {
             if (! $named instanceof ReflectionNamedType) {
                 continue;
             }
-            $name = $named->getName();
-            $matched = match ($name) {
-                'mixed'   => true,
-                'string'  => is_string($value),
-                'int'     => is_int($value),
-                'float'   => is_float($value) || is_int($value),
-                'bool'    => is_bool($value),
-                'array'   => is_array($value),
-                'object'  => is_object($value),
-                'iterable' => is_iterable($value),
-                default   => $value instanceof $name,
-            };
-            if ($matched) {
+            if ($matchType($named->getName())) {
                 return;
             }
         }

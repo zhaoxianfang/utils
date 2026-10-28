@@ -15,6 +15,9 @@ use zxf\Utils\Array\DataArray;
  * $collection = new Collection([['name' => 'John', 'age' => 25], ['name' => 'Jane', 'age' => 30]]);
  * $result = $collection->where('age', '>', 25)->pluck('name')->toArray(); // ['Jane']
  *
+ * @package zxf\Utils\Data
+ * @version 1.0.0
+ * @license MIT
  * @see https://weisifang.com/docs/doc/6_203 DataArray使用文档
  */
 class Collection extends DataArray

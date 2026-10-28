@@ -23,6 +23,14 @@ class Oschina extends Gateway
     protected $AccessTokenURL = 'https://www.oschina.net/action/openapi/token';
     protected $UserInfoURL = 'action/openapi/user';
 
+    /**
+     * 获取格式化后的用户信息
+     *
+     * 调用 getUserInfo() 获取原始数据并统一映射为本 SDK 的标准用户结构，
+     * 其中性别字段按 male/female 映射为统一常量。
+     *
+     * @return array 标准化用户信息（含 open_id、nickname、avatar 等）
+     */
     public function userInfo()
     {
         $result = $this->getUserInfo();
@@ -41,6 +49,15 @@ class Oschina extends Gateway
         return $userInfo;
     }
 
+    /**
+     * 获取原始接口返回的用户信息
+     *
+     * 内部先确保已获取 access_token，再携带 access_token 与 dataType=json 调用 OSChina 接口。
+     * 解析失败时抛出 OAuthException。
+     *
+     * @return array 原始用户信息数组
+     * @throws OAuthException 当接口未返回用户标识时抛出
+     */
     public function getUserInfo()
     {
         $this->getToken();

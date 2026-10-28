@@ -57,6 +57,11 @@ final class Retry
 
     private ?Closure $onFailure = null;
 
+    /**
+     * 私有构造函数，封装待重试的回调
+     *
+     * @param Closure $callback 待重试的回调，其参数为当前尝试次数
+     */
     private function __construct(Closure $callback)
     {
         $this->callback = $callback;
@@ -64,6 +69,12 @@ final class Retry
 
     /**
      * 创建重试实例
+     *
+     * 默认参数为：最多 3 次、基础等待 100ms、退避倍数 1.0、不启用抖动；
+     * 可通过 times()/sleep()/backoff()/jitter() 链式覆盖。
+     *
+     * @param Closure $callback 待重试的回调，签名 `function (int $attempt): mixed`
+     * @return static
      */
     public static function make(Closure $callback): self
     {
@@ -72,6 +83,11 @@ final class Retry
 
     /**
      * 设置最大重试次数
+     *
+     * 实际是「最大尝试次数」（含首次调用），传入小于 1 的值会被修正为 1。
+     *
+     * @param int $maxAttempts 最大尝试次数
+     * @return self 当前实例，便于链式调用
      */
     public function times(int $maxAttempts): self
     {
@@ -81,6 +97,11 @@ final class Retry
 
     /**
      * 设置基础等待时间（毫秒）
+     *
+     * 作为退避计算的基数（第 n 次等待 = 基数 × 倍数^(n-1)），负数会被修正为 0。
+     *
+     * @param int $milliseconds 基础等待毫秒数
+     * @return self 当前实例，便于链式调用
      */
     public function sleep(int $milliseconds): self
     {
@@ -90,6 +111,11 @@ final class Retry
 
     /**
      * 设置指数退避倍数
+     *
+     * 第 n 次重试的等待时间为「基础等待 × 倍数^(n-1)」；小于 1.0 会被修正为 1.0（即固定间隔）。
+     *
+     * @param float $multiplier 退避倍数
+     * @return self 当前实例，便于链式调用
      */
     public function backoff(float $multiplier): self
     {
@@ -99,6 +125,11 @@ final class Retry
 
     /**
      * 启用随机抖动，避免惊群效应
+     *
+     * 开启后实际等待时间按 50%~100% 的随机比例缩放计算出的退避时长。
+     *
+     * @param bool $enable 是否启用抖动，默认 true
+     * @return self 当前实例，便于链式调用
      */
     public function jitter(bool $enable = true): self
     {
@@ -108,6 +139,12 @@ final class Retry
 
     /**
      * 自定义重试条件
+     *
+     * 回调接收「回调返回值 + 当前尝试次数」，返回 true 表示需要继续重试（即使未抛异常）；
+     * 未设置时仅在抛异常的情况下重试。
+     *
+     * @param Closure $callback 重试判定回调，签名 `function (mixed $result, int $attempt): bool`
+     * @return self 当前实例，便于链式调用
      */
     public function when(Closure $callback): self
     {
@@ -117,6 +154,11 @@ final class Retry
 
     /**
      * 失败时的回调
+     *
+     * 每次捕获到异常都会调用（含最后一次失败），回调抛出的异常不会被捕获。
+     *
+     * @param Closure $callback 失败回调，签名 `function (Throwable $e, int $attempt): void`
+     * @return self 当前实例，便于链式调用
      */
     public function onFailure(Closure $callback): self
     {
@@ -126,6 +168,15 @@ final class Retry
 
     /**
      * 执行重试逻辑
+     *
+     * 循环最多 maxAttempts 次：回调正常返回且未命中 when() 条件时立即返回结果；
+     * 命中 when() 条件或抛出异常则在还有剩余次数时退避等待后重试。
+     * 次数耗尽后抛出最后一次捕获的异常。
+     *
+     * @return mixed 首次成功（或未命中重试条件）时的回调返回值
+     *
+     * @throws Throwable 全部尝试失败时抛出最后一次捕获的异常
+     * @throws RuntimeException 全部尝试因 when() 条件触发而失败时抛出
      */
     public function run(): mixed
     {
@@ -169,6 +220,12 @@ final class Retry
 
     /**
      * 计算并执行等待
+     *
+     * 等待时长 = 基础等待 × 倍数^(尝试次数-1)，启用抖动时再乘以 50%~100% 的随机系数；
+     * 结果向下取整为微秒后调用 usleep()，时长不大于 0 时直接返回。
+     *
+     * @param int $attempt 当前尝试次数（从 1 开始，用于计算指数退避）
+     * @return void 无返回值
      */
     private function doSleep(int $attempt): void
     {

@@ -51,11 +51,27 @@ class Request
 
     private array $proxies = [];
 
+    /**
+     * 构造时立即从当前请求的超全局变量中采集数据
+     *
+     * 会读取 $_SERVER、$_GET、$_POST、$_FILES、$_COOKIE、$_SESSION、$_ENV 等，
+     * 因此必须在请求生命周期内使用；外部请优先通过 instance() 获取共享实例。
+     */
     public function __construct()
     {
         $this->init();
     }
 
+    /**
+     * 获取请求单例
+     *
+     * 首次调用时创建实例并采集请求数据，之后复用同一实例（不会重新读取超全局变量）；
+     * 传入 $refresh 为 true 时丢弃旧实例并重新采集，适用于常驻进程（如 Swoole）
+     * 或同一进程内模拟多次请求的场景。
+     *
+     * @param  bool  $refresh  是否强制重建实例
+     * @return static 请求实例
+     */
     public static function instance(bool $refresh = false): static
     {
         if (self::$instance === null || $refresh) {
@@ -157,6 +173,12 @@ class Request
 
     /**
      * 检查一个字符串是否为 key1=value1&key2=value2 格式的字符串
+     *
+     * 判据是「parse_str 能解析出非空结果」且「原串含有 =」。这只是格式
+     * 上的粗略判断，不保证每个片段都带 =（如 a=1&b 也会返回 true）。
+     *
+     * @param mixed $str 待判断的值，非字符串或空值直接视为否
+     * @return bool 形似 URL 编码字符串返回 true，否则返回 false
      */
     private function isUrlEncodedString(mixed $str): bool
     {
@@ -170,14 +192,18 @@ class Request
     }
 
     /**
-     * 获取请求内容
+     * 获取请求体内容，可返回原始字符串或解析后的数组
      *
-     * @param  bool  $returnOriginal  是否返回原始数据；默认为 true；
-     *                                true:返回原始数据
-     *                                false:返回解析后的数据；
-     * @param  bool  $getDataType  是否获取数据类型；默认为 false；
-     *                             true:返回数据类型；
-     *                             false:只返回请求数据；
+     * 原始内容由 getRequestRawContent() 读取并缓存到静态属性，重复调用不会重复读流。
+     * $returnOriginal 为 true 时直接返回原始字符串（可能为 null）；为 false 时依次按
+     * urlencoded、JSON、XML 解析，并合并 $_GET 与 $_POST（无 POST 时合并 $_FILES），
+     * 原始内容为空且 GET/POST/FILES 均无数据时返回空数组。
+     * 注意：构造阶段已把解析结果缓存到 $this->input，缓存非空时会直接返回缓存，
+     * 此时 $getDataType 不生效。
+     *
+     * @param  bool  $returnOriginal  true 返回原始内容，false 返回解析后的数据
+     * @param  bool  $getDataType  为 true 时返回 ['data' => 数据, 'type' => raw|json|xml]
+     * @return array|string|null 原始字符串、解析结果数组，或含 data/type 的数组
      */
     public function getRawInput(bool $returnOriginal = true, bool $getDataType = false): array|string|null
     {
@@ -239,6 +265,12 @@ class Request
     /**
      * 获取PHP原始请求内容
      *      提示：如果是混合形式的请求(例如是 $_GET 请求 但是又包含了xml 等请求体)的只返回请求体数据，不返回$_GET 数据
+     *
+     * 优先使用静态缓存；缓存为资源句柄时先 rewind 再读取，保证可重复调用。
+     * 未命中缓存时按框架探测顺序取 body，失败则退回 php://input，再退回
+     * POST/GET 的 http_build_query 结果，最后整体为空时返回 null。
+     *
+     * @return mixed 原始请求体字符串；无任何可用内容时为 null
      */
     private function getRequestRawContent(): mixed
     {
@@ -311,6 +343,11 @@ class Request
 
     /**
      * 获取请求类型
+     *
+     * 返回构造阶段由请求头推断出的 MIME 类型（如 application/json、
+     * application/x-www-form-urlencoded）。请求头缺失时返回 null。
+     *
+     * @return string|null 请求 Content-Type；无法识别时为 null
      */
     public function getContentType(): ?string
     {
@@ -318,9 +355,12 @@ class Request
     }
 
     /**
-     * 返回包含所有输入数据的单个数组
+     * 以数组形式返回解析后的输入数据
      *
-     * @return array
+     * 等价于 (array) $this->input()，即 getRawInput(false) 的解析结果（已合并
+     * GET/POST 数据）；需要原始请求体字符串时应使用 getRawInput()。
+     *
+     * @return array 解析结果数组，无任何输入时为空数组
      */
     public function body(): array
     {
@@ -328,15 +368,31 @@ class Request
     }
 
     /**
-     * 检查请求方法是否已被重写。
+     * 判断请求是否被服务器内部重定向过
      *
-     * @return bool
+     * 依据 $_SERVER['REDIRECT_STATUS'] 是否设置（Apache 的 ErrorDocument、rewrite
+     * 内部跳转会写入该值），并非检测 PUT/DELETE 之类的方法重写。
+     * 属性缺省为 []，判断方式是"与 [] 不相等"：只要该键存在，即使值为空字符串
+     * 也会返回 true。
+     *
+     * @return bool REDIRECT_STATUS 存在时返回 true
      */
     public function overridden(): bool
     {
         return $this->overridden !== [];
     }
 
+    /**
+     * 读取内部数组中的指定键，支持默认值
+     *
+     * 各 get()/post()/files() 等访问器共用的取值实现：$key 为 null 时返回整个
+     * 数组，否则返回对应键，键不存在（或值为 null）时返回 $default。
+     *
+     * @param  array  $data  数据源
+     * @param  int|string|null  $key  键名；null 表示返回全部
+     * @param  mixed  $default  键不存在时的默认值
+     * @return mixed 取到的值或 $default
+     */
     private function parseData(array $data, int|string|null $key = null, mixed $default = null): mixed
     {
         if ($key === null) {
@@ -347,22 +403,27 @@ class Request
     }
 
     /**
-     * 获取get数组中项目的值。
+     * 获取 $_GET 数组中项目的值
+     *
+     * 不传 $key 时返回整个 $_GET 数组；仅读取构造时快照，运行期新增的 $_GET
+     * 数据不会反映到结果中。
      *
      * <code>
-     *   // 从$_Get数组中获取用户名变量。
-     *   $username = Request::get('username');
+     *   $request = Request::instance();
+     *
+     *   // 从 $_GET 数组中获取 username 变量。
+     *   $username = $request->get('username');
      *
      *   // 如果请求的项未定义，则返回默认值。
-     *   $username = Request::get('username', 'Fred Nurk');
+     *   $username = $request->get('username', 'Fred Nurk');
      *
-     *   // 返回$_GET数组中的所有输入数据。
-     *   $input = Request::get();
+     *   // 返回 $_GET 数组中的所有数据。
+     *   $input = $request->get();
      * </code>
      *
      * @param  string|null  $key  数组的键值
      * @param  mixed  $default  默认值
-     * @return mixed 如果键未定义，则为NULL。
+     * @return mixed 键不存在时返回 $default（默认为 NULL）
      */
     public function get(?string $key = null, mixed $default = null): mixed
     {
@@ -370,11 +431,14 @@ class Request
     }
 
     /**
-     * 获取$_POST数组中项目的值。
+     * 获取 $_POST 数组中项目的值
+     *
+     * 仅包含 PHP 已解析的表单体（application/x-www-form-urlencoded、multipart/form-data）；
+     * application/json、text/xml 等请求体不在 $_POST 中，需要用 getRawInput() 读取。
      *
      * @param  string|null  $key  数组的键值
      * @param  mixed  $default  默认值
-     * @return mixed 如果键未定义，则为NULL。
+     * @return mixed 键不存在时返回 $default（默认为 NULL）
      */
     public function post(?string $key = null, mixed $default = null): mixed
     {
@@ -382,10 +446,15 @@ class Request
     }
 
     /**
-     * 追加post数据
+     * 向 $_POST 数据中追加键值
      *
-     * @param  string|array  $keys  需要批量添加时传入二维数组，单个添加时候传入字符串
-     * @param  mixed  $value  被追加的值，$keys为字符串时候生效
+     * 传字符串键时写入单个键值（已存在则覆盖）；传二维数组时按数组 keys 批量
+     * 合并，使用 "+" 运算，因此已存在的同名键会保留原值、不被新值覆盖。
+     * 注意只有多维数组才走批量分支，一维数组会落入单键分支（数组作键会报错）。
+     * $keys 为空时直接返回，不产生任何修改。
+     *
+     * @param  string|array  $keys  键名；批量追加时传二维数组
+     * @param  mixed  $value  键对应的值，仅在 $keys 为字符串时生效
      * @return $this
      */
     public function addPost(string|array $keys = '', mixed $value = null): static
@@ -404,10 +473,13 @@ class Request
     }
 
     /**
-     * 追加get数据
+     * 向 $_GET 数据中追加键值
      *
-     * @param  array|string  $keys  需要批量添加时传入二维数组，单个添加时候传入字符串
-     * @param  mixed|null  $value  被追加的值，$keys为字符串时候生效
+     * 行为与 addPost() 一致：字符串键写入单值，二维数组按 "+" 批量合并（已有键
+     * 保留原值）；仅修改本实例的属性，不会改写超全局变量 $_GET。
+     *
+     * @param  array|string  $keys  键名；批量追加时传二维数组
+     * @param  mixed|null  $value  键对应的值，仅在 $keys 为字符串时生效
      * @return $this
      */
     public function addGet(array|string $keys = '', mixed $value = null): static
@@ -426,12 +498,14 @@ class Request
     }
 
     /**
-     * 获取通过PUT提交的项的值
-     * method (either spoofed or via REST).
+     * 获取 PUT 请求提交的项的值
+     *
+     * 仅当请求方法为 PUT 时从 $_POST 数据中取值（PHP 不会自动填充 PUT 的 body，
+     * 需要业务侧自行解析后通过 addPost() 注入）；其他请求方法一律返回 $default。
      *
      * @param  string|null  $key  数组的键值
      * @param  mixed  $default  默认值
-     * @return string
+     * @return mixed 取到的值；方法不匹配或键不存在时返回 $default
      */
     public function put(?string $key = null, mixed $default = null): mixed
     {
@@ -439,12 +513,14 @@ class Request
     }
 
     /**
-     * 获取通过DELETE提交的项目的值
-     * method (either spoofed or via REST).
+     * 获取 DELETE 请求提交的项的值
+     *
+     * 仅当请求方法为 DELETE 时从 $_POST 数据中取值（DELETE 的 body 同样不会被
+     * PHP 自动解析）；其他请求方法一律返回 $default。
      *
      * @param  string|null  $key  数组的键值
      * @param  mixed  $default  默认值
-     * @return string
+     * @return mixed 取到的值；方法不匹配或键不存在时返回 $default
      */
     public function delete(?string $key = null, mixed $default = null): mixed
     {
@@ -452,11 +528,15 @@ class Request
     }
 
     /**
-     * 获取$_FILES数组中项目的值。
+     * 获取 $_FILES 数组中项目的值
+     *
+     * 单个上传文件的结构与 PHP 原生一致（name/type/tmp_name/error/size）；
+     * 文件信息主要保存在 $_FILES 中，需用本方法读取（input() 只有在没有 POST
+     * 数据时才会把 files 合并进来）。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function files(?string $key = null, mixed $default = null)
     {
@@ -464,11 +544,13 @@ class Request
     }
 
     /**
-     * 获取$_SESSION数组中项目的值。
+     * 获取 $_SESSION 数组中项目的值
+     *
+     * 取自构造时读取的 $_SESSION 快照；若未调用 session_start()，结果为默认值。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function session(?string $key = null, mixed $default = null)
     {
@@ -476,11 +558,14 @@ class Request
     }
 
     /**
-     * 获取$_COOKIE数组中项目的值。
+     * 获取 $_COOKIE 数组中项目的值
+     *
+     * 读取的是解析后的 Cookie 键值，不含原始 Cookie 头文本；原始头可通过
+     * headers('COOKIE') 获取。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function cookie(?string $key = null, mixed $default = null)
     {
@@ -488,11 +573,14 @@ class Request
     }
 
     /**
-     * 获取$_ENV数组中项目的值。
+     * 获取 $_ENV 数组中项目的值
+     *
+     * 注意 $_ENV 是否填充取决于 php.ini 的 variables_order 是否包含 "E"，
+     * 未开启时通常只能读到默认值（读环境变量更可靠的方式是 getenv()）。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function env(?string $key = null, mixed $default = null)
     {
@@ -500,11 +588,14 @@ class Request
     }
 
     /**
-     * 获取$_SERVER数组中项的值。
+     * 获取 $_SERVER 数组中项的值
+     *
+     * 常用于读取 REQUEST_URI、REMOTE_ADDR、REQUEST_TIME 等；键名大小写敏感，
+     * 需与 $_SERVER 中的实际键一致（如 HTTPS 而非 https）。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function server(?string $key = null, mixed $default = null): mixed
     {
@@ -514,8 +605,12 @@ class Request
     /**
      * 获取请求头
      *
+     * 键名统一转为大写（如 CONTENT-TYPE、USER-AGENT、AUTHORIZATION）；
+     * 优先使用 apache_request_headers()/getallheaders()，不可用时从 $_SERVER 重建。
      *
-     * @return array|mixed|string
+     * @param  string|null  $key  头名称（大写）
+     * @param  mixed  $default  头不存在时的默认值
+     * @return mixed 不传 $key 时返回全部请求头数组，否则返回指定头或 $default
      */
     public function headers(?string $key = null, mixed $default = null)
     {
@@ -523,11 +618,14 @@ class Request
     }
 
     /**
-     * 从通过Get、POST、PUT或DELETE提交的输入数据中获取项目的值。
+     * 获取请求输入数据（请求体解析结果）中项目的值
+     *
+     * 数据来源为 getRawInput(false) 的解析结果，已合并 $_GET、$_POST 等，
+     * 因此 JSON/XML 请求体也能取到；通常不含 $_FILES（仅在没有 POST 数据时合并）。
      *
      * @param  string|null  $key  数组的键值
      * @param  mixed  $default  默认值
-     * @return string
+     * @return mixed 键不存在时返回 $default
      */
     public function input(?string $key = null, mixed $default = null): mixed
     {
@@ -535,11 +633,14 @@ class Request
     }
 
     /**
-     * 从通过Get、POST、PUT、DELETE或FILES提交的输入数据中获取项的值。
+     * 聚合全部来源的输入数据后取值
+     *
+     * 按 input + post + get + files 的顺序用 "+" 合并，同名键以靠前者为准
+     * （input 优先，files 最低）；不传 $key 时返回合并后的完整数组。
      *
      * @param  string|null  $key  数组的键值
-     * @param  string  $default  默认值
-     * @return string
+     * @param  mixed  $default  默认值
+     * @return mixed 键不存在时返回 $default
      */
     public function all(?string $key = null, mixed $default = null)
     {
@@ -547,18 +648,23 @@ class Request
     }
 
     /**
-     * 从输入数据中获取项目的子集。
+     * 从输入数据中截取指定键的子集
+     *
+     * 以 input() 的解析结果为数据源，仅保留 $keys 中列出的键（键不存在时被忽略），
+     * 返回顺序与数据源一致；需要按来源（GET/POST/FILES）区分时请使用对应访问器。
      *
      * <code>
-     *   // 仅从输入数据中获取电子邮件变量。
-     *   $email = Request::only('email');
+     *   $request = Request::instance();
      *
-     *   // 仅从输入数据中获取用户名和电子邮件。
-     *   $input = Request::only(array('username', 'email'));
+     *   // 仅从输入数据中获取 email。
+     *   $email = $request->only('email');
+     *
+     *   // 仅从输入数据中获取 username 和 email。
+     *   $input = $request->only(['username', 'email']);
      * </code>
      *
-     * @param  array|string  $keys  The keys to select from the input.
-     * @return array
+     * @param  array|string  $keys  要保留的键，支持单个字符串或键数组
+     * @return array 仅包含已存在键的关联数组，可能为空数组
      */
     public function only(array|string $keys): array
     {
@@ -568,18 +674,23 @@ class Request
     }
 
     /**
-     * 获取除指定项或项数组之外的所有输入数据。
+     * 从输入数据中排除指定键
+     *
+     * 与 only() 互补，同样以 input() 的解析结果为数据源；$keys 中不存在的键
+     * 不影响结果，剩余键保持原有顺序。
      *
      * <code>
-     *   // 获取除用户名之外的所有输入数据。
-     *   $input = Request::except('username');
+     *   $request = Request::instance();
      *
-     *   // 获取除用户名和电子邮件之外的所有输入数据。
-     *   $input = Request::except(array('username', 'email'));
+     *   // 获取除 username 之外的所有输入数据。
+     *   $input = $request->except('username');
+     *
+     *   // 获取除 username 和 email 之外的所有输入数据。
+     *   $input = $request->except(['username', 'email']);
      * </code>
      *
-     * @param  array|string  $keys  要从输入中忽略的键。
-     * @return array
+     * @param  array|string  $keys  要排除的键，支持单个字符串或键数组
+     * @return array 排除后的关联数组
      */
     public function except(array|string $keys): array
     {
@@ -589,20 +700,24 @@ class Request
     }
 
     /**
-     * 检查输入数据是否包含项或所有指定的项数组。
+     * 判断输入数据中是否存在指定键且值非空
      *
-     * 如果任何输入项为空字符串，将返回FALSE。
+     * 逐个用 input($key) 取值：值为 null，或转成字符串并去掉空白后为空字符串即视为
+     * 不存在（因此 false 与空字符串等价）；"0"、0 等非空值算存在。
+     * 传数组时要求**全部**键都存在才返回 true，任一不满足立即返回 false。
      *
      * <code>
-     *   // 请求信息中是否存在id
-     *   if (Request::has('id')) { echo 'The `id` exists.'; }
+     *   $request = Request::instance();
      *
-     *   // 请求信息中是否id 和 name 都存在？
-     *   if (Request::has(array('id', 'name'))) { // do stuff }
+     *   // 请求信息中是否存在 id
+     *   if ($request->has('id')) { echo 'The `id` exists.'; }
+     *
+     *   // 请求信息中 id 和 name 是否都存在？
+     *   if ($request->has(['id', 'name'])) { // do stuff }
      * </code>
      *
-     * @param  array|string  $keys  输入数据键或键数组。
-     * @return bool
+     * @param  array|string  $keys  单个键或键数组
+     * @return bool 全部键存在且非空返回 true，否则 false
      */
     public function has(array|string $keys)
     {
@@ -645,9 +760,12 @@ class Request
     }
 
     /**
-     * 检查请求是否通过HTTPS进行。
+     * 判断请求是否通过 HTTPS 访问
      *
-     * @return bool
+     * 优先检查 $_SERVER['HTTPS'] 是否为 ON/on；否则仅在处于受信代理之后时，
+     * 才参考 SSL_HTTPS 与 X_FORWARDED_PROTO 头，避免客户端直接伪造协议头。
+     *
+     * @return bool 通过 HTTPS 访问返回 true
      */
     public function secure()
     {
@@ -700,6 +818,10 @@ class Request
 
     /**
      * 检查请求是否为AJAX请求。
+     *
+     * 依据请求头 X-Requested-With 是否等于 XMLHTTPREQUEST（忽略大小写）。
+     *
+     * @return bool 是 AJAX 请求返回 true，否则返回 false
      */
     public function isAjax(): bool
     {
@@ -707,34 +829,57 @@ class Request
     }
 
     /**
-     * 当前是否Pjax请求
+     * 判断当前是否为 Pjax 请求
      *
+     * 依据请求头 X-PJAX 是否存在且非空。$pjax 为 true 时把该头的原始值作为结果
+     * 返回（常用于同时下发版本标识），为 false 时只返回布尔结果。
      *
-     * @param  bool  $pjax  true 获取原始pjax请求
+     * @param  bool  $pjax  是否返回 X-PJAX 头的原始值
+     * @return bool|string 非 Pjax 请求为 false；$pjax 为 true 时为头原始值
      */
-    public function isPjax(bool $pjax = false): bool
+    public function isPjax(bool $pjax = false): bool|string
     {
-        return ! empty($val = $this->server('HTTP_X_PJAX')) ? ($pjax ? $val : true) : false;
+        $val = $this->server('HTTP_X_PJAX');
+
+        if (empty($val)) {
+            return false;
+        }
+
+        // $pjax 为 true 时返回原始头值（字符串），否则仅返回布尔判定
+        return $pjax ? (string) $val : true;
     }
 
+    /**
+     * 判断当前请求是否为 POST
+     *
+     * @return bool REQUEST_METHOD 为 POST 时返回 true
+     */
     public function isPost(): bool
     {
         return $this->method() == 'POST';
     }
 
+    /**
+     * 判断当前请求是否为 GET
+     *
+     * @return bool REQUEST_METHOD 为 GET（或未提供时默认值）返回 true
+     */
     public function isGet(): bool
     {
         return $this->method() == 'GET';
     }
 
     /**
-     * 获取网页是从哪个页面链接过来的
+     * 获取来源页 URL（Referer）
      *
-     * @param  null  $default  默认值
+     * 读取 `HTTP_REFERER` 请求头（PHP 注入时即为该拼写），缺失时返回 $default。
+     *
+     * @param  mixed  $default  请求头缺失时返回的默认值
+     * @return array|string|null 来源页 URL；缺失时返回 $default
      */
     public function referrer($default = null): array|string|null
     {
-        return $this->server('HTTP_REFERRER', $default);
+        return $this->server('HTTP_REFERER', $default);
     }
 
     /**
@@ -763,6 +908,10 @@ class Request
 
     /**
      * 获取请求的URL. e.g. http://a.com/bar?q=foo
+     *
+     * 由协议、主机、端口、路径与查询串依次拼接而成，端口为默认值时省略。
+     *
+     * @return string 完整请求 URL
      */
     public function fullUrl(): string
     {
@@ -812,7 +961,17 @@ class Request
      */
     public function segments(array $default = [])
     {
-        return explode('/', trim($this->uri() ?: $default, '/'));
+        // uri() 可能为空（例如 CLI 环境）：此时回退到 $default。
+        // $default 是数组，必须先拼成字符串，否则 trim(array, '/') 会抛 TypeError。
+        $uri = $this->uri();
+
+        if ($uri === null || $uri === '') {
+            $uri = implode('/', $default);
+        }
+
+        $uri = trim($uri, '/');
+
+        return $uri === '' ? [] : explode('/', $uri);
     }
 
     /**
@@ -848,6 +1007,11 @@ class Request
         $result = [];
 
         foreach (array_reverse(explode(',', $terms)) as $part) {
+            // 防御性裁剪：HTTP 请求头由客户端完全控制，限制单个片段长度，
+            // 避免超长/恶意输入让正则引擎产生大量回溯而耗尽 CPU（ReDoS 加固）。
+            if (strlen($part) > 512) {
+                $part = substr($part, 0, 512);
+            }
             if (preg_match("/{$regex}/", $part, $m)) {
                 $quality = $m['quality'] ?? 1;
                 $result[$m['term']] = $quality;
@@ -881,7 +1045,7 @@ class Request
     {
         return $this->parse(
             $this->server('HTTP_ACCEPT_LANGUAGE', 'en'),
-            '(?P<term>[\w\-]+)+(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
+            '(?P<term>[\w\-]+)(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
         );
     }
 
@@ -894,7 +1058,7 @@ class Request
     {
         return $this->parse(
             $this->server('HTTP_ACCEPT', 'text/html'),
-            '(?P<term>[\w\-\+\/\*]+)+(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
+            '(?P<term>[\w\-\+\/\*]+)(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
         );
     }
 
@@ -919,7 +1083,7 @@ class Request
     public function charsets()
     {
         return $this->parse(
-            $this->server('HTTP_ACCEPT_CHARSET', 'utf-8'), '(?P<term>[\w\-\*]+)+(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
+            $this->server('HTTP_ACCEPT_CHARSET', 'utf-8'), '(?P<term>[\w\-\*]+)(?:;q=(?P<quality>[0-9]+\.[0-9]+))?'
         );
     }
 
@@ -1002,6 +1166,10 @@ class Request
 
     /**
      * 获取当前包含协议的域名
+     *
+     * 结果形如 https://example.com，不含端口与路径。
+     *
+     * @return string 协议加主机名
      */
     public function domain(): string
     {
@@ -1009,16 +1177,17 @@ class Request
     }
 
     /**
-     * 获取客户端IP地址。
+     * 获取客户端 IP 地址
      *
-     * 默认情况下，HTTP_CLIENT_IP受信任。如果不信任此标头，请使用FALSE调用该方法。
-     * 如果HTTP_CLIENT_IP无效或被排除，将返回通过可信代理服务器获得的有效IP地址或REMOTE_ADDR。
-     * 忽略无效、专用和保留的IP地址。
+     * 仅当通过 setProxies() 配置了受信代理、且直连的 REMOTE_ADDR 命中其中一项时，
+     * 才采信 X-Forwarded-For / X-Forwarded / Forwarded-For / Forwarded 头（多个地址
+     * 取逗号分隔后的最后一个），$trusted 为 true 时才会额外采信 Client-IP 头；
+     * 未经受信代理时这些头一律忽略，以防客户端伪造。
+     * 候选项需能通过 FILTER_VALIDATE_IP 且不属于私有/保留网段，全部不合法时回退到
+     * REMOTE_ADDR，仍然没有则返回 0.0.0.0。
      *
-     * 如果无法获得有效的IP地址。 返回 0.0.0.0
-     *
-     * @param  bool  $trusted  信任客户端通过HTTP_client_IP设置的IP地址。
-     * @return string
+     * @param  bool  $trusted  是否采信 Client-IP 头（仍要求处于受信代理之后）
+     * @return string 客户端 IP 地址
      */
     public function ip($trusted = true)
     {
@@ -1055,6 +1224,12 @@ class Request
 
     /**
      * 检测是否使用手机访问
+     *
+     * 依次判断 HTTP_VIA 是否含 wap、HTTP_ACCEPT 是否声明 WAP、是否带
+     * X-WAP-PROFILE/HTTP_PROFILE，最后用 User-Agent 正则匹配常见移动端标识。
+     * 任一条命中即视为移动端，不做 UA 真伪校验。
+     *
+     * @return bool 判定为移动端返回 true，否则返回 false
      */
     public function isMobile(): bool
     {

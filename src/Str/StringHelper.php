@@ -10,9 +10,16 @@ use InvalidArgumentException;
  * 字符串处理工具类
  * 提供命名风格转换、内容判断、掩码脱敏、相似度计算等常用字符串操作
  *
- * @package Str
+ * @package zxf\Utils\Str
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * use zxf\Utils\Str\StringHelper;
+ * StringHelper::camel('foo-bar');          // 'fooBar'
+ * StringHelper::maskMobile('13812345678'); // '138****5678'
+ * StringHelper::slug('Hello World');       // 'hello-world'
+ * StringHelper::similarity('abc', 'abd');  // 约 0.67
  */
 class StringHelper
 {
@@ -25,7 +32,10 @@ class StringHelper
     private string $value;
 
     /**
+     * 构造函数
+     *
      * @param string $value 实例初始字符串
+     * @return void
      */
     public function __construct(string $value = '')
     {
@@ -34,6 +44,8 @@ class StringHelper
 
     /**
      * 获取实例持有的字符串
+     *
+     * @return string 当前持有的字符串
      */
     public function value(): string
     {
@@ -41,7 +53,9 @@ class StringHelper
     }
 
     /**
-     * 字符串化
+     * 字符串化（对象当作字符串使用时返回所持有的字符串）
+     *
+     * @return string 当前持有的字符串
      */
     public function __toString(): string
     {
@@ -276,8 +290,15 @@ class StringHelper
      * 按字符（而非字节）计算 Levenshtein 编辑距离
      *
      * 使用滚动数组的动态规划实现，空间复杂度 O(min(n, m))。
+     * 纯 ASCII 且两串长度均不超过 255 时直接调用原生 levenshtein()，
+     * 其余情况按 UTF-8 字符切分后自行计算，中英文混排也按字符计距离。
+     * 任一参数为空串时返回另一串的字符数。
      *
-     * @throws InvalidArgumentException 字符串过长时抛出
+     * @param string $a 第一个字符串
+     * @param string $b 第二个字符串
+     * @return int 编辑距离（把 $a 变成 $b 所需的最少单字符增/删/改次数）
+     *
+     * @throws InvalidArgumentException 任一侧字符数超过上限时抛出
      */
     public static function levenshteinDistance(string $a, string $b): int
     {

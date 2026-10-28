@@ -70,10 +70,16 @@ class FileCache
     /**
      * 写入缓存
      *
-     * @param string $key   缓存键名
+     * 键名先经 PSR-16 规则校验，非法键直接抛异常；随后按 md5 分片定位文件，
+     * 目录不存在时自动创建。$ttl 为负数时回落到构造时设置的默认 TTL，
+     * 为 0 表示永不过期。写入采用「临时文件 + rename」的原子替换，
+     * 序列化失败（如 JSON 模式下存在非法 UTF-8）返回 false 且不落盘。
+     *
+     * @param string $key   缓存键名，长度不超过 64 且不得包含 {}()/\@: 等保留字符
      * @param mixed  $value 缓存值（任意可序列化类型）
      * @param int    $ttl   过期时间（秒），0 为永不过期，负数使用默认 TTL
-     * @return bool 写入成功返回 true
+     * @return bool 写入成功返回 true；目录不可写或序列化失败返回 false
+     * @throws RuntimeException 缓存键非法时抛出
      */
     public function set(string $key, mixed $value, int $ttl = -1): bool
     {
@@ -102,9 +108,13 @@ class FileCache
     /**
      * 读取缓存
      *
+     * 文件不存在、内容为空或载荷结构损坏时返回 $default；
+     * 若载荷已过期，会顺带删除该缓存文件再返回 $default。
+     *
      * @param string $key     缓存键名
-     * @param mixed  $default 缓存不存在或已过期时的默认值
-     * @return mixed 缓存值或默认值
+     * @param mixed  $default 缓存不存在、已过期或损坏时的默认值
+     * @return mixed 命中时返回原始缓存值（可能为 null），否则返回 $default
+     * @throws RuntimeException 缓存键非法时抛出
      */
     public function get(string $key, mixed $default = null): mixed
     {
@@ -156,8 +166,12 @@ class FileCache
     /**
      * 删除缓存
      *
+     * 只有文件真实存在时才尝试 unlink；文件本就不存在视为删除成功（幂等），
+     * 因此重复调用不会报错。
+     *
      * @param string $key 缓存键名
-     * @return bool 删除成功（或本就不存在）返回 true
+     * @return bool 删除成功（或本就不存在）返回 true，unlink 失败返回 false
+     * @throws RuntimeException 缓存键非法时抛出
      */
     public function delete(string $key): bool
     {
@@ -204,8 +218,12 @@ class FileCache
     /**
      * 批量写入缓存
      *
+     * 遍历写入，单个键失败不会中断后续键的处理；整型键会被强制转为字符串，
+     * 避免 strict_types 下触发 TypeError。返回值只反映「是否全部成功」，
+     * 不做整体回滚，因此可能出现部分键已写入的情况。
+     *
      * @param array<int|string, mixed> $items 键值对数组，如 ['key1' => 'value1', 2 => 'value2']
-     * @param int                      $ttl   过期时间（秒），-1 使用默认 TTL
+     * @param int                      $ttl   过期时间（秒），0 永不过期，-1 使用默认 TTL
      * @return bool 全部写入成功返回 true，任一失败返回 false
      */
     public function setMultiple(array $items, int $ttl = -1): bool
@@ -224,9 +242,12 @@ class FileCache
     /**
      * 批量读取缓存
      *
+     * 逐个复用 get() 读取，未命中或已过期的键在结果中填入 $default；
+     * 整型键会被转为字符串后再查询，但结果数组仍以原始键名索引。
+     *
      * @param array<int|string> $keys    缓存键名数组
-     * @param mixed             $default 默认值
-     * @return array<int|string, mixed> 以键名为索引的结果数组
+     * @param mixed             $default 缓存不存在或已过期时使用的默认值
+     * @return array<int|string, mixed> 以键名为索引的结果数组，顺序与 $keys 一致
      */
     public function getMultiple(array $keys, mixed $default = null): array
     {
@@ -240,6 +261,9 @@ class FileCache
 
     /**
      * 批量删除缓存
+     *
+     * 逐个调用 delete()，删除不存在的键也算成功，因此重复批量删除是幂等的；
+     * 单个键失败不会中断后续键的删除。
      *
      * @param array<int|string> $keys 缓存键名数组
      * @return bool 全部删除成功返回 true，任一失败返回 false
@@ -268,6 +292,11 @@ class FileCache
 
     /**
      * 获取缓存目录
+     *
+     * 返回构造时传入的目录路径（已去掉结尾的斜杠与反斜杠），
+     * 不校验该目录当前是否存在或可写。
+     *
+     * @return string 缓存文件存储目录的绝对路径或相对路径
      */
     public function getCacheDir(): string
     {
@@ -293,6 +322,15 @@ class FileCache
 
     /**
      * 以独占锁执行数值增减
+     *
+     * 使用 'c+' 模式打开文件并加 LOCK_EX 独占锁，在锁内完成「读 → 过期判定
+     * → 加步长 → 截断重写」的完整流程，保证并发计数不丢失。
+     * 已过期的旧值按 0 起算，写回时统一使用默认 TTL。
+     * 目录创建失败、文件无法打开、加锁失败或序列化失败时返回 0（即计数未生效）。
+     *
+     * @param string $key  缓存键名，调用方需保证已通过合法性校验
+     * @param int    $step 增减步长，正数递增、负数递减
+     * @return int 增减后的数值，失败时返回 0
      */
     private function delta(string $key, int $step): int
     {
@@ -347,6 +385,14 @@ class FileCache
 
     /**
      * 原子写入：先写临时文件再 rename，避免并发读取到不完整内容
+     *
+     * 临时文件名为「目标文件 + .tmp.<pid>」，写入后 rename 覆盖目标；
+     * 若 rename 失败（如 Windows 下目标被占用）会先清理临时文件，
+     * 再退回直接覆盖写入。
+     *
+     * @param string $file    目标文件完整路径
+     * @param string $content 待写入的序列化载荷
+     * @return bool 写入成功返回 true，写临时文件与回退写入均失败时返回 false
      */
     private function atomicWrite(string $file, string $content): bool
     {
@@ -367,7 +413,15 @@ class FileCache
     }
 
     /**
-     * 序列化缓存载荷，失败返回 null
+     * 序列化缓存载荷
+     *
+     * 按构造参数选择 PHP 序列化或 JSON 编码；JSON 模式启用
+     * JSON_UNESCAPED_UNICODE 与 JSON_PRESERVE_ZERO_FRACTION，
+     * 遇到非 UTF-8 字符串或递归引用等编码失败情形返回 null，
+     * 由调用方中止写入，避免把空内容落盘导致缓存静默丢失。
+     *
+     * @param array<string, mixed> $data 含 expires 与 value 的缓存载荷
+     * @return string|null 序列化后的字符串，编码失败返回 null
      */
     private function encode(array $data): ?string
     {
@@ -383,7 +437,14 @@ class FileCache
     }
 
     /**
-     * 反序列化缓存载荷，失败返回 null
+     * 反序列化缓存载荷
+     *
+     * 序列化模式下限定 allowed_classes=false，杜绝反序列化出任意对象引发 POP 链攻击；
+     * JSON 模式按关联数组解析。解析结果不是数组（含内容损坏、类型不符）时返回 null，
+     * 由调用方按「未命中」处理。
+     *
+     * @param string $content 从缓存文件读到的原始内容
+     * @return array<string, mixed>|null 解析成功返回载荷数组，失败返回 null
      */
     private function decode(string $content): ?array
     {
@@ -401,6 +462,13 @@ class FileCache
 
     /**
      * 确保目录存在且可写
+     *
+     * 目录已存在时仅做可写判断；不存在则递归创建（权限 0755）。
+     * 创建后仍不可写时返回 false，由调用方决定是否中止写入。
+     *
+     * @param string $dir 目录路径
+     * @return bool 目录存在且可写返回 true，存在但不可写返回 false
+     * @throws RuntimeException 目录无法创建时抛出
      */
     private function ensureDirectory(string $dir): bool
     {
@@ -418,7 +486,12 @@ class FileCache
     /**
      * 校验缓存键合法性（遵循 PSR-16 约定）
      *
-     * @throws RuntimeException 键非法时抛出
+     * 依次检查三项：键不能为空串、长度不得超过 64 个字符、
+     * 不得包含 {}()/\@: 等保留字符。任一不满足即抛出异常。
+     *
+     * @param string $key 待校验的缓存键名
+     * @return void
+     * @throws RuntimeException 键为空、超长或含保留字符时抛出
      */
     private function assertValidKey(string $key): void
     {
@@ -485,6 +558,11 @@ class FileCache
 
     /**
      * 获取未命中哨兵实例（每个进程共享同一个对象引用）
+     *
+     * 首次调用时惰性创建一个 stdClass 并缓存在静态属性上，后续调用返回同一引用。
+     * 由于对象比较默认按引用，has() 可借此区分「值为 null」与「键不存在」。
+     *
+     * @return object 进程内唯一的哨兵对象
      */
     private static function missSentinel(): object
     {

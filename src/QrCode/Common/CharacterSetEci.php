@@ -94,6 +94,11 @@ final class CharacterSetEci extends AbstractEnum
 
     /**
      * 返回主值
+     *
+     * 一个字符集可能对应多个 ECI 编号（如 UTF-8 有多个历史编号），
+     * 此处固定取构造时传入数组的第一个元素作为该字符集的代表编号。
+     *
+     * @return int 该字符集的主 ECI 编号
      */
     public function getValue() : int
     {
@@ -103,8 +108,11 @@ final class CharacterSetEci extends AbstractEnum
     /**
      * 通过值获取字符集ECI
      *
-     * 返回给定值的代表ECI，如果合法但不支持则返回null
+     * 返回给定值的代表ECI，如果合法但不支持则返回null。
+     * 映射表在首次调用时构建并静态缓存，后续命中缓存。
      *
+     * @param int $value ECI 编号，须在 0~899 之间
+     * @return self|null 匹配到的字符集；编号越界时抛异常，未被收录时返回 null
      * @throws InvalidArgumentException 如果值不在0到900之间
      */
     public static function getCharacterSetEciByValue(int $value) : ?self
@@ -121,7 +129,11 @@ final class CharacterSetEci extends AbstractEnum
     /**
      * 通过名称返回字符集ECI
      *
-     * 返回给定名称的代表ECI，如果合法但不支持则返回null
+     * 返回给定名称的代表ECI，如果合法但不支持则返回null。名称匹配不区分
+     * 大小写，并同时认字符集的标准名与别名（如 utf8 与 UTF-8）。
+     *
+     * @param string $name 字符集名称，例如 'UTF-8'
+     * @return self|null 匹配到的字符集；名称未被收录时返回 null
      */
     public static function getCharacterSetEciByName(string $name) : ?self
     {
@@ -133,6 +145,11 @@ final class CharacterSetEci extends AbstractEnum
 
     /**
      * 值到ECI的映射
+     *
+     * 遍历全部内置字符集，把每个 ECI 编号（含同一字符集的多个编号）指向
+     * 对应的字符集实例；结果写入静态属性，只在首次调用时构建一次。
+     *
+     * @return array<int, self> 以 ECI 编号为键、字符集实例为值的映射表
      */
     private static function valueToEci() : array
     {
@@ -153,6 +170,12 @@ final class CharacterSetEci extends AbstractEnum
 
     /**
      * 名称到ECI的映射
+     *
+     * 把每个字符集的标准名及其全部别名统一转成小写后作为键，指向对应的
+     * 字符集实例（因此查找天然不区分大小写）；结果静态缓存，仅在首次
+     * 调用时构建。
+     *
+     * @return array<string, self> 以小写名称/别名为键、字符集实例为值的映射表
      */
     private static function nameToEci() : array
     {

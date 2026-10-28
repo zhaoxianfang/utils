@@ -12,7 +12,13 @@ use InvalidArgumentException;
  * 支持版本号解析、比较、兼容性判断和范围匹配。
  * 遵循 SemVer 2.0.0 规范。
  *
- * @package Data
+ * @example
+ * // 比较版本号大小
+ * Version::gt('2.0.0', '1.9.9'); // true
+ * // 判断是否满足约束范围（如 Composer / npm 语法）
+ * (new Version('1.2.3'))->satisfies('^1.0 || >=2.0'); // true
+ *
+ * @package zxf\Utils\Data
  * @version 1.0.0
  * @license MIT
  */
@@ -36,6 +42,12 @@ class Version
     /** @var string 原始版本字符串 */
     public readonly string $raw;
 
+    /**
+     * 解析版本字符串并构造版本实例
+     *
+     * @param string $version 版本字符串，可带前导 v（如 "v1.2.3"）
+     * @throws InvalidArgumentException 当版本号不符合 SemVer 规范时抛出
+     */
     public function __construct(string $version)
     {
         $this->raw = ltrim($version, 'v');
@@ -43,7 +55,14 @@ class Version
     }
 
     /**
-     * 快速创建实例
+     * 快速创建版本实例
+     *
+     * 等价于 new self($version)，便于链式调用；允许带前导 v（如 "v1.2.3"），
+     * 该前缀会在构造时被去掉。版本串不合 SemVer 规范时抛异常。
+     *
+     * @param string $version 版本字符串（可带前导 v，如 "v1.2.3"）
+     * @return self 新创建的版本实例
+     * @throws InvalidArgumentException 当版本号不符合 SemVer 规范时抛出
      */
     public static function of(string $version): self
     {
@@ -53,7 +72,14 @@ class Version
     /**
      * 比较两个版本号
      *
+     * 依次比较 major、minor、patch；三段均相同时，带预发布标识的一方更小
+     * （1.0.0-beta < 1.0.0），双方都有预发布标识则逐段比较标识符。构建元数据
+     * 不参与比较。入参可混用字符串与实例。
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
      * @return int -1: $a < $b, 0: 相等, 1: $a > $b
+     * @throws InvalidArgumentException 当传入字符串不符合 SemVer 规范时抛出
      */
     public static function compare(string|self $a, string|self $b): int
     {
@@ -82,6 +108,10 @@ class Version
 
     /**
      * 判断 $a 是否等于 $b
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
+     * @return bool 相等返回 true
      */
     public static function eq(string|self $a, string|self $b): bool
     {
@@ -90,6 +120,10 @@ class Version
 
     /**
      * 判断 $a 是否大于 $b
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
+     * @return bool a 大于 b 返回 true
      */
     public static function gt(string|self $a, string|self $b): bool
     {
@@ -98,6 +132,10 @@ class Version
 
     /**
      * 判断 $a 是否大于等于 $b
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
+     * @return bool a 大于等于 b 返回 true
      */
     public static function gte(string|self $a, string|self $b): bool
     {
@@ -106,6 +144,10 @@ class Version
 
     /**
      * 判断 $a 是否小于 $b
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
+     * @return bool a 小于 b 返回 true
      */
     public static function lt(string|self $a, string|self $b): bool
     {
@@ -114,6 +156,10 @@ class Version
 
     /**
      * 判断 $a 是否小于等于 $b
+     *
+     * @param string|self $a 版本 a（字符串或 Version 实例）
+     * @param string|self $b 版本 b（字符串或 Version 实例）
+     * @return bool a 小于等于 b 返回 true
      */
     public static function lte(string|self $a, string|self $b): bool
     {
@@ -159,7 +205,11 @@ class Version
     /**
      * 按 `||` 切分「或」组
      *
-     * @return list<string>
+     * 同时兼容 `||`、单竖线 `|` 以及两侧无空格的写法（如 "1.0.0||^2.0"），
+     * 并丢弃空片段；切分失败时退回为只含原串的单元素数组。
+     *
+     * @param string $constraint 完整约束表达式，如 "^1.0 || >=2.1 <3.0"
+     * @return list<string> 各「或」组的原始文本
      */
     private static function splitOrGroups(string $constraint): array
     {
@@ -171,6 +221,13 @@ class Version
 
     /**
      * 判断单个「或」组（内部为「且」条件）是否满足
+     *
+     * 空串、`*`、`x`、`X` 视为始终满足；`1.0.0 - 2.0.0` 形式的范围表达式
+     * 会优先按区间判断（避免被空白切分破坏），其余按空白或逗号拆成多个子
+     * 条件后递归判断，全部满足才返回 true。
+     *
+     * @param string $group 单个「或」组文本，可含多个以空白/逗号分隔的条件
+     * @return bool 该组条件全部满足时返回 true
      */
     private function satisfiesAndGroup(string $group): bool
     {
@@ -204,6 +261,13 @@ class Version
 
     /**
      * 判断单个约束条件是否满足
+     *
+     * 支持通配（空串/`*`）、波浪线 `~`、插入符 `^` 与 `>=`、`<=`、`>`、`<`、
+     * `=`、`!=`、`<>` 比较符，语义与 Composer 一致；约束中省略版本段时会先
+     * 补齐为三段再比较。
+     *
+     * @param string $constraint 单个约束表达式，如 "~1.2"、"^0.3"、">=2.0"
+     * @return bool 当前版本满足该约束时返回 true
      */
     private function satisfiesSingle(string $constraint): bool
     {
@@ -352,7 +416,11 @@ class Version
     /**
      * 拆分版本号的数字段（忽略预发布与构建元数据）
      *
-     * @return list<string>
+     * 先截掉第一个 `-` 或 `+` 之后的全部内容，再按 `.` 拆分并过滤空段，
+     * 因此 "1.2" 返回两个元素、"1.2.3" 返回三个，可用于判断约束写到了哪一级。
+     *
+     * @param string $version 版本号或部分版本号（如 "1.2"、"1.2.3-beta+build"）
+     * @return list<string> 数字段列表，可能不足三段
      */
     private static function versionSegments(string $version): array
     {
@@ -365,8 +433,12 @@ class Version
     /**
      * 递增版本号
      *
+     * major 递增后次版本与修订号归零，minor 递增后修订号归零，patch 仅自增；
+     * 预发布与构建元数据不会保留。返回新实例，当前实例不变。
+     *
      * @param string $type major|minor|patch
      * @return static 新的版本实例
+     * @throws InvalidArgumentException 当 $type 不是 major、minor 或 patch 时抛出
      */
     public function increment(string $type = 'patch'): self
     {
@@ -382,6 +454,11 @@ class Version
 
     /**
      * 转换为字符串
+     *
+     * 格式为 "主版本.次版本.修订号"，若存在预发布标识则追加 "-标识"，
+     * 若存在构建元数据则追加 "+元数据"。
+     *
+     * @return string 标准 SemVer 版本字符串
      */
     public function __toString(): string
     {
@@ -395,6 +472,15 @@ class Version
         return $str;
     }
 
+    /**
+     * 解析版本字符串并填充 major/minor/patch/preRelease/build 属性
+     *
+     * 仅接受标准 SemVer 三段式（可含预发布与构建元数据），
+     * 不符合规范（如缺段、含字母数字混杂等）会抛出异常。
+     *
+     * @param string $version 已去除前导 v 的版本字符串
+     * @throws InvalidArgumentException 当版本号不符合 SemVer 规范时抛出
+     */
     private function parse(string $version): void
     {
         $pattern = '/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9.]+))?(?:\+([a-zA-Z0-9.]+))?$/';
@@ -411,6 +497,13 @@ class Version
 
     /**
      * 比较预发布版本标识符
+     *
+     * 按 `.` 拆段逐段比较：数字段按数值比较，且数字段优先级低于字母段；
+     * 字母段用 strcmp 比较；前缀相同的一方更小（1.0.0-alpha < 1.0.0-alpha.1）。
+     *
+     * @param string $a 预发布标识，如 "alpha.1"
+     * @param string $b 预发布标识，如 "beta"
+     * @return int -1、0 或 1，含义与 compare() 一致
      */
     private static function comparePreRelease(string $a, string $b): int
     {

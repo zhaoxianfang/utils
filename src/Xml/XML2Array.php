@@ -21,9 +21,11 @@ use XMLReader;
  * 3. 智能内存管理
  * 4. 多层级错误处理
  * 5. 支持XML注释处理
- */
-
-/**
+ *
+ * @package zxf\Utils\Xml
+ * @version 1.0.0
+ * @license MIT
+ *
  * @example 用法详见 readme.md 文件
  *      1、支持解析微信官方文档中示例的 XML 数据
  *      2、支持解析普通的xml 字符串
@@ -63,6 +65,11 @@ final class XML2Array
         'parseTime' => 0,
     ];
 
+    /**
+     * 构造 XML 解析器并合并配置、初始化安全设置
+     *
+     * @param array $options 自定义配置项，覆盖 DEFAULT_OPTIONS 中的默认配置
+     */
     public function __construct(array $options = [])
     {
         $this->options = array_merge(self::DEFAULT_OPTIONS, $options);
@@ -72,8 +79,10 @@ final class XML2Array
     /**
      * 静态调用 解析 XML 字符串为数组
      *
-     * @param  string|DomDocument  $xml  XML 字符串
+     * @param  string|DomDocument  $xml  XML 字符串或 DOMDocument 对象
      * @param  array  $options  配置选项
+     * @return array 解析后的关联数组
+     * @throws InvalidArgumentException|RuntimeException 输入为空/格式非法或解析失败时抛出
      */
     public static function toArray(string|DomDocument $xml, array $options = []): array
     {
@@ -84,6 +93,10 @@ final class XML2Array
 
     /**
      * 解析XML字符串
+     *
+     * @param  string|DomDocument  $xml  XML 字符串或 DOMDocument 对象
+     * @return array 解析后的关联数组
+     * @throws InvalidArgumentException|RuntimeException 输入为空/格式非法或解析失败时抛出
      */
     public function parse(string|DomDocument $xml): array
     {
@@ -120,12 +133,16 @@ final class XML2Array
     }
 
     /**
-     * 流式解析XML文件
+     * 流式解析XML文件（边读边产出，适合大文件）
      *
      * @example 流式处理并忽略根节点
      *      foreach ($parser->parseStream('data.xml') as $key => $value) {
      *          // 直接获取子节点，不包含根节点
      *      }
+     *
+     * @param  string  $filePath  XML 文件路径
+     * @return Generator 逐节点产出的键值对（遇到根节点时按 preserveRootNode 配置展平）
+     * @throws RuntimeException  文件不存在、不可读或解析失败时抛出
      */
     public function parseStream(string $filePath): Generator
     {
@@ -180,6 +197,12 @@ final class XML2Array
 
     /**
      * 处理最终结果（控制根节点）
+     *
+     * preserveRootNode 为 false 时展平根节点（取根元素的值作为结果）；
+     * 为 true 时保留根节点名作为键，并按 removeXmlDeclaration 决定是否过滤 `?xml` 声明项。
+     *
+     * @param array $result 原始解析结果（根节点名 => 内容）
+     * @return array 处理后的结果数组
      */
     private function processResult(array $result): array
     {
@@ -196,6 +219,12 @@ final class XML2Array
 
     /**
      * 展平根节点结构
+     *
+     * 结果只有 1 个顶层键时取出该键的值（丢失根节点名），否则原样返回；
+     * 两种情况都会强制转为数组，故纯文本根节点会得到「仅含 0 号元素」的数组。
+     *
+     * @param array $result 原始解析结果
+     * @return array 展平后的数组
      */
     private function flattenRoot(array $result): array
     {
@@ -208,6 +237,11 @@ final class XML2Array
 
     /**
      * 创建DOM文档对象
+     *
+     * 按配置的 encoding 初始化，关闭空白保留与严格错误检查、允许恢复（recover）、
+     * 关闭实体替换以与流式解析的安全策略保持一致。
+     *
+     * @return DOMDocument 配置完成的空文档对象
      */
     private function createDomDocument(): DOMDocument
     {
@@ -225,6 +259,12 @@ final class XML2Array
 
     /**
      * 处理DOM文档
+     *
+     * 以 documentElement 为入口递归转换；若首个节点是以 xml 开头的处理指令，
+     * 额外记录到 `?xml` 键（是否保留由 processResult() 决定）。
+     *
+     * @param DOMDocument $dom 待转换的 DOM 文档
+     * @return array 根节点名 => 内容（可能附带 `?xml` 项）的数组
      */
     private function processDom(DOMDocument $dom): array
     {
@@ -247,6 +287,16 @@ final class XML2Array
 
     /**
      * 递归处理节点
+     *
+     * 按配置收集属性（加前缀）、元素子节点（同名元素自动聚合成数组）、注释与文本；
+     * 无元素且有文本时直接返回文本值，有元素时文本存入 textNodeName 键。
+     * 容器完全为空时返回空字符串。
+     *
+     * @param DOMNode $node 待处理节点
+     * @param int $depth 当前递归深度（从 0 开始，用于 maxDepth 校验）
+     * @return mixed 节点对应的标量或数组结构
+     *
+     * @throws RuntimeException 超过最大递归深度时抛出
      */
     private function processNode(DOMNode $node, int $depth = 0): mixed
     {
@@ -323,6 +373,12 @@ final class XML2Array
 
     /**
      * 检查内存限制
+     *
+     * memoryLimit 为 0（未设置）时跳过检查；当前占用超过阈值则中断解析。
+     *
+     * @return void 无返回值
+     *
+     * @throws RuntimeException 内存占用超出配置上限时抛出
      */
     private function checkMemoryLimit(): void
     {
@@ -334,6 +390,13 @@ final class XML2Array
 
     /**
      * 检查递归深度
+     *
+     * 深度超过 maxDepth 即中断解析，防止深层嵌套导致栈溢出。
+     *
+     * @param int $depth 当前递归深度
+     * @return void 无返回值
+     *
+     * @throws RuntimeException 超过最大递归深度时抛出
      */
     private function checkDepth(int $depth): void
     {
@@ -344,6 +407,13 @@ final class XML2Array
 
     /**
      * 检查文件访问权限
+     *
+     * 依次确认文件存在且可读，任一不满足即抛出异常；仅做校验，不打开文件。
+     *
+     * @param string $filePath 待检查的文件路径
+     * @return void 无返回值
+     *
+     * @throws RuntimeException 文件不存在或不可读时抛出
      */
     private function checkFileAccess(string $filePath): void
     {
@@ -358,6 +428,11 @@ final class XML2Array
 
     /**
      * 初始化安全设置
+     *
+     * PHP 8.0+ 已移除实体加载器，此处不再禁用；仅把 mbstring 的内部编码
+     * 对齐到配置的 encoding，避免后续字符串处理出现编码不一致。
+     *
+     * @return void 无返回值
      */
     private function initSecurity(): void
     {
@@ -372,6 +447,14 @@ final class XML2Array
 
     /**
      * 验证XML输入
+     *
+     * 仅做轻量前置校验：内容非空白且去掉首尾空白后以 `<` 开头，
+     * 不做完整语法检查（语法错误交由后续解析器处理）。
+     *
+     * @param string $xml 待验证的 XML 字符串
+     * @return void 无返回值
+     *
+     * @throws InvalidArgumentException 内容为空或不以 `<` 开头时抛出
      */
     private function validateXml(string $xml): void
     {
@@ -386,6 +469,14 @@ final class XML2Array
 
     /**
      * 验证XML文档
+     *
+     * 启用 schemaValidation 且配置了 schemaPath 时按 XSD 校验（文件缺失即报错）；
+     * 否则在 validateOnParse 开启时回退到 DTD 校验。未开启任何校验时直接返回。
+     *
+     * @param DOMDocument $dom 待校验的文档
+     * @return void 无返回值
+     *
+     * @throws RuntimeException XSD 文件不存在或文档校验失败时抛出
      */
     private function validateDocument(DOMDocument $dom): void
     {
@@ -406,6 +497,12 @@ final class XML2Array
 
     /**
      * 标准化节点名称（处理命名空间）
+     *
+     * 按 namespaceHandling 决策：`none` 用贪婪匹配去掉最后一个冒号前的内容，
+     * `remove` 只去掉第一个前缀段（多前缀名会保留剩余部分），其它取值原样返回。
+     *
+     * @param string $name 原始节点名（可能含命名空间前缀）
+     * @return string 处理后的节点名
      */
     private function normalizeNodeName(string $name): string
     {
@@ -418,6 +515,14 @@ final class XML2Array
 
     /**
      * 添加子节点到输出
+     *
+     * 键已存在时把旧值提升为数组再追加（同名元素自动聚合），
+     * 键不存在时按 autoArray 决定是否包成单元素数组。
+     *
+     * @param array $output 输出容器（按引用修改）
+     * @param string $name 子节点名
+     * @param mixed $value 子节点值
+     * @return void 无返回值
      */
     private function addToOutput(array &$output, string $name, $value): void
     {
@@ -433,6 +538,12 @@ final class XML2Array
 
     /**
      * 智能值处理
+     *
+     * 按配置先 trim，再在 typeDetection 开启时依次尝试识别布尔值（true/false/null）、
+     * 数字（含小数点转 float，否则 int）与 JSON 字符串；识别失败或空串时原样返回。
+     *
+     * @param string $value 原始文本值
+     * @return mixed 转换后的值（bool/int/float/array/null 或原字符串）
      */
     private function processValue(string $value): mixed
     {
@@ -473,6 +584,12 @@ final class XML2Array
 
     /**
      * 判断是否为JSON字符串
+     *
+     * 仅看首尾字符是否成对为 `{}` 或 `[]`，属于轻量启发式判断，
+     * 不保证内容为合法 JSON（真正解码由调用方完成并检查错误码）。
+     *
+     * @param string $value 待判断的文本
+     * @return bool 形似 JSON 对象/数组返回 true，否则返回 false
      */
     private function looksLikeJson(string $value): bool
     {
@@ -490,6 +607,10 @@ final class XML2Array
 
     /**
      * 获取解析统计信息
+     *
+     * 包含节点数、属性数、注释数、最大深度、内存占用与解析耗时等。
+     *
+     * @return array{nodes:int,attributes:int,comments:int,depth:int,memory:int,parseTime:float} 统计信息数组
      */
     public function getStats(): array
     {
@@ -498,6 +619,11 @@ final class XML2Array
 
     /**
      * 重置统计信息
+     *
+     * 将节点数、属性数、注释数、最大深度、内存占用与解析耗时全部归零，
+     * 每次解析开始前调用，保证多次解析的统计互不累加。
+     *
+     * @return void 无返回值
      */
     private function resetStats(): void
     {

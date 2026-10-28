@@ -20,9 +20,20 @@ use CurlHandle;
 use Exception;
 use zxf\Utils\Data\Collection;
 
+/**
+ * HTTP 请求客户端（基于 cURL 封装）
+ *
+ * 支持 GET/POST、表单与文件上传、下载与断点续传、Cookie 管理、自定义请求头、
+ * 请求前/后回调以及调试输出；默认开启 SSL 证书校验、超时与跳转次数限制。
+ * 通过 responseObject 控制返回 Curl 实例还是直接返回响应结果。
+ *
+ * @package zxf\Utils\Http
+ */
 class Curl
 {
     private ?\CurlHandle $ch = null; // curl 句柄
+
+    private $debugStream = null; // 调试输出流资源（CURLOPT_STDERR），需显式关闭以防句柄泄漏
 
     private array|string|null $httpParams = null;
 
@@ -103,14 +114,13 @@ class Curl
     }
 
     /**
-     * 判断资源类型是否需要初始化 CURL,防止第二次调用时候第一次的资源被释放
+     * 初始化 cURL 句柄并应用默认选项
      *
+     * 仅在句柄为空时执行 curl_init() 并写入 defaultParams，避免重复初始化覆盖
+     * 已设置的选项；每次调用都会重新应用 Cookie 读取/保存路径（若已通过
+     * setCookieFile() 配置）并清空上一次的响应数据。
      *
-     * @DateTime 2018-12-29
-     *
-     * @return void [type]       [description]
-     *
-     * @throws Exception
+     * @return void
      */
     private function initCurl()
     {
@@ -125,11 +135,14 @@ class Curl
     }
 
     /**
-     * 初始化
+     * 获取单例实例
      *
+     * 仅在首次调用时按 $options、$responseObject 创建实例，后续调用直接返回同一
+     * 对象（此时两个参数被忽略）；需要不同配置时请直接 new static(...)。
      *
-     * @param  array  $options  参数
-     * @return static
+     * @param  array  $options  首次创建时生效的 cURL 默认配置
+     * @param  bool  $responseObject  首次创建时生效，为 true 时请求返回当前对象
+     * @return static 共享实例
      *
      * @throws Exception
      */
@@ -143,14 +156,18 @@ class Curl
     }
 
     /**
-     * 设置http header
+     * 设置请求头
      *
-     * @param  array  $header  设置的请求头
-     * @param  bool  $isAppend  是否追加
-     * @param  bool  $setLength  是否设置 Content-Length ; 默认为false,如果为true,请在调用本方法之前 调用 setParams 方法
+     * 支持两种写法并统一归一化为 key => value：关联数组，或索引数组中形如
+     * "Key: value" 的字符串。归一化后按 $isAppend 决定合并还是覆盖，再拼成
+     * cURL 需要的 "Key: value" 列表写入 CURLOPT_HTTPHEADER（立即生效）。
      *
-     * @example setHeader(['Content-type' => 'application/json;charset="utf-8"', 'Accept' => 'application/json'])
-     *          setHeader(['Content-type: application/json;charset="utf-8"', 'Accept: application/json'], false)
+     * @param  array  $header  请求头，如 ['Accept' => 'application/json'] 或 ['Accept: application/json']
+     * @param  bool  $isAppend  为 false 时丢弃已有请求头只保留本次设置，为 true 时合并（同键覆盖）
+     * @param  bool  $setLength  为 true 时按 $httpParams 计算并写入 Content-Length；需先调用 setParams()
+     *
+     * @example $http->setHeader(['Content-type' => 'application/json;charset="utf-8"', 'Accept' => 'application/json'])
+     *          $http->setHeader(['Content-type: application/json;charset="utf-8"', 'Accept: application/json'], false)
      *
      * @return $this
      *
@@ -187,12 +204,15 @@ class Curl
     }
 
     /**
-     * 设置 SSL 验证
+     * 设置 SSL 证书校验策略
      *
-     * 生产环境强烈建议保持验证开启（默认）
+     * 生产环境强烈建议保持校验开启（默认开启）。设置会同时写入 defaultParams
+     * （句柄重建时仍然生效）并立即应用到当前句柄；$verify 为 false 时会强制
+     * 把 CURLOPT_SSL_VERIFYHOST 置 0，与 cURL 的要求保持一致。
      *
-     * @param bool $verify 是否验证 SSL 证书
-     * @param int $verifyHost 验证级别: 0=不验证, 1=存在即可(不安全), 2=验证匹配(推荐)
+     * @param  bool  $verify  是否校验服务端证书
+     * @param  int  $verifyHost  校验级别：0=不校验, 1=证书存在即可(不安全), 2=证书与主机名匹配(推荐)
+     * @return self
      */
     public function verifySsl(bool $verify = true, int $verifyHost = 2): self
     {
@@ -208,7 +228,10 @@ class Curl
     }
 
     /**
-     * 清空整个请求头
+     * 清空句柄上的请求头选项
+     *
+     * 仅把 CURLOPT_HTTPHEADER 置为空数组，不会清空内部保存的 $this->headers；
+     * 之后再调用 setHeader() 且 $isAppend 为 true 时，旧请求头会被重新合并下发。
      *
      * @return $this
      *
@@ -223,9 +246,15 @@ class Curl
     }
 
     /**
-     * 设置cookie文件的保存路径地址或者读取地址
+     * 设置 Cookie 文件的读取/写入路径
      *
+     * 非空路径会先通过 create_dir_or_filepath() 创建目录与文件；$cookieFile 用于
+     * 发送时读取 Cookie（CURLOPT_COOKIEFILE），$cookieJarFile 用于保存响应中的
+     * Cookie（CURLOPT_COOKIEJAR）。仅记录到属性，需在下一次 initCurl()（即下次请求）
+     * 时才会应用到句柄。
      *
+     * @param  string  $cookieFile  Cookie 读取文件路径，空字符串表示不读取
+     * @param  string  $cookieJarFile  Cookie 保存文件路径，空字符串表示不保存
      * @return $this
      */
     public function setCookieFile(string $cookieFile = '', string $cookieJarFile = '')
@@ -239,9 +268,13 @@ class Curl
     }
 
     /**
-     * 设置cookie字符串
+     * 以字符串形式设置请求携带的 Cookie
      *
+     * 直接写入 CURLOPT_COOKIE，格式为 "name1=value1; name2=value2"；
+     * 与 setCookieFile() 配置的 Cookie 文件可以并存，两者内容会一并发送；
+     * 连续调用会覆盖上一次设置，只保留最后一次的字符串。
      *
+     * @param  string  $cookieString  Cookie 字符串，如 "sid=abc; token=xyz"
      * @return $this
      */
     public function setCookieString(string $cookieString)
@@ -252,9 +285,12 @@ class Curl
     }
 
     /**
-     * 设置http 超时
+     * 设置请求超时时间（秒）
      *
+     * 对应 CURLOPT_TIMEOUT，含连接与传输总耗时。传入小于等于 0 的值时会被
+     * 静默修正为 5 秒，避免设置成 0 导致无限等待。
      *
+     * @param  int  $time  超时秒数，非正数按 5 处理
      * @return $this
      *
      * @throws Exception
@@ -273,9 +309,12 @@ class Curl
     }
 
     /**
-     * 设置http 代理
+     * 设置 HTTP 代理地址
      *
+     * 对应 CURLOPT_PROXY，可写 "127.0.0.1:8080" 或 "socks5://127.0.0.1:1080"；
+     * 传入空字符串时不设置，保留原有代理配置。
      *
+     * @param  string  $proxy  代理地址
      * @return $this
      *
      * @throws Exception
@@ -291,9 +330,12 @@ class Curl
     }
 
     /**
-     * 设置http 代理端口
+     * 设置代理端口
      *
+     * 对应 CURLOPT_PROXYPORT；若代理地址中已带端口（setProxy('host:port')），
+     * 一般无需再调用本方法。
      *
+     * @param  int  $port  代理端口
      * @return $this
      *
      * @throws Exception
@@ -307,9 +349,12 @@ class Curl
     }
 
     /**
-     * 设置来源页面
+     * 设置 Referer 来源页
      *
+     * 对应 CURLOPT_REFERER；传入空字符串时不设置（不会清空已有值）。
+     * 注意 defaultParams 中已开启 CURLOPT_AUTOREFERER，跟随跳转时会自动改写 Referer。
      *
+     * @param  string  $referer  来源页面地址
      * @return $this
      *
      * @throws Exception
@@ -325,9 +370,13 @@ class Curl
     }
 
     /**
-     * 设置用户代理
+     * 设置 User-Agent
      *
+     * 对应 CURLOPT_USERAGENT；传入空字符串时不设置。
+     * 注意：get()/post()/put()/delete()/patch() 在发起请求时会用 randUserAgent()
+     * 覆盖此处设置的值，需要固定 UA 时应改用 setHeader(['User-Agent' => ...])。
      *
+     * @param  string  $agent  用户代理字符串
      * @return $this
      *
      * @throws Exception
@@ -346,7 +395,11 @@ class Curl
     /**
      * 开启文件调试
      *
+     * 打开 CURLOPT_VERBOSE 并把调试输出重定向到指定文件，文件（及其目录）
+     * 不存在时自动创建。写入流句柄被保存，供 closeDebug() 与析构函数关闭，
+     * 避免句柄泄漏；重复调用会用新模式重新打开同一文件。
      *
+     * @param  string  $debugFile  调试输出文件路径
      * @return $this
      */
     public function debug(string $debugFile)
@@ -354,15 +407,18 @@ class Curl
         create_dir_or_filepath($debugFile);
         // 启用调试输出
         curl_setopt($this->ch, CURLOPT_VERBOSE, true);
-        // 将调试信息写入文件
-        $debugFile = fopen($debugFile, 'w+');
-        curl_setopt($this->ch, CURLOPT_STDERR, $debugFile);
+        // 将调试信息写入文件（保存句柄以便后续关闭，避免句柄泄漏）
+        $this->debugStream = fopen($debugFile, 'w+');
+        curl_setopt($this->ch, CURLOPT_STDERR, $this->debugStream);
 
         return $this;
     }
 
     /**
      * 关闭调试
+     *
+     * 关闭 CURLOPT_VERBOSE，恢复 CURLOPT_RETURNTRANSFER（使响应以返回值形式
+     * 返回而非直接输出），并关闭已打开的调试流。未开启调试时只做幂等处理。
      *
      * @return $this
      */
@@ -373,13 +429,37 @@ class Curl
 
         curl_setopt($this->ch, CURLOPT_RETURNTRANSFER, true);
 
+        if ($this->debugStream !== null) {
+            fclose($this->debugStream);
+            $this->debugStream = null;
+        }
+
         return $this;
     }
 
     /**
-     * 设置是否返回对象
+     * 析构时释放 curl 句柄与调试流，避免资源泄漏
+     */
+    public function __destruct()
+    {
+        if ($this->debugStream !== null) {
+            fclose($this->debugStream);
+            $this->debugStream = null;
+        }
+        if ($this->ch instanceof \CurlHandle) {
+            // PHP 8.0 起 curl_close() 已无实际作用、8.5 起被弃用，直接断开引用交由 GC 回收
+            $this->ch = null;
+        }
+    }
+
+    /**
+     * 切换请求后的返回形式
      *
+     * 为 true 时 get()/post() 等方法返回 $this，可继续调用 getStatusCode()、
+     * getBody()、getHeader()、getResp()、isSuccessful() 等读取响应；为 false
+     * （默认）时直接返回解析后的响应结果。
      *
+     * @param  bool  $flag  是否返回对象
      * @return $this
      */
     public function respObj(bool $flag = true)
@@ -390,9 +470,13 @@ class Curl
     }
 
     /**
-     * 复制句柄
+     * 复制当前 cURL 句柄
      *
-     * @return CurlHandle|false
+     * 返回一份选项相同的独立句柄，可用于并发请求；复制出的句柄由调用方负责
+     * 释放（PHP 8.0 起 curl_close() 已无实际作用，断开引用交由 GC 回收即可）。
+     * 当前句柄未初始化时会先执行 initCurl()。
+     *
+     * @return CurlHandle|false 复制失败时返回 false
      *
      * @throws Exception
      */
@@ -403,7 +487,15 @@ class Curl
         return curl_copy_handle($this->ch);
     }
 
-    // 重置所有的预先设置的选项
+    /**
+     * 重置句柄上已设置的全部选项
+     *
+     * 调用 curl_reset() 后，构造函数与 setHeader()/setTimeout() 等设置过的原生
+     * cURL 选项（含 defaultParams 中的默认项）都会被清除；本类属性（请求头、
+     * Cookie 路径、请求参数）不受影响。重置后继续请求需重新设置相关选项。
+     *
+     * @return $this
+     */
     public function reset()
     {
         $this->initCurl();
@@ -413,9 +505,13 @@ class Curl
     }
 
     /**
-     * http响应中是否显示header，1表示显示
+     * 设置 curl_exec 返回的内容是否包含响应头
      *
+     * 对应 CURLOPT_HEADER；开启后 curl_exec 的结果会在响应体前拼接响应头，
+     * parserResponse() 会按 CURLINFO_HEADER_SIZE 将其切分，因此 getBody()
+     * 拿到的仍是纯响应体。
      *
+     * @param  mixed  $show  1/true 显示响应头，0/false 不显示
      * @return $this
      *
      * @throws Exception
@@ -429,13 +525,20 @@ class Curl
     }
 
     /**
-     * 设置http请求的参数,get或post
+     * 设置本次请求的参数（GET 查询串或 POST 请求体）
      *
-     * @param  string  $data_type  数据类型 array|json|string
-     * @param  bool  $excludeZhCN  是否排除汉字转义
+     * 按 $data_type 转换后暂存到 $httpParams，由 get()/post()/put() 等方法在发起
+     * 请求时读取；重复调用会整体覆盖上一次的参数。
+     *   - json：json_encode 成 JSON 字符串，需配合 Content-type: application/json；
+     *   - array：经 obj2Arr() 把对象转为数组后暂存（实际交给 cURL 处理）；
+     *   - string（默认）：http_build_query 生成 a=1&b=2，或按 $excludeZhCN 走不编码值的实现。
+     *
+     * @param  array  $params  请求参数，支持一维/多维数组
+     * @param  string  $data_type  参数类型：array|json|string
+     * @param  bool  $excludeZhCN  仅 $data_type=string 时生效；true 时值不做 URL 编码（键仍编码），便于直接阅读中文
      * @return $this
-     *               setParams( array('abc'=>'123', 'file1'=>'@/data/1.jpg'));
-     *               setParams( {'a'=>'str_a'});
+     *
+     * @example $http->setParams(['abc' => '123'], 'string');
      *
      * @throws Exception
      */
@@ -456,10 +559,19 @@ class Curl
     }
 
     /**
-     * 取消 http_build_query 对中文进行编码 例如处理结果为 [name=张三&age=25] 而不是 [name=%E5%BC%A0%E4%B8%89&age=25]
+     * 生成不对值做 URL 编码的查询串
      *
+     * 用于替代 http_build_query 的中文转义行为：本实现输出 name=张三&age=25，
+     * 而 http_build_query 会得到 name=%E5%BC%A0%E4%B8%89&age=25。
+     * 嵌套数组会递归展开为 parent[key]=value；键默认编码、值默认原样保留。
      *
-     * @return false|string
+     * @param  array  $data  待处理的参数
+     * @param  string  $prefix  当前层级的键前缀，递归时内部使用
+     * @param  string  $arg_separator  参数之间的分隔符
+     * @param  bool  $encode_keys  是否对键做 rawurlencode
+     * @param  bool  $encode_values  是否对值做 rawurlencode
+     * @param  string  $encoding  键编码时按此字符集做编码转换
+     * @return string 拼接后的查询串
      */
     private function custom_http_build_query(array $data, string $prefix = '', string $arg_separator = '&', bool $encode_keys = true, bool $encode_values = false, string $encoding = 'UTF-8'): bool|string
     {
@@ -498,7 +610,11 @@ class Curl
     /**
      * 设置证书路径
      *
+     * 将 CA 证书文件（PEM 格式）写入 CURLOPT_CAINFO，用于校验 HTTPS 服务端
+     * 证书；调用前会先初始化 cURL 句柄。文件是否存在不在本方法校验范围内，
+     * 由 cURL 在请求时自行报错。
      *
+     * @param  string  $file  CA 证书文件路径
      * @return Curl
      *
      * @throws Exception
@@ -521,10 +637,21 @@ class Curl
         return curl_version();
     }
 
-    //  闭包方式 注入 Curl
-    //  ...->inject(function($http, $ch){
-    //      curl_setopt($ch, CURLOPT_SSLCERTTYPE, 'PEM');
-    //  });
+    /**
+     * 通过闭包注入原生 cURL 操作
+     *
+     * 闭包签名约定为 function (Curl $http, ?CurlHandle $ch) {}，可直接用
+     * curl_setopt() 设置本类未封装的原生选项（如 CURLOPT_SSLCERTTYPE）。
+     * 本方法不会调用 initCurl()，请求结束或 reset() 之后句柄为 null，此时闭包
+     * 收到的第二个参数是 null；需要有效句柄时请先调用任意 setter（如 setHeader）。
+     *
+     * @param  Closure  $func  接收 (当前实例, curl 句柄) 的回调
+     * @return $this
+     *
+     * @example $http->inject(function ($http, $ch) {
+     *              curl_setopt($ch, CURLOPT_SSLCERTTYPE, 'PEM');
+     *          });
+     */
     public function inject(Closure $func)
     {
         $func($this, $this->ch);
@@ -535,7 +662,10 @@ class Curl
     /**
      * 在请求之前调用闭包函数
      *
+     * 仅登记回调，实际在每次发送请求前执行，可用于统一追加签名头等操作。
+     * 重复调用会覆盖上一个回调；回调接收 (当前实例, curl 句柄) 两个参数。
      *
+     * @param  Closure  $func  请求前执行的回调
      * @return $this
      *
      * @example $http->before(function($http, $ch){
@@ -552,7 +682,11 @@ class Curl
     /**
      * 在请求之后调用闭包函数
      *
+     * 仅登记回调，实际在每次请求响应解析完成后执行，可用于记录日志或统一
+     * 改写响应。重复调用会覆盖上一个回调。回调约定接收 (当前实例, curl 句柄,
+     * 响应 body) 三个参数，此时句柄尚未关闭。
      *
+     * @param  Closure  $func  请求后执行的回调
      * @return $this
      *
      * @example $http->after(function($http, $ch, $response){
@@ -567,14 +701,19 @@ class Curl
     }
 
     /**
-     * 模拟GET请求
+     * 模拟 GET 请求
      *
-     * @param  string  $data_type  返回数据类型
-     * @return mixed
+     * 会把 setParams() 设置的参数拼接到 URL 尾部（URL 已含 ? 时用 & 连接，否则用
+     * ? 连接），随后强制启用压缩解码、随机设置浏览器 User-Agent 并发送请求。
+     *
+     * @param  string  $url  请求地址
+     * @param  string  $data_type  返回数据类型：json(数组)|string(json 字符串)|collection(集合)
+     * @return mixed 默认返回解析后的响应体；$responseObject 为 true 时返回当前实例；
+     *               传输层出错时直接返回错误数组（见 getError()）
      *
      * Examples:
      * ```
-     * Curl::get('http://api.example.com/?a=123&b=456', 'json');
+     * $http->get('http://api.example.com/?a=123&b=456', 'json');
      * ```
      *
      * @throws Exception
@@ -606,17 +745,19 @@ class Curl
     }
 
     /**
-     * 模拟POST请求
+     * 模拟 POST 请求
      *
+     * 以 CURLOPT_POST 发送；请求体取自 setParams() 设置的 $httpParams，未设置则
+     * 发送空 body。文件上传请改用 upload()，它会把文件包成 CURLFile 后再调用本方法。
      *
-     * @return mixed
+     * @param  string  $url  请求地址
+     * @param  string  $data_type  返回数据类型：json(数组)|string(json 字符串)|collection(集合)
+     * @return mixed 默认返回解析后的响应体；$responseObject 为 true 时返回当前实例；
+     *               传输层出错时直接返回错误数组（见 getError()）
      *
      * Examples:
      * ```
-     * Http->post('http://api.example.com/?a=123',  'json');
-     * Http->post('http://api.example.com/',  'json');
-     * 文件post上传
-     * Curl::post('http://api.example.com/', 'json');
+     * $http->setParams(['a' => 123], 'json')->post('http://api.example.com/', 'json');
      * ```
      *
      * @throws Exception
@@ -637,6 +778,17 @@ class Curl
         return $this->run($data_type);
     }
 
+    /**
+     * 发送 PUT 请求
+     *
+     * 请求体取自此前 setParams() 设置的 $httpParams（未设置则不发送 body）；
+     * 每次请求都会把 User-Agent 替换为随机的主流浏览器 UA。
+     * 注意 $url 未做类型声明，内部直接交给 CURLOPT_URL。
+     *
+     * @param  string  $url  请求地址
+     * @param  string  $data_type  返回数据类型：json|string|collection，语义与 get() 一致
+     * @return mixed 默认返回解析后的响应体；$responseObject 为 true 时返回当前对象
+     */
     public function put($url, $data_type = 'json')
     {
         $this->initCurl();
@@ -651,6 +803,16 @@ class Curl
         return $this->run($data_type);
     }
 
+    /**
+     * 发送 DELETE 请求
+     *
+     * 通过 CURLOPT_CUSTOMREQUEST 指定 DELETE 方法；若此前 setParams() 设置过参数，
+     * 会作为请求体发送（部分服务端会忽略 DELETE 的 body）。
+     *
+     * @param  string  $url  请求地址
+     * @param  string  $data_type  返回数据类型：json|string|collection，语义与 get() 一致
+     * @return mixed 默认返回解析后的响应体；$responseObject 为 true 时返回当前对象
+     */
     public function delete($url, $data_type = 'json')
     {
         $this->initCurl();
@@ -666,6 +828,16 @@ class Curl
         return $this->run($data_type);
     }
 
+    /**
+     * 发送 PATCH 请求
+     *
+     * 通过 CURLOPT_CUSTOMREQUEST 指定 PATCH 方法；若此前 setParams() 设置过参数，
+     * 会作为请求体发送。常用于资源的局部更新。
+     *
+     * @param  string  $url  请求地址
+     * @param  string  $data_type  返回数据类型：json|string|collection，语义与 get() 一致
+     * @return mixed 默认返回解析后的响应体；$responseObject 为 true 时返回当前对象
+     */
     public function patch($url, $data_type = 'json')
     {
         $this->initCurl();
@@ -684,13 +856,16 @@ class Curl
     /**
      * 上传文件
      *
-     * @param  string  $url  上传地址
-     * @param  string  $filePath  被上传文件绝对地址
-     * @param  string  $name  上传字段名称；默认 media，eg: file
-     * @param  array  $params  上传的附加请求数据 。例如上传视频时候设置 description 等参数
-     * @return array|mixed
+     * 先把文件包装成 CURLFile（PHP < 5.5 回退为 @路径 写法），与 $params 合并后
+     * 交给 setParams()，再以 POST 方式提交到 $url；返回结果类型与 post() 一致。
      *
-     * @throws Exception
+     * @param  string  $url  上传接口地址
+     * @param  string  $filePath  本地待上传文件的路径，必须存在且可读
+     * @param  string  $name  表单文件字段名，如 file；为空时默认 media
+     * @param  array  $params  随文件一起提交的附加字段，如 description
+     * @return mixed 解析后的响应体，或 $responseObject 为 true 时的当前实例
+     *
+     * @throws Exception 文件不存在或不可读时抛出
      */
     public function upload(string $url = '', string $filePath = '', string $name = '', array $params = [])
     {
@@ -715,54 +890,109 @@ class Curl
     }
 
     /**
-     * 下载文件
+     * 下载远程文件到本地
+     *
+     * 取消 PHP 执行时间限制，把响应体直接写入 CURLOPT_FILE 指向的文件流，
+     * 因此响应内容不会保留在内存里。目标文件以 w+ 打开，同名文件会被覆盖，
+     * 且不自动创建多级目录。文件句柄在请求结束后（含异常）必定关闭。
+     *
+     * 返回值描述本次下载结果：success 需同时满足「无传输错误 + 2xx 状态码 +
+     * 落盘字节数大于 0」，可直接据此判断下载是否成功。
      *
      * @param  string  $url  远程文件地址
-     * @param  string  $filePath  存在在本地的地址
-     * @return array|mixed
+     * @param  string  $filePath  本地保存路径，其所在目录需已存在且可写
+     * @return array{success:bool,file:string,size:int,status:int,error:mixed}
+     *               success 是否成功；file 落盘路径；size 实际字节数；
+     *               status HTTP 状态码（0 表示未取得）；error 传输层错误，无错误为 null
      *
-     * @throws Exception
+     * @throws Exception 目标文件无法以写方式打开时抛出 RuntimeException
      */
-    public function download(string $url = '', string $filePath = ''): mixed
+    public function download(string $url = '', string $filePath = ''): array
     {
-        set_time_limit(0);
-        $this->initCurl();
-
-        curl_setopt($this->ch, CURLOPT_URL, $url);
-        $fp = fopen($filePath, 'w+');
-        curl_setopt($this->ch, CURLOPT_FILE, $fp);
-        $res = $this->run();
-        fclose($fp);
-
-        return $res;
+        return $this->downloadToFile($url, $filePath, null);
     }
 
     /**
-     * 断点续传下载文件
+     * 断点续传下载远程文件
+     *
+     * 通过 CURLOPT_RANGE 设置 "{$range}-" 请求从指定字节偏移开始的内容，
+     * 服务端须支持 Range 请求（返回 206）才能真正续传。目标文件仍以 w+ 打开，
+     * 会从头覆盖写入，所以续传时传入的 $filePath 应是需要写入的分片文件而非
+     * 已下载的完整文件；如需追加，请自行先改好写入方式。
      *
      * @param  string  $url  远程文件地址
-     * @param  string  $filePath  存在在本地的地址
-     * @param  int  $range  下载节点
-     * @return array|mixed
+     * @param  string  $filePath  本地保存路径
+     * @param  int  $range  起始字节偏移，0 表示从头下载
+     * @return array{success:bool,file:string,size:int,status:int,error:mixed}
+     *               结构同 download()；续传成功时 status 通常为 206
      *
-     * @throws Exception
+     * @throws Exception 目标文件无法以写方式打开时抛出 RuntimeException
      */
-    public function downloadByRange(string $url = '', string $filePath = '', int $range = 0): mixed
+    public function downloadByRange(string $url = '', string $filePath = '', int $range = 0): array
+    {
+        return $this->downloadToFile($url, $filePath, $range);
+    }
+
+    /**
+     * 下载实现：把响应体写入文件并汇总结果
+     *
+     * @param  string  $url  远程文件地址
+     * @param  string  $filePath  本地保存路径
+     * @param  int|null  $range  起始字节偏移，null 表示不设置 Range 头
+     * @return array{success:bool,file:string,size:int,status:int,error:mixed} 下载结果
+     *
+     * @throws Exception 目标文件无法以写方式打开时抛出 RuntimeException
+     */
+    protected function downloadToFile(string $url, string $filePath, ?int $range): array
     {
         set_time_limit(0);
         $this->initCurl();
-        // curl_setopt($this->ch, CURLOPT_RANGE, $range.'1000-'); // 从字节 1000 开始继续下载
-        curl_setopt($this->ch, CURLOPT_RANGE, $range.'-'); // 从字节 $range 开始继续下载
-        curl_setopt($this->ch, CURLOPT_URL, $url);
-        $fp = fopen($filePath, 'w+');
-        curl_setopt($this->ch, CURLOPT_FILE, $fp);
-        $res = $this->run();
-        fclose($fp);
 
-        return $res;
+        if ($range !== null) {
+            curl_setopt($this->ch, CURLOPT_RANGE, $range . '-');
+        }
+        curl_setopt($this->ch, CURLOPT_URL, $url);
+        // 默认参数里 CURLOPT_HEADER 为 true：与 CURLOPT_FILE 组合会把响应头一起写进
+        // 目标文件，导致下载内容被污染，这里必须关闭
+        curl_setopt($this->ch, CURLOPT_HEADER, false);
+
+        $fp = fopen($filePath, 'w+');
+        if ($fp === false) {
+            throw new \RuntimeException("无法打开文件用于写入: {$filePath}");
+        }
+        curl_setopt($this->ch, CURLOPT_FILE, $fp);
+        try {
+            $this->run();
+        } finally {
+            fclose($fp);
+        }
+
+        // 文件刚写完，清掉 stat 缓存再取真实大小
+        clearstatcache(true, $filePath);
+        $size = is_file($filePath) ? (int) filesize($filePath) : 0;
+        $status = (int) ($this->getStatusCode() ?? 0);
+        $error = $this->isError() ? $this->getError() : null;
+
+        return [
+            'success' => $error === null && $status >= 200 && $status < 300 && $size > 0,
+            'file' => $filePath,
+            'size' => $size,
+            'status' => $status,
+            'error' => $error,
+        ];
     }
 
-    // 判断远程资源是否存在
+    /**
+     * 判断远程资源是否存在
+     *
+     * 使用独立的 cURL 句柄发送 HEAD 请求（CURLOPT_NOBODY），仅当 HTTP 状态码
+     * 恰为 200 时返回 true；3xx 跳转、4xx/5xx 与网络错误均返回 false。
+     * 该方法不复用当前句柄，因此 setHeader()/setProxy()/setTimeout() 等设置对其无效，
+     * 但会强制开启 SSL 证书与主机名校验（自签名证书站点会被判为不存在）。
+     *
+     * @param  string  $url  待检测的远程地址
+     * @return bool 存在返回 true，否则返回 false
+     */
     public function exists(string $url = '')
     {
         $curl = curl_init($url);
@@ -777,16 +1007,22 @@ class Curl
                 $found = true;
             }
         }
-        curl_close($curl);
+        // PHP 8.0 起 curl_close() 无实际作用（8.5 弃用），断开引用即可
+        unset($curl);
 
         return $found;
     }
 
     /**
-     * 执行请求 [如果是网页内容会直接返回网页]
+     * 执行请求并返回结果（供 get()/post() 等公开方法内部调用）
      *
-     * @param  string  $data_type  返回数据类型 json|string(json字符串)|collection
-     * @return array|mixed
+     * 流程：触发 before 回调（参数为 $this 与 curl 句柄）→ parserResponse() 发请求
+     * 并解析响应 → 触发 after 回调（参数为 $this、句柄、响应 body）→ 关闭句柄并置空。
+     * 返回值的优先级为：$responseObject 为 true 时返回当前实例；存在传输层错误时返回
+     * 错误数组；响应体是字符串（HTML/纯文本）时原样返回；否则再按 $data_type 转换。
+     *
+     * @param  string  $data_type  返回数据类型：json(数组，默认)|string(JSON 字符串)|collection(集合)
+     * @return mixed 当前实例、错误数组、原始字符串、JSON 字符串、Collection 实例或数组
      */
     protected function run(string $data_type = 'json')
     {
@@ -799,8 +1035,7 @@ class Curl
         // 请求后处理,回调参数($this 对象，响应的body)
         (($this->afterFunc) instanceof Closure) && is_callable($this->afterFunc) && ($this->afterFunc)($this, $this->ch, $this->respObjData['body']);
 
-        curl_close($this->ch);
-
+        // 断开句柄引用（curl_close 自 PHP 8.0 起无作用，8.5 起弃用）
         $this->ch = null; // 重置
 
         if ($this->responseObject) {
@@ -831,13 +1066,28 @@ class Curl
         return $body;
     }
 
+    /**
+     * 执行请求并解析响应，结果写入 $respObjData
+     *
+     * 调用 curl_exec() 发起请求，采集 curl_getinfo 的状态码、耗时、服务器 IP、
+     * 重定向、SSL 校验结果等信息，并按 $header_size 拆分响应头与响应体。
+     * 响应体按以下顺序归一化：JSONP（callback(...)）剥壳 → 非 JSON 的 key=value
+     * 串用 parse_str 解析 → XML 转数组 → JSON 解码，最后经 objToArr() 递归转数组。
+     * 请求失败不抛异常，错误码与描述记录在 $respObjData['error']（no/info）。
+     *
+     * @return static 返回当前实例，便于链式调用
+     */
     private function parserResponse(): static
     {
         $content = curl_exec($this->ch);
 
+        // 设置了 CURLOPT_FILE（download/downloadByRange/putFileFromUrlContent）时
+        // curl_exec 返回 bool 而非响应字符串；不归一化会在严格类型下让 substr() 抛 TypeError
+        $content = is_string($content) ? $content : '';
+
         $http_code = curl_getinfo($this->ch, CURLINFO_HTTP_CODE); // 获取 HTTP 状态码
         $effective_url = curl_getinfo($this->ch, CURLINFO_EFFECTIVE_URL); // 最终请求的 URL（跟随重定向后的 URL）
-        $content_type = curl_getinfo($this->ch, CURLINFO_CONTENT_TYPE); // 响应的 Content-Type
+        $content_type = (string) (curl_getinfo($this->ch, CURLINFO_CONTENT_TYPE) ?? ''); // 响应的 Content-Type（CURLOPT_FILE 模式下可能为 null）
         $total_time = curl_getinfo($this->ch, CURLINFO_TOTAL_TIME); // 总请求时间（秒）
         $name_lookup_time = curl_getinfo($this->ch, CURLINFO_NAMELOOKUP_TIME); // DNS 解析时间（秒）
         $connect_time = curl_getinfo($this->ch, CURLINFO_CONNECT_TIME); // 连接服务器所用时间（秒）
@@ -941,7 +1191,7 @@ class Curl
         // 根据 `Content-Type` 解析内容
         if (stripos($content_type, 'text/xml') !== false || stripos($content_type, 'application/xml') !== false) {
             // 解析 XML
-            $xmlObject = simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA);
+            $xmlObject = simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA | LIBXML_NONET);
             // 将对象转换为 JSON，再转换为数组
             $body = json_decode(json_encode($xmlObject), true);
         } else {
@@ -959,7 +1209,12 @@ class Curl
     }
 
     /**
-     * 请求是否成功（响应状态码是否为 2xx ）
+     * 判断请求是否成功
+     *
+     * 判定依据为 HTTP 状态码是否落在 2xx 区间（含 204 等空响应），与响应内容
+     * 无关；连接失败时状态码为 0，同样视为失败。未发起请求时该键不存在，返回 null。
+     *
+     * @return bool|null 2xx 返回 true，其余返回 false；无响应数据时为 null
      */
     public function isSuccessful(): mixed
     {
@@ -967,7 +1222,12 @@ class Curl
     }
 
     /**
-     * 判断请求是否发生请求错误
+     * 判断本次请求是否存在传输层错误
+     *
+     * 对应 curl_errno() 是否非 0（如域名解析失败、连接超时、SSL 握手失败），
+     * 4xx/5xx 这类服务端正常返回的状态码不计入错误。
+     *
+     * @return bool 有错误返回 true
      */
     public function isError(): bool
     {
@@ -975,22 +1235,37 @@ class Curl
     }
 
     /**
-     * 返回响应状态码
+     * 获取响应 HTTP 状态码
      *
-     * @return mixed
+     * @return int 如 200、404；未发起请求时该键不存在，取值为 null
      */
     public function getStatusCode()
     {
         return $this->respObjData['http_code'];
     }
 
-    // 响应内容
+    /**
+     * 获取响应体
+     *
+     * 内容已在 parserResponse() 中按 Content-Type 归一化：JSON/XML 转为数组，
+     * 纯文本（HTML、文本响应）保持字符串，因此返回类型不固定。
+     *
+     * @return mixed 解析后的响应体；未发起请求时为 null
+     */
     public function getBody()
     {
         return $this->respObjData['body'];
     }
 
-    // 响应头
+    /**
+     * 获取响应头
+     *
+     * 除服务端返回的头之外，还附加 content_type、header_size、http_code、
+     * request_size 四个键；服务端头名保持响应中的原始大小写。
+     *
+     * @param  string  $key  头名称，如 content_type；为空时返回全部响应头
+     * @return mixed 指定 $key 不存在时返回 null；未指定 $key 时返回全部响应头数组
+     */
     public function getHeader(string $key = '')
     {
         if ($key) {
@@ -1002,6 +1277,10 @@ class Curl
 
     /**
      * 获取 服务器信息
+     *
+     * 取自本次响应解析阶段汇总的连接信息（如 primary_ip、redirect_count、
+     * is_redirect 等）。传入 $key 时取对应字段，字段不存在返回 null；
+     * 不传则返回全部服务器信息数组。
      *
      * @param  string  $key  eg: primary_ip:服务器ip
      * @return mixed|null
@@ -1015,20 +1294,39 @@ class Curl
         return $this->respObjData['servers'];
     }
 
-    // 是否重定向
+    /**
+     * 判断请求是否发生了重定向
+     *
+     * 依据 curl_getinfo 的 CURLINFO_REDIRECT_COUNT 是否大于 0，仅统计本次请求；
+     * 可通过 getServer('redirect_count') 或 getServer('redirect_url') 查看细节。
+     *
+     * @return bool 发生过跳转返回 true
+     */
     public function hasRedirect()
     {
         return $this->respObjData['servers']['is_redirect'];
     }
 
-    // 所有响应错误内容
+    /**
+     * 获取请求错误信息
+     *
+     * 来源为 curl_errno()/curl_error()，只反映传输层错误（DNS、超时、连接失败等），
+     * 不含 4xx/5xx 这类业务层状态码；后者请用 isSuccessful() 或 getStatusCode() 判断。
+     *
+     * @return array 形如 ['no' => 错误码, 'info' => 错误描述]；无错误时为空数组
+     */
     public function getError()
     {
         return $this->respObjData['error'];
     }
 
     /**
-     * 所有响应数据
+     * 获取本次响应的完整原始数据
+     *
+     * 包含 success、http_code、servers、headers、body、error 六个键，
+     * 未发起请求时为空数组。
+     *
+     * @return array 响应数据集合
      */
     public function getResp(): array
     {
@@ -1036,10 +1334,13 @@ class Curl
     }
 
     /**
-     * 获取类中的属性
+     * 读取本类内部属性的值
      *
+     * 供调试/扩展使用，可读取私有属性（如 headers、cookieFile、responseObject）；
+     * 属性不存在时返回 null，不会抛异常。
      *
-     * @return void
+     * @param  string  $attr  属性名
+     * @return mixed 属性值；属性不存在时为 null
      */
     public function getAttr(string $attr = '')
     {
@@ -1051,7 +1352,14 @@ class Curl
         }
     }
 
-    // PHP stdClass Object转array
+    /**
+     * 将 stdClass 对象递归转换为数组
+     *
+     * 多层嵌套对象会被逐层转换；数组中的对象同样会被转换，标量原样返回。
+     *
+     * @param  mixed  $array  待转换的数据，可为对象、数组或标量
+     * @return mixed 对象或数组返回数组，标量原样返回
+     */
     protected function objToArr($array)
     {
         if (is_object($array)) {
@@ -1099,6 +1407,8 @@ class Curl
     {
         // 设置运行时间为无限制
         set_time_limit(0);
+        // 前一次请求结束后句柄会被置空，这里必须先初始化，否则 curl_setopt(null) 抛 TypeError
+        $this->initCurl();
         $url = trim($url);
         // 设置你需要抓取的URL
         curl_setopt($this->ch, CURLOPT_URL, $url);
@@ -1106,30 +1416,35 @@ class Curl
         curl_setopt($this->ch, CURLOPT_HEADER, 0);
         // 运行cURL，请求网页
         $file = curl_exec($this->ch);
-        // 关闭URL请求
-        curl_close($this->ch);
+        // 断开句柄引用（curl_close 自 PHP 8.0 起无作用，8.5 起弃用）
+        $this->ch = null;
         // 将文件写入获得的数据
         $write = @fopen($saveFile, 'w');
         if (! $write) {
             return false;
         }
-        if (! fwrite($write, $file)) {
-            return false;
-        }
-        if (! fclose($write)) {
-            return false;
+        // 无论写入是否成功都必须关闭句柄：原实现在 fwrite 失败时提前 return，造成句柄泄漏。
+        try {
+            // curl_exec 失败时 $file 为 false，不应写入。
+            // fwrite 返回 0 表示写入 0 字节（空响应，合法），只有严格 false 才算失败，
+            // 原写法 `! fwrite(...)` 会把空响应误判为写入错误。
+            if ($file === false || fwrite($write, $file) === false) {
+                return false;
+            }
+        } finally {
+            fclose($write);
         }
 
         return true;
     }
 
     /**
-     * 生成随机的userAgent
+     * 随机生成一个常见浏览器的 User-Agent
      *
+     * 从内置的 PC/移动端（含微信内置浏览器等）UA 列表中随机取一条，
+     * 供 get()/post()/put() 等方法在请求前覆盖 CURLOPT_USERAGENT。
      *
-     * @DateTime 2018-12-28
-     *
-     * @return string [type]       [description]
+     * @return string 随机 User-Agent 字符串
      */
     protected function randUserAgent(): string
     {

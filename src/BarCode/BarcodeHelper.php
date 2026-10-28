@@ -15,6 +15,10 @@ class BarcodeHelper
 {
     /**
      * 快速生成条码
+     *
+     * 按需把 options 中的 width/height/bgColor/barColor/showText 透传给构建器，
+     * 再按 options['format']（png/svg/html，默认 png）把结果保存到指定路径。
+     * 任何异常都会被捕获并记录日志，方法只以布尔值表示成败，不向上抛出。
      * 
      * @param string $type 条码类型
      * @param string $data 条码数据
@@ -54,6 +58,11 @@ class BarcodeHelper
 
     /**
      * 批量生成条码
+     *
+     * 先校验数据列表非空，创建输出目录并确认可写，然后按 options['batchSize']
+     * （默认 100）分批遍历生成。每项可用 ['data' => ..., 'filename' => ...] 指定
+     * 文件名基名（会自动清洗目录分隔符与非法字符），否则用 options['prefix']
+     * 加序号命名；单项失败只计入 failed，不影响后续项。
      * 
      * @param array $dataList 数据列表 ['data1', 'data2', ...] 或 [['data' => '...', 'filename' => '...'], ...]
      * @param string $type 条码类型
@@ -337,6 +346,9 @@ class BarcodeHelper
 
     /**
      * 计算校验位
+     *
+     * 通过工厂按类型创建临时生成器并委托其计算，数据格式不合法时统一
+     * 包装为 BarcodeException 抛出。
      * 
      * @param string $type 条码类型
      * @param string $data 数据
@@ -387,6 +399,9 @@ class BarcodeHelper
 
     /**
      * 检查环境支持
+     *
+     * 逐项检查 GD 扩展与 imagepng、memory_limit 配置、临时目录可写性。
+     * 仅 GD 缺失会把 passed 置为 false，临时目录不可写只标记为 warning。
      * 
      * @return array 环境检查结果
      */

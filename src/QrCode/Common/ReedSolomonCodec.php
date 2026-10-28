@@ -170,6 +170,13 @@ final class ReedSolomonCodec
 
     /**
      * Encodes data and writes result back into parity array.
+     *
+     * 对 $data 中的有效码字做多项式除法，计算出的纠错码字写入 $parity
+     * （长度应为 numRoots）。$parity 会先被清零，原内容不保留；$data
+     * 仅作为输入读取，不会被修改。
+     *
+     * @param SplFixedArray $data 待编码的数据码字，元素为 0~255 的整数
+     * @param SplFixedArray $parity 输出用的纠错码字数组，长度需不小于 numRoots
      */
     public function encode(SplFixedArray $data, SplFixedArray $parity) : void
     {
@@ -207,6 +214,15 @@ final class ReedSolomonCodec
 
     /**
      * Decodes received data.
+     *
+     * 先计算校验子判断是否存在错误，无错时直接返回 0；随后用
+     * Berlekamp-Massey 求错误定位多项式、Chien 搜索求根、Forney 公式
+     * 计算错误值，并就地修正 $data。若定位多项式次数与根的个数不符，
+     * 说明错误数量超出纠错能力，返回 null 表示不可纠正。
+     *
+     * @param SplFixedArray $data 接收到的码字，会被就地修正为纠错后的数据
+     * @param SplFixedArray|null $erasures 可选的已知擦除位置；非空时会被重写为检测到的错误位置
+     * @return int|null 成功时返回纠正（含擦除）的数量，无法纠正时返回 null
      */
     public function decode(SplFixedArray $data, ?SplFixedArray $erasures = null) : ?int
     {
@@ -441,6 +457,12 @@ final class ReedSolomonCodec
 
     /**
      * Computes $x % GF_SIZE, where GF_SIZE is 2**GF_BITS - 1, without a slow divide.
+     *
+     * 采用折叠减法代替取模：反复把超出 blockSize 的高位折回低位，
+     * 直到结果落在 [0, blockSize) 内，用于伽罗华域的指数归一化。
+     *
+     * @param int $x 待取模的整数，可为大正数
+     * @return int 取模结果，范围为 0~blockSize
      */
     private function modNn(int $x) : int
     {

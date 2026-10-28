@@ -307,6 +307,13 @@ class Compressor
 
     /**
      * 兼容旧版 API 的 set 方法
+     *
+     * 内部转调 setSource() 完成源图校验与信息解析，可选同时记录保存路径。
+     *
+     * @param string $srcPath 源图片路径，必须存在且可读
+     * @param string|null $savePath 保存路径，null 表示稍后由 save() 决定
+     * @return static 当前实例，便于链式调用
+     * @throws Exception 源图片不存在、不可读或格式不受支持时抛出
      * @deprecated 请使用 setSource()
      */
     public function set(string $srcPath, ?string $savePath = null): static
@@ -457,9 +464,16 @@ class Compressor
 
     /**
      * 设置目标尺寸
+     *
+     * 仅记录目标宽高与是否保持比例，实际缩放发生在 process()/save() 阶段；
+     * 传入 0 表示该维度按比例自动推算。同时把裁剪模式重置为 STRETCH，
+     * 避免复用实例时残留上一次的 CROP_FILL 设置。
+     *
      * @param int $width 目标宽度（0=自动）
      * @param int $height 目标高度（0=自动）
      * @param bool $maintainRatio 是否保持比例
+     * @return static 当前实例，便于链式调用
+     * @throws Exception 宽或高为负数时抛出
      */
     public function resize(int $width, int $height, bool $maintainRatio = true): static
     {
@@ -471,6 +485,9 @@ class Compressor
 
     /**
      * 按宽度等比缩放
+     *
+     * 依据源图宽高比推算目标高度（四舍五入），并把裁剪模式切回 STRETCH，
+     * 确保走整体缩放而非居中裁切分支。需先调用 setSource()。
      *
      * @param int $width 目标宽度（像素）
      * @return $this
@@ -489,6 +506,9 @@ class Compressor
     /**
      * 按高度等比缩放
      *
+     * 依据源图宽高比推算目标宽度（四舍五入），并把裁剪模式切回 STRETCH，
+     * 确保走整体缩放而非居中裁切分支。需先调用 setSource()。
+     *
      * @param int $height 目标高度（像素）
      * @return $this
      * @throws Exception 高度须大于0，且需要先调用 setSource
@@ -505,6 +525,9 @@ class Compressor
 
     /**
      * 按比例缩放
+     *
+     * 以源图尺寸乘以比例得到目标宽高（四舍五入），并置为 STRETCH 模式。
+     * 需先调用 setSource()；比例大于 1 即为放大。
      *
      * @param float $ratio 缩放比例（如 0.5 表示缩小到一半）
      * @return $this
@@ -559,6 +582,9 @@ class Compressor
     /**
      * 裁剪指定区域
      *
+     * 记录裁剪矩形，实际裁剪在 process() 阶段执行；负的起始坐标会被夹紧为 0，
+     * 但宽高不做上界检查，超出源图范围的部分由 GD 自行处理。
+     *
      * @param int $x 起始X坐标
      * @param int $y 起始Y坐标
      * @param int $w 裁剪宽度
@@ -590,8 +616,13 @@ class Compressor
     }
 
     /**
-     * 设置压缩质量（修正版）
-     * 质量值 0-100，值越大越清晰、文件越大
+     * 设置压缩质量（compress 的别名）
+     *
+     * 语义与 setQuality() 完全一致：质量值 0-100，值越大越清晰、文件越大。
+     *
+     * @param int $quality 质量值 0-100
+     * @return static 当前实例，便于链式调用
+     * @throws Exception 质量值不在 0-100 之间时抛出
      */
     public function compress(int $quality = 80): static
     {
@@ -600,6 +631,9 @@ class Compressor
 
     /**
      * 设置压缩质量
+     *
+     * 保存时按输出格式换算：PNG 取 (100-q)/10 作为 0-9 的压缩等级，
+     * JPEG/WebP 直接使用 0-100 的质量值。
      *
      * @param int $q 质量值 0-100，值越大越清晰、文件越大
      * @return $this
@@ -653,6 +687,9 @@ class Compressor
     /**
      * 设置输出格式
      *
+     * 格式名不区分大小写，jpg 会被归一化为 jpeg；转换仅在保存时执行，
+     * 目标格式与原图不同会经历一次重新编码。
+     *
      * @param string $f 目标格式：png/jpeg/webp/gif/bmp 或 jpg
      * @return $this
      * @throws Exception 不支持的格式时抛出
@@ -667,8 +704,11 @@ class Compressor
         return $this;
     }
 
+    /** 设置输出格式为 PNG（保留透明通道） @return $this */
     public function toPng(): static  { $this->outFormat = self::F_PNG; return $this; }
+    /** 设置输出格式为 JPEG（不支持透明） @return $this */
     public function toJpeg(): static { $this->outFormat = self::F_JPEG; return $this; }
+    /** 设置输出格式为 WebP（支持透明，文件更小） @return $this */
     public function toWebp(): static { $this->outFormat = self::F_WEBP; return $this; }
 
     /**
@@ -679,13 +719,29 @@ class Compressor
     public function rotate(int $deg): static { $this->rotateAngle = ($this->rotateAngle + $deg) % 360; return $this; }
     /**
      * 顺时针旋转图片
+     *
+     * 内部以 -$deg 转调 rotate()，因此与 rotate($deg) 的旋转方向相反；
+     * 角度会累加到已有旋转量上并对 360 取模，负数结果同样参与后续计算。
+     *
      * @param int $deg 旋转角度
      * @return $this
      */
     public function rotateClockwise(int $deg): static { return $this->rotate(-$deg); }
-    /** 水平翻转图片 @return $this */
+    /**
+     * 水平翻转图片
+     *
+     * 仅置位标志，实际翻转在 process() 阶段执行；重复调用不会叠加（仍只翻一次）。
+     *
+     * @return $this
+     */
     public function flipH(): static { $this->flipHorizontal = true; return $this; }
-    /** 垂直翻转图片 @return $this */
+    /**
+     * 垂直翻转图片
+     *
+     * 仅置位标志，实际翻转在 process() 阶段执行；重复调用不会叠加（仍只翻一次）。
+     *
+     * @return $this
+     */
     public function flipV(): static { $this->flipVertical = true; return $this; }
     /** 水平翻转图片（别名） @return $this */
     public function flipHorizontal(): static { return $this->flipH(); }
@@ -694,7 +750,12 @@ class Compressor
 
     /**
      * 等比例缩放（兼容旧版）
+     *
+     * 直接转调 scale()，参数语义为缩放比例而非百分比（1 表示原始尺寸）；
+     * 需先调用 setSource()，比例非法时由 scale() 抛出异常。
+     *
      * @param float $percent 缩放比例
+     * @return static 当前实例，便于链式调用
      */
     public function proportion(float $percent = 1): static
     {
@@ -1008,8 +1069,14 @@ class Compressor
 
     /**
      * 保存到文件
+     *
+     * 先执行 process() 完成缩放/裁剪/水印等处理，再按输出格式换算质量并写入
+     * 目标文件（父目录不存在时自动创建）。若设置了 smartCompress() 目标大小，
+     * 会在此阶段二分搜索最优质量。保存后释放 GD 资源并返回结果信息。
+     *
      * @param string|null $path 保存路径，null则覆盖源图
-     * @return array 结果信息
+     * @return array 结果信息（含源/输出尺寸、体积、压缩比等）
+     * @throws Exception 目录创建失败或写入失败时抛出
      */
     public function save(?string $path = null): array
     {
@@ -1086,10 +1153,15 @@ class Compressor
     }
 
     /**
-     * 保存图片到文件
+     * 按输出格式写出图片文件
+     *
+     * 依据 outFormat 分派到 imagepng/imagejpeg/imagewebp/imagegif/imagebmp，
+     * 质量参数会先夹紧到各格式的合法区间；当前环境缺少 webp/bmp 支持或写出
+     * 失败时抛出异常。
      *
      * @param string $path 保存路径
      * @param int $q 质量参数
+     * @return void
      * @throws Exception 保存失败时抛出
      */
     private function saveImage(string $path, int $q): void
@@ -1223,8 +1295,15 @@ class Compressor
 
     /**
      * 批量处理图片
-     * @param array $items 处理项数组
-     * @param Closure|null $progress 进度回调
+     *
+     * 复用同一实例逐项处理，每项开始前重置状态；单项失败不会中断整批，而是
+     * 记录 ['success' => false, 'error' => ...]。支持的键：src（必填）、dest、
+     * width/height、crop（为真时用 fill 居中裁剪，否则 resize）、quality、format。
+     * 进度回调在第 i 项处理完后触发。
+     *
+     * @param array $items 处理项数组，每个元素为含 src 等键的配置数组
+     * @param Closure|null $progress 进度回调，签名 (item, result, index, total)
+     * @return array 与输入顺序一致的结果列表，元素为 ['success'=>bool, 'info'=>array] 或 ['success'=>false, 'error'=>string]
      */
     public static function batch(array $items, ?Closure $progress = null): array
     {

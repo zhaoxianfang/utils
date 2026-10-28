@@ -9,12 +9,21 @@ use RuntimeException;
 
 /**
  * 密码处理类
- * 提供密码哈希、验证、强度评估和强密码生成功能
- * 基于PHP 8.2+ password_* 函数和原生随机扩展
  *
- * @package Crypto
+ * 提供密码哈希（bcrypt / argon2i / argon2id）、验证、重哈希检测、强度评估、
+ * 安全强密码生成等功能，基于 PHP 8.2+ 的 password_* 函数与原生加密安全随机
+ * 扩展实现。所有随机材料均使用 CSPRNG（random_int / random_bytes），绝不采用
+ * mt_rand 等非安全随机源。
+ *
+ * @package zxf\Utils\Crypto
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * // 使用 bcrypt 对密码哈希（cost 默认 12，越大越慢越安全）
+ * $hash = \zxf\Utils\Crypto\Password::bcrypt('user-password-here');
+ * // 验证密码：返回 true / false，永不抛异常
+ * $ok   = \zxf\Utils\Crypto\Password::verify('user-password-here', $hash);
  */
 class Password
 {
@@ -48,9 +57,14 @@ class Password
     /**
      * 使用 bcrypt 哈希密码
      *
+     * bcrypt 自带盐值并内置成本因子（cost），哈希结果已包含算法与参数信息，
+     * 可直接存入数据库，无需自行管理盐值。cost 建议在服务器可承受范围内尽量调大。
+     *
      * @param string $password 明文密码
-     * @param array  $options 选项（cost: 10-31，默认12）
-     * @return string 密码哈希
+     * @param array  $options 选项（cost: 4-31，默认 10；推荐 12）
+     * @return string 密码哈希（形如 $2y$...）
+     * @throws InvalidArgumentException 当密码为空时抛出
+     * @throws RuntimeException 当哈希失败（如 cost 超出范围）时抛出
      */
     public static function bcrypt(string $password, array $options = []): string
     {
@@ -67,9 +81,15 @@ class Password
     /**
      * 使用 Argon2id 哈希密码
      *
+     * Argon2id 是抗 GPU/侧信道攻击的推荐内存硬化算法。三个关键参数：
+     * memory_cost（内存消耗，字节）、time_cost（迭代次数）、threads（并行度）。
+     * 使用前应确保当前 PHP 以 --with-password-argon2 编译支持。
+     *
      * @param string $password 明文密码
      * @param array  $options 选项（memory_cost, time_cost, threads）
-     * @return string 密码哈希
+     * @return string 密码哈希（形如 $argon2id$...）
+     * @throws InvalidArgumentException 当密码为空时抛出
+     * @throws RuntimeException 当当前环境不支持 Argon2id 或哈希失败时抛出
      */
     public static function argon2id(string $password, array $options = []): string
     {
@@ -89,9 +109,14 @@ class Password
     /**
      * 使用 Argon2i 哈希密码
      *
+     * Argon2i 与 Argon2id 类似，但 Argon2id 在抵御侧信道攻击上更优，新项目
+     * 通常优先选 Argon2id。同样需 PHP 编译支持 Argon2。
+     *
      * @param string $password 明文密码
-     * @param array  $options 选项
-     * @return string 密码哈希
+     * @param array  $options 选项（memory_cost, time_cost, threads）
+     * @return string 密码哈希（形如 $argon2i$...）
+     * @throws InvalidArgumentException 当密码为空时抛出
+     * @throws RuntimeException 当当前环境不支持 Argon2i 或哈希失败时抛出
      */
     public static function argon2i(string $password, array $options = []): string
     {
@@ -109,11 +134,14 @@ class Password
     }
 
     /**
-     * 验证密码
+     * 验证密码与哈希是否匹配
+     *
+     * 委托 PHP 原生 password_verify()，自动识别 bcrypt、argon2i、argon2id
+     * 等由本类哈希方法产出的格式；哈希串格式非法时返回 false 而不抛异常。
      *
      * @param string $password 明文密码
-     * @param string $hash     密码哈希
-     * @return bool 验证结果
+     * @param string $hash     由 hashPassword()/argon2i() 等方法生成的哈希
+     * @return bool 匹配返回 true，否则返回 false
      */
     public static function verify(string $password, string $hash): bool
     {
@@ -134,10 +162,14 @@ class Password
     }
 
     /**
-     * 获取哈希信息
+     * 获取密码哈希的算法与选项信息
      *
-     * @param string $hash 密码哈希
-     * @return array 哈希信息
+     * 返回 password_get_info() 的原始结构：algo（算法常量）与 algoName
+     * （算法名称），以及 options（cost、memory_cost 等参数）。哈希串非法时
+     * 算法名称为 "unknown"，且不会抛异常。
+     *
+     * @param string $hash 密码哈希串
+     * @return array{algo:int,algoName:string,options:array} 算法常量、算法名称与选项
      */
     public static function getInfo(string $hash): array
     {
@@ -145,11 +177,15 @@ class Password
     }
 
     /**
-     * 评估密码强度
+     * 评估密码强度并给出改进建议
+     *
+     * 按长度、字符类别、额外长度与特殊符号累加得分（上限 100），映射为
+     * 极弱/弱/中等/强/极强；未启用的 require_* 规则既不加分也不报错。
+     * 返回的 is_acceptable 要求得分不低于 60 且没有任何规则违规。
      *
      * @param string $password 要评估的密码
-     * @param array  $rules    自定义规则（覆盖默认规则）
-     * @return array 评估结果
+     * @param array  $rules    自定义规则（覆盖默认规则中同名键，如 min_length、require_uppercase）
+     * @return array{score:int,level:string,length:int,issues:array<int,string>,is_acceptable:bool} 得分、等级、长度、问题清单与是否可接受
      */
     public static function strength(string $password, array $rules = []): array
     {
@@ -230,6 +266,10 @@ class Password
     /**
      * 生成强密码
      *
+     * 先从启用的每种字符类别各取一个字符保证覆盖，再随机补齐到指定长度，
+     * 最后打乱顺序。excludeChars 中的字符会从可选字符集中剔除。长度小于 4
+     * 或所有字符类别均被关闭（或剔除后无可用字符）时抛出异常。
+     *
      * @param int    $length        密码长度，默认16
      * @param bool   $useUppercase  包含大写字母
      * @param bool   $useLowercase  包含小写字母
@@ -237,6 +277,7 @@ class Password
      * @param bool   $useSpecial    包含特殊字符
      * @param string $excludeChars  排除的字符
      * @return string 生成的密码
+     * @throws InvalidArgumentException 当长度小于 4 或所有字符类型均被关闭时抛出
      */
     public static function generate(int $length = 16, bool $useUppercase = true, bool $useLowercase = true, bool $useNumbers = true, bool $useSpecial = true, string $excludeChars = ''): string
     {
@@ -292,7 +333,9 @@ class Password
             $password .= $chars[random_int(0, $charLength - 1)];
         }
 
-        // 打乱顺序
+        // 注意：str_shuffle 底层使用 PHP 的 mt_rand（梅森旋转，非密码学安全随机源）。
+        // 此处仅用于打乱已生成的字符在明文中的排列顺序，随机字符本身已用 random_int
+        // 抽取；若对顺序有强安全需求，应改用基于 random_int 的 Fisher-Yates 打乱。
         return str_shuffle($password);
     }
 
@@ -355,7 +398,8 @@ class Password
      * 获取推荐的bcrypt cost值
      *
      * @param float $targetTime 目标耗时（秒），默认0.25
-     * @return int 推荐的cost值
+     * @return int 推荐的cost值（10-31，上限 31 对应 bcrypt 最高成本）
+     * @throws RuntimeException 当 bcrypt 哈希失败（如 cost 超出范围）时抛出
      */
     public static function recommendBcryptCost(float $targetTime = 0.25): int
     {
@@ -382,7 +426,9 @@ class Password
     }
 
     /**
-     * 内部单词列表
+     * 内部单词列表（用于生成易记密码的候选词）
+     *
+     * @return array<string> 小写英文单词数组
      */
     private static function getWordList(): array
     {

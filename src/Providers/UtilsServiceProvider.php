@@ -8,10 +8,23 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Foundation\Console\AboutCommand;
 use Composer\InstalledVersions;
 
+/**
+ * zxf/utils 的 Laravel 服务提供者
+ *
+ * 负责将配置文件发布到应用配置目录，并在 Artisan `about` 命令中登记本包版本信息。
+ *
+ * @package zxf\Utils\Providers
+ * @version 1.0.0
+ * @license MIT
+ */
 class UtilsServiceProvider extends ServiceProvider
 {
     /**
      * 启动服务
+     *
+     * 发布配置文件，并将 zxf/utils 版本登记到 `about` 命令的 Extend 分组。
+     *
+     * @return void
      */
     public function boot(): void
     {
@@ -33,6 +46,10 @@ class UtilsServiceProvider extends ServiceProvider
 
     /**
      * 注册服务
+     *
+     * 本包无需在容器中绑定任何服务，故此处为空实现。
+     *
+     * @return void
      */
     public function register(): void
     {

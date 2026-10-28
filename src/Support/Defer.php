@@ -33,6 +33,13 @@ use Closure;
 use RuntimeException;
 use Throwable;
 
+/**
+ * 延迟执行工具类
+ *
+ * 实现类似 Go 语言 defer 的延迟执行机制：注册的回调在对象销毁或显式
+ * execute() 时按后进先出（LIFO）顺序执行，常用于资源释放、锁释放、
+ * 计时收尾等需要确保「无论成功失败都执行」的场景。
+ */
 final class Defer
 {
     /** @var Closure[] */
@@ -43,6 +50,11 @@ final class Defer
 
     private bool $executed = false;
 
+    /**
+     * 创建延迟执行实例
+     *
+     * @return static
+     */
     public static function make(): self
     {
         return new self();
@@ -55,6 +67,7 @@ final class Defer
      * 并收到一个 `Throwable|null` 参数（即 call() 中捕获到的异常，没有则为 null）。
      *
      * @param Closure(Throwable|null): mixed $callback
+     * @return self 当前实例，便于链式注册
      *
      * @throws RuntimeException 延迟回调已执行完毕后再注册时抛出
      */
@@ -113,6 +126,10 @@ final class Defer
 
     /**
      * 获取捕获的异常（如果有）
+     *
+     * 仅在 call() 执行期间发生异常时被赋值，可提供给延迟回调判断是否走了异常分支。
+     *
+     * @return Throwable|null 捕获到的异常，未发生异常时返回 null
      */
     public function caught(): ?Throwable
     {

@@ -11,6 +11,13 @@ use zxf\Utils\OAuth2\Connector\Gateway;
 use zxf\Utils\OAuth2\Exception\OAuthException;
 use zxf\Utils\OAuth2\Helper\ConstCode;
 
+/**
+ * 快手 OAuth2 授权登录网关
+ *
+ * 对接快手开放平台，采用 OAuth2 授权码模式获取用户身份凭证。
+ * 因快手 openapi 的参数名（app_id/app_secret）与父类不一致，自带 access_token 获取流程。
+ * 提供授权跳转、用户信息、openid、令牌刷新与校验等能力。
+ */
 class Kuaishou extends Gateway
 {
     const API_BASE = 'https://open.kuaishou.com/';
@@ -20,6 +27,11 @@ class Kuaishou extends Gateway
 
     /**
      * 得到跳转地址
+     *
+     * 生成前先调用 saveState() 落地 state 供回调校验；使用快手要求的
+     * app_id 参数名（而非 client_id），scope 缺省为 user_info，state 缺省为空串。
+     *
+     * @return string 完整的授权跳转 URL，需引导用户浏览器跳转访问
      */
     public function getRedirectUrl()
     {
@@ -120,6 +132,13 @@ class Kuaishou extends Gateway
 
     /**
      * 检验授权凭证AccessToken是否有效
+     *
+     * 携带 access_token 请求用户信息接口，响应中含 result 字段即视为有效；
+     * 未传 $accessToken 时使用当前 token 缓存。任何异常都会被捕获并返回 false，
+     * 注意即使 token 无效，只要接口返回结构正常也可能被判为有效。
+     *
+     * @param string|null $accessToken 待校验的 accessToken，null 表示使用当前 token
+     * @return bool 有效返回 true，无效或请求异常返回 false
      */
     public function validateAccessToken($accessToken = null)
     {
@@ -141,6 +160,12 @@ class Kuaishou extends Gateway
 
     /**
      * 刷新AccessToken续期
+     *
+     * 以 grant_type=refresh_token 换取新令牌，成功后整体替换当前 token 缓存；
+     * 响应不含 access_token 时不做修改并返回 false（不抛异常）。
+     *
+     * @param string $refreshToken 刷新令牌，来自首次授权返回的 refresh_token
+     * @return bool 刷新成功返回 true，失败返回 false
      */
     public function refreshToken($refreshToken)
     {

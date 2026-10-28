@@ -266,6 +266,9 @@ class Domain
     /**
      * 生成随机域名
      *
+     * 由小写字母与数字随机组合出指定长度的名称，再拼上顶级域名；
+     * 仅作格式示意，不保证域名未被注册。长度小于 1 时只返回 ".<tld>"。
+     *
      * @param string $tld    顶级域名，默认 "com"
      * @param int    $length 随机名称长度，默认 8
      * @return string 随机域名，如 "a3k9m2p7.com"

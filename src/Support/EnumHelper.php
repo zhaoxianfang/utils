@@ -106,9 +106,12 @@ final class EnumHelper
     /**
      * 根据值获取枚举实例，失败返回 null
      *
+     * 仅适用于 BackedEnum；纯枚举或非法值不会抛异常，统一返回 null。
+     *
      * @template T of BackedEnum
-     * @param class-string<T> $enumClass
-     * @return T|null
+     * @param class-string<T> $enumClass 枚举类名
+     * @param int|string $value 待匹配的枚举值
+     * @return T|null 匹配到的枚举实例，类名非法或值不存在时返回 null
      */
     public static function tryFrom(string $enumClass, int|string $value): ?BackedEnum
     {
@@ -127,9 +130,12 @@ final class EnumHelper
     /**
      * 根据名称获取枚举实例，失败返回 null
      *
+     * 同时适用于纯枚举与 BackedEnum，按 case 名称精确匹配（区分大小写）。
+     *
      * @template T of UnitEnum
-     * @param class-string<T> $enumClass
-     * @return T|null
+     * @param class-string<T> $enumClass 枚举类名
+     * @param string $name 枚举 case 名称
+     * @return T|null 匹配到的枚举实例，类名非法或名称不存在时返回 null
      */
     public static function tryFromName(string $enumClass, string $name): ?UnitEnum
     {
@@ -148,7 +154,11 @@ final class EnumHelper
     /**
      * 检查值是否在枚举中
      *
-     * @param class-string<BackedEnum> $enumClass
+     * 基于 tryFrom()，非 BackedEnum 或值不存在时返回 false，不抛异常。
+     *
+     * @param class-string<BackedEnum> $enumClass 枚举类名
+     * @param int|string $value 待检查的枚举值
+     * @return bool 存在返回 true，否则返回 false
      */
     public static function hasValue(string $enumClass, int|string $value): bool
     {
@@ -158,7 +168,11 @@ final class EnumHelper
     /**
      * 检查名称是否在枚举中
      *
-     * @param class-string<UnitEnum> $enumClass
+     * 基于 tryFromName()，类名非法或名称不存在时返回 false，不抛异常。
+     *
+     * @param class-string<UnitEnum> $enumClass 枚举类名
+     * @param string $name 待检查的 case 名称
+     * @return bool 存在返回 true，否则返回 false
      */
     public static function hasName(string $enumClass, string $name): bool
     {
@@ -220,7 +234,13 @@ final class EnumHelper
     /**
      * 获取枚举的注释（DocBlock）
      *
-     * @param class-string<UnitEnum> $enumClass
+     * 通过反射读取每个 case 的 DocBlock 文本并去除注释符号，
+     * 以「case 名称 => 描述文本」形式返回；无注释的 case 值为空字符串。
+     *
+     * @param class-string<UnitEnum> $enumClass 枚举类名
+     * @return array<string, string> case 名称 => DocBlock 文本
+     *
+     * @throws \InvalidArgumentException 传入的不是已定义的枚举时抛出
      */
     public static function descriptions(string $enumClass): array
     {
@@ -241,6 +261,11 @@ final class EnumHelper
 
     /**
      * 判断给定的类名是否为枚举
+     *
+     * 基于 enum_exists()，未定义的类名同样返回 false，不会触发自动加载报错。
+     *
+     * @param string $class 待判断的类名（含命名空间）
+     * @return bool 是已定义的枚举返回 true，否则返回 false
      */
     public static function isEnum(string $class): bool
     {

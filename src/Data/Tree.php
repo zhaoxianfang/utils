@@ -115,6 +115,8 @@ class Tree
 
     private array $data = []; // 原始数据数组
 
+    private ?array $indexById = null; // id -> 节点 的惰性索引，避免祖先/子孙查询退化为 O(n^2)
+
     private string $id = 'id'; // 节点ID字段名，默认为'id'
 
     private string $pid = 'pid'; // 父节点ID字段名，默认为'pid'
@@ -147,7 +149,13 @@ class Tree
     }
 
     /**
-     * 初始化实例
+     * 获取全局单例（可顺带注入数据）
+     *
+     * 实例不存在时以 $data 创建；已存在且 $data 非空时用其覆盖现有数据
+     * （会同时使 id 索引失效）。因此传入的非空数据会替换已有内容，而不是追加。
+     *
+     * @param array $data 初始/替换用的原始数据数组，空数组表示不改动现有数据
+     * @return static 单例实例
      */
     public static function instance(array $data = []): static
     {
@@ -161,14 +169,18 @@ class Tree
     }
 
     /**
-     * 设置数据
+     * 设置原始数据
      *
+     * 整体替换内部数据数组（不追加），并让缓存的 id 索引失效，保证后续
+     * findNode() 等查询基于新数据重建索引。
      *
-     * @return self
+     * @param array $data 节点数组，每个元素为一条含 id/pid 等字段的记录
+     * @return self 当前实例，便于链式调用
      */
     public function setData(array $data = [])
     {
         $this->data = $data;
+        $this->invalidateIndex();
 
         return $this;
     }
@@ -176,12 +188,15 @@ class Tree
     /**
      * 设置节点ID字段名
      *
+     * 指定数据中作为主键的字段名，同时使 id 索引失效以便按新字段重建。
      *
-     * @return Tree
+     * @param string $id 主键字段名，默认 id
+     * @return Tree 当前实例，便于链式调用
      */
     public function setId(string $id = 'id')
     {
         $this->id = $id;
+        $this->invalidateIndex();
 
         return $this;
     }
@@ -189,8 +204,8 @@ class Tree
     /**
      * 设置父节点ID字段名
      *
-     *
-     * @return Tree
+     * @param string $pid 父节点字段名，默认 pid
+     * @return Tree 当前实例，便于链式调用
      */
     public function setPid(string $pid = 'pid')
     {
@@ -202,8 +217,8 @@ class Tree
     /**
      * 设置节点名称/标题 字段名
      *
-     *
-     * @return Tree
+     * @param string $title 标题字段名，默认 title
+     * @return Tree 当前实例，便于链式调用
      */
     public function setTitle(string $title = 'title')
     {
@@ -215,8 +230,10 @@ class Tree
     /**
      * 设置子节点列表字段名
      *
+     * 该字段用于承载 toTree() 生成的子节点集合。
      *
-     * @return Tree
+     * @param string $childlist 子节点列表字段名，默认 childlist
+     * @return Tree 当前实例，便于链式调用
      */
     public function setChildlist(string $childlist = 'childlist')
     {
@@ -228,7 +245,11 @@ class Tree
     /**
      * 设置排序字段
      *
-     * @return self
+     * 指定 toTree() 排序时使用的权重字段名；仅记录配置，实际排序在输出阶段
+     * 由 sortNodesByWeight() 执行，缺失该字段的节点按权重 0 参与比较。
+     *
+     * @param string $field 权重字段名，默认 weight
+     * @return self 当前实例，便于链式调用
      */
     public function setWeight(string $field = 'weight')
     {
@@ -238,18 +259,29 @@ class Tree
     }
 
     /**
-     * 存在 $weight 的前提下 根据权重排序的方式, desc 降序 asc 升序
+     * 设置权重排序方向
      *
+     * 仅在设置了权重字段（setWeight）时生效；除 desc/asc 之外的取值一律
+     * 回退为降序，避免产生未定义顺序。
      *
-     * @return self
+     * @param string $sortType 排序方向，desc 降序（默认）或 asc 升序
+     * @return self 当前实例，便于链式调用
      */
     public function setSortType(string $sortType = 'desc')
     {
-        $this->sortType = in_array($sortType, ['desc', 'asc']) ? strtolower($sortType) : 'desc';
+        $this->sortType = in_array($sortType, ['desc', 'asc'], true) ? strtolower($sortType) : 'desc';
 
         return $this;
     }
 
+    /**
+     * 设置根节点 ID（默认 0）
+     *
+     * 用于界定树形结构的根节点判定条件，影响 toTree() 等方法的输出。
+     *
+     * @param int $rootId 作为根节点判定的父 ID 值
+     * @return self
+     */
     public function setRootId(int $rootId = 0)
     {
         $this->rootId = (int) $rootId;
@@ -290,8 +322,11 @@ class Tree
     /**
      * 将原始数据转换为树形结构
      *
-     * 如果之前调用了 setPrefix() 或 withIcon(true)，
-     * 输出结果会自动应用对应的前缀和层级图标。
+     * 以 rootId 为根判定条件组装出多层级数组并返回根节点列表；根节点及其子
+     * 节点均按权重字段与排序方向排序。若之前调用了 setPrefix() 或
+     * withIcon(true)，输出结果会自动应用对应的前缀和层级图标。
+     *
+     * @return array 根节点列表，每个节点含 childlist 字段（无子节点时该字段可能不存在）
      */
     public function toTree(): array
     {
@@ -321,7 +356,11 @@ class Tree
     /**
      * 根据权重字段对节点数组进行排序
      *
-     * @param  array  &$nodes  节点数组
+     * 通过引用就地重排 $nodes（按 sortType 决定升降序，缺失权重字段按 0 处理），
+     * 随后递归对每个节点的子节点做同样排序，最后返回同一数组。
+     *
+     * @param  array  &$nodes  节点数组，传入即被排序
+     * @return array 排序后的节点数组（与入参为同一份数据）
      */
     private function sortNodesByWeight(array &$nodes): array
     {
@@ -364,6 +403,12 @@ class Tree
 
     /**
      * 获取指定节点的所有子孙节点ID(包含自己)
+     *
+     * 遍历原始数据，用 isDescendant() 判断每个节点是否位于 $id 子树中；
+     * 结果顺序与数据存储顺序一致，命中顺序码不保证与层级顺序相同。
+     *
+     * @param int $id 目标节点ID
+     * @return array 子孙节点（含自身）的ID列表
      */
     public function getChildrenAndMeIds(int $id): array
     {
@@ -380,6 +425,12 @@ class Tree
 
     /**
      * 获取指定节点的所有子孙节点列表(包含自己)
+     *
+     * 与 getChildrenAndMeIds() 判定逻辑相同，但返回完整的节点数组，顺序为
+     * 数据存储顺序。
+     *
+     * @param int $id 目标节点ID
+     * @return array 子孙节点（含自身）的记录数组
      */
     public function getChildrenAndMeNodes(int $id): array
     {
@@ -396,6 +447,12 @@ class Tree
 
     /**
      * 获取指定节点的所有子孙节点ID(不包含自己)
+     *
+     * 以 isDescendant(..., false) 判定，仅收集 $id 的下级节点；$id 不存在
+     * 或没有下级时返回空数组。
+     *
+     * @param int $id 目标节点ID
+     * @return array 子孙节点的ID列表（不含自身）
      */
     public function getChildrenIds(int $id): array
     {
@@ -412,6 +469,11 @@ class Tree
 
     /**
      * 获取指定节点的所有子孙节点列表(不包含自己)
+     *
+     * 与 getChildrenIds() 判定逻辑相同，返回完整节点数组而非仅 ID。
+     *
+     * @param int $id 目标节点ID
+     * @return array 子孙节点的记录数组（不含自身）
      */
     public function getChildrenNodes(int $id): array
     {
@@ -427,11 +489,55 @@ class Tree
     }
 
     /**
+     * 惰性构建 id -> 节点 索引（仅构建一次，数据变更后失效）
+     */
+    private function buildIndex(): void
+    {
+        $this->indexById = [];
+        foreach ($this->data as $item) {
+            if (isset($item[$this->id])) {
+                $this->indexById[$item[$this->id]] = $item;
+            }
+        }
+    }
+
+    /**
+     * 通过 id 查找节点（O(1)，首次访问时构建索引）
+     *
+     * 首次调用会建立 id => 节点 的索引并缓存，之后直接命中；数据经
+     * setData()、addNode() 等方法变更时索引会被置空以触发重建。
+     *
+     * @param int|string $id 节点ID（与数据中 id 字段类型保持一致才能命中）
+     * @return array|null 节点记录；未找到返回 null
+     */
+    private function findNode(int|string $id): ?array
+    {
+        if ($this->indexById === null) {
+            $this->buildIndex();
+        }
+
+        return $this->indexById[$id] ?? null;
+    }
+
+    /**
+     * 数据变更后使索引失效
+     */
+    private function invalidateIndex(): void
+    {
+        $this->indexById = null;
+    }
+
+    /**
      * 判断指定节点是否是指定父节点的子孙节点
+     *
+     * 沿 pid 链自下而上逐级查找，命中目标父节点即返回 true。通过 $visited
+     * 记录已访问节点，遇到环形数据时提前返回 false，避免无限递归。
      *
      * @param  int  $itemId  要查询的节点id
      * @param  int  $parentId  要查询的父节点id
      * @param  bool  $includeSelf  是否包含自己
+     * @param  array  &$visited  已访问节点集合（内部递归用，外部一般留空）
+     * @return bool 属于该父节点的子孙（或等于自身且 includeSelf 为 true）时返回 true
      */
     private function isDescendant(int $itemId, int $parentId, bool $includeSelf = true, array &$visited = []): bool
     {
@@ -440,17 +546,15 @@ class Tree
         }
         $visited[$itemId] = true;
 
-        foreach ($this->data as $item) {
-            if ($item[$this->id] === $itemId) {// 先找到要查询的那个节点
+        $item = $this->findNode($itemId);
+        if ($item !== null) {// 先找到要查询的那个节点
+            if ($includeSelf ? $item[$this->id] === $parentId : $item[$this->pid] === $parentId) {
+                return true;
+            }
 
-                if ($includeSelf ? $item[$this->id] === $parentId : $item[$this->pid] === $parentId) {
-                    return true;
-                }
-
-                // 一直向上找父节点，判断父节点是否存在要查询的指定 id父节点
-                if ($this->isDescendant($item[$this->pid], $parentId, $includeSelf, $visited)) {
-                    return true;
-                }
+            // 一直向上找父节点，判断父节点是否存在要查询的指定 id父节点
+            if ($this->isDescendant($item[$this->pid], $parentId, $includeSelf, $visited)) {
+                return true;
             }
         }
 
@@ -459,6 +563,12 @@ class Tree
 
     /**
      * 获取指定节点的所有父节点ids(包含自己)
+     *
+     * 沿 pid 链向上收集直到 pid 为 0 或节点缺失，并对 $visited 检测环；
+     * 返回顺序经 array_reverse 处理，为「根 → … → 自身」。
+     *
+     * @param int $id 目标节点ID
+     * @return array 祖辈链ID列表（含自身），由顶层到自身排列
      */
     public function getParentAndMeIds(int $id): array
     {
@@ -473,14 +583,11 @@ class Tree
             $visited[$currentId] = true;
 
             $found = false;
-            foreach ($this->data as $item) {
-                // 找到当前节点
-                if ($item[$this->id] === $currentId) {
-                    $parents[] = $currentId;
-                    $currentId = $item[$this->pid];
-                    $found = true;
-                    break;
-                }
+            $item = $this->findNode($currentId);
+            if ($item !== null) {
+                $parents[] = $currentId;
+                $currentId = $item[$this->pid];
+                $found = true;
             }
 
             if (! $found) {
@@ -493,6 +600,12 @@ class Tree
 
     /**
      * 获取指定节点的所有父节点列表(包含自己)
+     *
+     * 与 getParentAndMeIds() 数据来源与顺序完全一致：沿 pid 链向上收集后
+     * array_reverse，返回「根 → … → 自身」的节点记录数组。
+     *
+     * @param int $id 目标节点ID
+     * @return array 祖辈链节点记录（含自身），由顶层到自身排列
      */
     public function getParentAndMeNodes(int $id): array
     {
@@ -507,14 +620,11 @@ class Tree
             $visited[$currentId] = true;
 
             $found = false;
-            foreach ($this->data as $item) {
-                // 找到当前节点
-                if ($item[$this->id] === $currentId) {
-                    $parents[] = $item;
-                    $currentId = $item[$this->pid];
-                    $found = true;
-                    break;
-                }
+            $item = $this->findNode($currentId);
+            if ($item !== null) {
+                $parents[] = $item;
+                $currentId = $item[$this->pid];
+                $found = true;
             }
 
             if (! $found) {
@@ -522,11 +632,17 @@ class Tree
             }
         }
 
-        return $parents;
+        return array_reverse($parents);
     }
 
     /**
      * 获取指定节点的所有父节点ids(不包含自己)
+     *
+     * 沿 pid 链向上收集但跳过起点自身，并对 $visited 检测环；结果经
+     * array_reverse 处理，为「根 → … → 直接父节点」。
+     *
+     * @param int $id 目标节点ID
+     * @return array 祖辈链ID列表（不含自身），由顶层到直接父节点排列
      */
     public function getParentIds(int $id): array
     {
@@ -541,16 +657,13 @@ class Tree
             $visited[$currentId] = true;
 
             $found = false;
-            foreach ($this->data as $item) {
-                // 找到当前节点
-                if ($item[$this->id] === $currentId) {
-                    if ($currentId !== $id) {
-                        $parents[] = $currentId;
-                    }
-                    $currentId = $item[$this->pid];
-                    $found = true;
-                    break;
+            $item = $this->findNode($currentId);
+            if ($item !== null) {
+                if ($currentId !== $id) {
+                    $parents[] = $currentId;
                 }
+                $currentId = $item[$this->pid];
+                $found = true;
             }
 
             if (! $found) {
@@ -563,6 +676,12 @@ class Tree
 
     /**
      * 获取指定节点的所有父节点列表(不包含自己)
+     *
+     * 与 getParentIds() 判定与顺序完全一致：跳过起点自身向上收集后
+     * array_reverse，返回「根 → … → 直接父节点」的节点记录数组。
+     *
+     * @param int $id 目标节点ID
+     * @return array 祖辈链节点记录（不含自身），由顶层到直接父节点排列
      */
     public function getParentNodes(int $id): array
     {
@@ -577,16 +696,13 @@ class Tree
             $visited[$currentId] = true;
 
             $found = false;
-            foreach ($this->data as $item) {
-                // 找到当前节点
-                if ($item[$this->id] === $currentId) {
-                    if ($currentId !== $id) {
-                        $parents[] = $item;
-                    }
-                    $currentId = $item[$this->pid];
-                    $found = true;
-                    break;
+            $item = $this->findNode($currentId);
+            if ($item !== null) {
+                if ($currentId !== $id) {
+                    $parents[] = $item;
                 }
+                $currentId = $item[$this->pid];
+                $found = true;
             }
 
             if (! $found) {
@@ -594,11 +710,16 @@ class Tree
             }
         }
 
-        return $parents;
+        return array_reverse($parents);
     }
 
     /**
      * 获取所有的根节点ids
+     *
+     * 以严格比较筛选 pid 等于 rootId 的记录（默认 rootId 为 0），返回其 id
+     * 列表；注意 pid 为字符串 "0" 时不会命中，需与 rootId 类型保持一致。
+     *
+     * @return array 根节点ID列表，顺序与数据存储顺序一致
      */
     public function getRootsIds(): array
     {
@@ -643,6 +764,7 @@ class Tree
         if (empty($args)) {
             return $this;
         }
+        $this->invalidateIndex();
 
         // 闭包形式处理
         if ($args[0] instanceof Closure) {
@@ -1124,6 +1246,10 @@ class Tree
 
     /**
      * 获取所有数据的ID值
+     *
+     * 按当前 id 字段名抽取全部主键，返回扁平数组（可能含重复值）。
+     *
+     * @return array 全部节点ID的一维数组
      */
     public function getAllIds(): array
     {
@@ -1131,7 +1257,12 @@ class Tree
     }
 
     /**
-     * 克隆当前Tree实例（PHP 8风格）
+     * 克隆当前 Tree 实例（PHP 8 风格）
+     *
+     * 用同一份数据新建实例，并逐个复制字段名配置、rootId、图标与前缀设置；
+     * 新实例的 id 索引为惰性重建状态，与源实例互不影响。
+     *
+     * @return self 配置与数据一致的新实例
      */
     public function clone(): self
     {
@@ -1306,6 +1437,7 @@ class Tree
         $this->withIcon = false;
         $this->prefixConfig = null;
         // $this->data      = [];
+        $this->invalidateIndex();
 
         return $this;
     }
@@ -1313,12 +1445,16 @@ class Tree
     /**
      * 添加新节点
      *
+     * 把节点追加到原始数据末尾（不校验 id 是否重复），并使索引失效，
+     * 后续 toTree() 调用会按 pid 关系重新组装。
      *
-     * @return self
+     * @param array $node 节点记录，需含 id/pid 等字段才能被正确挂载
+     * @return self 当前实例，便于链式调用
      */
     public function addNode(array $node)
     {
         $this->data[] = $node;
+        $this->invalidateIndex();
 
         return $this;
     }
@@ -1326,12 +1462,23 @@ class Tree
     /**
      * 通过主键id删除节点
      *
+     * 默认级联删除：先收集该节点的全部子孙 ID（getChildrenIds()），再一并移除，
+     * 避免留下 pid 指向已不存在父节点的孤儿记录。传 $cascade = false 可只删自身
+     * （子节点会变成孤儿）。删除后重建索引；索引为顺序列表，不会留下空洞键。
      *
-     * @return self
+     * @param int $id 待删除节点的主键值
+     * @param bool $cascade 是否同时删除全部子孙节点，默认 true
+     * @return self 当前实例，便于链式调用
      */
-    public function removeNode(int $id)
+    public function removeNode(int $id, bool $cascade = true)
     {
-        $this->data = array_filter($this->data, fn ($item) => $item[$this->id] !== $id);
+        $ids = $cascade ? array_merge([$id], $this->getChildrenIds($id)) : [$id];
+
+        $this->data = array_values(array_filter(
+            $this->data,
+            fn ($item) => ! in_array($item[$this->id] ?? null, $ids, true)
+        ));
+        $this->invalidateIndex();
 
         return $this;
     }
@@ -1339,8 +1486,12 @@ class Tree
     /**
      * 通过主键id更新节点
      *
+     * 找到第一个主键匹配的节点后用 array_merge 合并新字段（同名键被覆盖，
+     * 其余字段保留），随后跳出循环并重建索引。未命中时不修改任何数据。
      *
-     * @return self
+     * @param int $id 待更新节点的主键值
+     * @param array $newData 待合并的字段集合
+     * @return self 当前实例，便于链式调用
      */
     public function updateNode(int $id, array $newData)
     {
@@ -1350,6 +1501,8 @@ class Tree
                 break;
             }
         }
+        unset($item);
+        $this->invalidateIndex();
 
         return $this;
     }

@@ -9,24 +9,30 @@ use InvalidArgumentException;
 use RuntimeException;
 
 /**
- * AES加密解密类
- * 支持多种加密模式、填充方式、密钥长度和认证加密
- * 基于PHP 8.2+ openssl扩展实现，包含完整的错误处理和调试功能
+ * AES 加密解密类
  *
- * 主要功能：
- * - 支持所有主流AES加密模式（CBC, ECB, CFB, OFB, CTR, GCM, XTS）
- * - 支持文件加密解密和批量操作
- * - 支持HMAC签名和验证
- * - 支持PBKDF2密钥派生
- * - 完整的调试日志和性能监控
- * - 增强的文件格式和完整性验证
+ * 基于 PHP 8.2+ OpenSSL 扩展实现，支持主流 AES 模式（CBC/ECB/CFB/OFB/CTR/GCM/XTS）、
+ * 文件流式加解密、HMAC 签名验签、PBKDF2 密钥派生，以及带完整性校验的
+ * 「企业级」文件格式。GCM 等为认证加密模式，可在一次调用内同时完成加密与防篡改。
  *
- * @package Crypto
+ * 安全要点：
+ * - IV 使用 random_bytes（CSPRNG）生成；分块加密时按块号派生独立 IV，避免 GCM 下 IV 重用。
+ * - 认证模式（GCM）会附带认证标签，解密失败即代表数据被篡改或密钥错误。
+ * - 从密码派生密钥须使用 generateKeyFromPassword（PBKDF2 + 盐值），切勿直接用密码作密钥。
+ *
+ * @package zxf\Utils\Crypto
  * @author Security Team
- * @version 7.0.0
+ * @version 1.0.0
  * @license MIT
  * @created 2026-01-01
  * @updated 2026-01-15
+ *
+ * @example
+ * // 生成 256 位密钥（切勿硬编码真实密钥，以下仅为占位说明）
+ * $key  = \zxf\Utils\Crypto\AES::generateKey('aes-256-gcm'); // 或自行保管的 'your-secret-key'
+ * $aes  = new \zxf\Utils\Crypto\AES($key, 'aes-256-gcm');
+ * $cipher = $aes->encrypt('敏感数据');      // 输出含 IV（GCM 还含标签）的 Base64 串
+ * $plain  = $aes->decrypt($cipher);
  */
 class AES
 {
@@ -191,7 +197,10 @@ class AES
     }
 
     /**
-     * 记录调试信息
+     * 记录一条 AES 调试日志
+     *
+     * 仅在调试模式开启时输出，否则静默丢弃。输出内容附带毫秒级时间戳与当前
+     * 进程内存占用（MB），便于排查加密流程与内存峰值；该方法不会中断业务逻辑。
      *
      * @param string $message 调试消息
      * @return void
@@ -284,10 +293,11 @@ class AES
     }
 
     /**
-     * 检查加密模式是否需要IV
+     * 检查当前加密模式是否需要 IV（初始化向量）
      *
-     * @return bool 是否需要IV
-     * @access private
+     * ECB 模式不使用 IV，其余模式均需要；IV 必须随机且不可预测，且同一密钥下不可重用。
+     *
+     * @return bool 是否需要 IV
      */
     public function requiresIV(): bool
     {
@@ -295,10 +305,12 @@ class AES
     }
 
     /**
-     * 检查是否为认证加密模式（GCM）
+     * 检查当前模式是否为认证加密模式（GCM）
+     *
+     * 认证加密（AEAD）在解密时会校验认证标签，可同时保证机密性与完整性/真实性，
+     * 相比 CBC 等「加密但不认证」模式更安全，推荐用于网络传输场景。
      *
      * @return bool 是否为认证加密模式
-     * @access private
      */
     public function isAuthenticatedMode(): bool
     {
@@ -335,6 +347,8 @@ class AES
         }
 
         try {
+            // 使用 random_bytes 获取 CSPRNG 熵：IV 必须不可预测且在同一密钥下绝不重用，
+            // 否则（尤其 GCM/CTR 等流模式）会直接泄露明文或破坏认证安全性。
             $iv = random_bytes($ivLength);
             $this->logDebug("生成IV: " . bin2hex($iv) . " (长度: {$ivLength})");
             return $iv;
@@ -365,7 +379,10 @@ class AES
     }
 
     /**
-     * 初始化性能统计
+     * 重置性能统计计数器
+     *
+     * 将加/解密次数、累计处理字节数归零，记录本次统计起始时间，并清空上次操作
+     * 时间与峰值内存，使后续 updatePerformanceStats() 的采样从干净状态开始。
      *
      * @return void
      * @access private
@@ -430,7 +447,14 @@ class AES
     }
 
     /**
-     * 解析 php.ini memory_limit（如 128M / 1G / -1）为字节数；无限制或无法解析返回 -1
+     * 将 php.ini 的 memory_limit 配置解析为字节数
+     *
+     * 支持 K/M/G/T 单位（不区分大小写，如 128M、1G）；值为 -1、空串、false
+     * 或格式无法识别时统一返回 -1，表示内存不受限制。
+     *
+     * @param string|false $limitIni ini_get('memory_limit') 的原始值，失败时为 false
+     * @return int 字节数；-1 表示无限制或无法解析
+     * @access private
      */
     private function parseMemoryLimit(string|false $limitIni): int
     {
@@ -455,9 +479,15 @@ class AES
     }
 
     /**
-     * 分块加密时为每个数据块派生独立 IV：
-     * 在基础 IV 的末尾 4 字节上异或块号（小端），保证块间 IV 不重复。
-     * IV 不足 4 字节（ECB 等无 IV 模式不会走到这里）时原样返回。
+     * 为分块加密的指定数据块派生独立 IV
+     *
+     * 在基础 IV 末尾 4 字节上按小端序异或块号，保证同一密钥下各块 IV 不重复，
+     * 避免分块加密出现相同明文块产生相同密文块。IV 不足 4 字节时（如 ECB 等
+     * 无 IV 模式不会走到该分支）原样返回基础 IV。
+     *
+     * @param int $blockIndex 块序号，从 0 开始，超出 32 位范围时按低 32 位截断
+     * @return string 派生后的 IV，长度与基础 IV 一致
+     * @access private
      */
     private function deriveBlockIv(int $blockIndex): string
     {
@@ -560,11 +590,17 @@ class AES
     /**
      * 分块加密大数据
      *
+     * 按 1MB 固定块长切分输入，逐块加密后以 `|` 连接并整体返回，避免一次性
+     * 处理超大字符串导致内存翻倍。每块使用 deriveBlockIv() 派生的独立 IV，
+     * 认证模式（GCM）下每块输出「IV+标签+密文」，其余需要 IV 的模式输出
+     * 「IV+密文」，两者均再经 Base64 编码；ECB 等无 IV 模式仅编码密文本身。
+     *
      * @param string $data 原始数据
-     * @param int $options 加密选项
-     * @param string|null $additionalData 附加数据
-     * @param int $tagLength 标签长度
-     * @return string 加密结果
+     * @param int $options 加密选项（OPENSSL_RAW_DATA / OPENSSL_ZERO_PADDING）
+     * @param string|null $additionalData 附加认证数据，仅认证模式生效
+     * @param int $tagLength 认证标签长度（字节），仅认证模式生效
+     * @return string 分块加密结果，块间以 `|` 分隔
+     * @throws RuntimeException 任一块加密失败时抛出
      * @access private
      */
     private function encryptChunked(
@@ -615,13 +651,19 @@ class AES
     }
 
     /**
-     * 认证加密模式加密（GCM）
+     * 认证加密模式（GCM）加密
+     *
+     * 使用 openssl_encrypt 产出密文与认证标签，返回值为 Base64 编码的
+     * 「IV+标签+密文」，解密方需按相同顺序拆包。附加数据不参与加密，
+     * 但会参与标签计算，可用于校验上下文完整性。
      *
      * @param string $data 原始数据
-     * @param int $options 加密选项
-     * @param string|null $additionalData 附加数据
-     * @param int $tagLength 认证标签长度
-     * @return string 加密结果
+     * @param int $options 加密选项（OPENSSL_RAW_DATA / OPENSSL_ZERO_PADDING）
+     * @param string|null $additionalData 附加认证数据，null 视为空串
+     * @param int $tagLength 认证标签长度（字节）
+     * @param string|null $forcedIv 强制指定 IV，用于分块加密注入派生 IV；为 null 时使用实例 IV
+     * @return string Base64 编码的「IV+标签+密文」
+     * @throws RuntimeException 加密失败时抛出
      * @access private
      */
     private function encryptAuthenticated(
@@ -657,11 +699,15 @@ class AES
     }
 
     /**
-     * XTS模式加密
+     * XTS 模式加密
+     *
+     * XTS 由 OpenSSL 自身完成扇区调优，这里直接以实例 IV 调用 openssl_encrypt，
+     * 并将 IV 与密文拼接后整体 Base64 编码返回，便于解密时还原起始 IV。
      *
      * @param string $data 原始数据
-     * @param int $options 加密选项
-     * @return string 加密结果
+     * @param int $options 加密选项（OPENSSL_RAW_DATA / OPENSSL_ZERO_PADDING）
+     * @return string Base64 编码的「IV+密文」
+     * @throws RuntimeException 加密失败时抛出
      * @access private
      */
     private function encryptXTS(string $data, int $options): string
@@ -684,11 +730,14 @@ class AES
     }
 
     /**
-     * 打包加密数据
+     * 打包加密结果
      *
-     * @param string $encrypted 加密数据
-     * @param int $options 加密选项
-     * @return string 打包后的数据
+     * 需要 IV 的模式（除 ECB 外）把当前 IV 前置拼到密文前，使解密方能从载荷
+     * 中取回 IV；无 IV 模式仅编码密文。无论哪种分支，返回值均为 Base64 字符串。
+     *
+     * @param string $encrypted 原始密文
+     * @param int $options 加密选项，当前仅用于与其他加密分支保持签名一致
+     * @return string Base64 编码的「IV+密文」或纯密文
      * @access private
      */
     private function packEncryptedData(string $encrypted, int $options): string
@@ -778,10 +827,16 @@ class AES
     /**
      * 分块解密数据
      *
-     * @param string $encryptedData 加密数据
-     * @param int $options 解密选项
-     * @param string|null $additionalData 附加数据
-     * @return string 解密结果
+     * 按 `|` 分隔符逐块拆分密文并解密，拼接为完整明文后返回。认证模式下
+     * 每块先 Base64 解码再交给 decryptAuthenticated() 校验标签；非认证模式下
+     * 每块自带 IV，直接复用 decrypt() 的拆包逻辑。分隔符通过 strpos 迭代定位，
+     * 只对单块切片，避免整份密文被复制进数组。
+     *
+     * @param string $encryptedData 分块加密结果（块间以 `|` 分隔）
+     * @param int $options 解密选项（OPENSSL_RAW_DATA / OPENSSL_ZERO_PADDING）
+     * @param string|null $additionalData 附加认证数据，仅认证模式生效
+     * @return string 拼接后的原始明文
+     * @throws RuntimeException 任一块解密失败时抛出
      * @access private
      */
     private function decryptChunked(
@@ -876,16 +931,24 @@ class AES
     }
 
     /**
-     * XTS模式解密
+     * XTS 模式解密
      *
-     * @param string $data 加密数据
-     * @param int $options 解密选项
-     * @return string 解密结果
+     * 从载荷头部按 openssl_cipher_iv_length() 取回 IV，其余部分为密文，
+     * 再交给 openssl_decrypt 还原明文。入参须为 encryptXTS() 解 Base64 后的
+     * 原始字节串，而非 Base64 文本。
+     *
+     * @param string $data 原始「IV+密文」字节串（已 Base64 解码）
+     * @param int $options 解密选项（OPENSSL_RAW_DATA / OPENSSL_ZERO_PADDING）
+     * @return string 解密后的原始数据
+     * @throws RuntimeException 解密失败时抛出
      * @access private
      */
     private function decryptXTS(string $data, int $options): string
     {
         $ivLength = openssl_cipher_iv_length($this->method);
+        if ($ivLength === false || $ivLength <= 0) {
+            throw new RuntimeException('XTS解密失败: 无法获取 IV 长度');
+        }
         $iv = substr($data, 0, $ivLength);
         $encrypted = substr($data, $ivLength);
 
@@ -1048,12 +1111,17 @@ class AES
     }
 
     /**
-     * 压缩后加密文件
+     * 压缩后加密文件内容
      *
-     * @param resource $inputHandle 输入文件句柄
-     * @param resource $outputHandle 输出文件句柄
-     * @param int $chunkSize 分块大小
-     * @return bool 是否成功
+     * 一次性读入剩余全部输入流，以 gzcompress 最高级别（9）压缩后整体加密，
+     * 输出为「4 字节大端长度 + 密文」写入输出流。适合可整体驻留内存的中小文件；
+     * 大文件会因全量读入而产生较高内存占用。
+     *
+     * @param resource $inputHandle 输入文件句柄，需可读
+     * @param resource $outputHandle 输出文件句柄，需可写
+     * @param int $chunkSize 单次读取的字节数
+     * @return bool 写入成功返回 true
+     * @throws RuntimeException 读取、压缩、加密或写入失败时抛出
      * @access private
      */
     private function encryptFileWithCompression($inputHandle, $outputHandle, int $chunkSize): bool
@@ -1218,12 +1286,17 @@ class AES
     }
 
     /**
-     * 解压解密文件
+     * 解密并解压文件内容
      *
-     * @param resource $inputHandle 输入文件句柄
-     * @param resource $outputHandle 输出文件句柄
-     * @param array $headerInfo 头部信息
-     * @return bool 是否成功
+     * 按「4 字节大端长度 + 密文」读取载荷，解密后 gzuncompress 还原明文，
+     * 并与文件头记录的 original_size 比对，大小不符视为数据损坏并抛错，
+     * 校验通过后一次性写入输出流。
+     *
+     * @param resource $inputHandle 输入文件句柄，定位在加密数据长度字段处
+     * @param resource $outputHandle 输出文件句柄，需可写
+     * @param array $headerInfo 文件头信息，需包含 original_size 键
+     * @return bool 写入成功返回 true
+     * @throws RuntimeException 读取、解密、解压、大小校验或写入失败时抛出
      * @access private
      */
     private function decryptFileWithDecompression($inputHandle, $outputHandle, array $headerInfo): bool
@@ -1376,11 +1449,16 @@ class AES
     }
 
     /**
-     * 写入完整性数据
+     * 向输出流追加文件完整性数据
      *
-     * @param string $inputFile 输入文件
-     * @param resource $outputHandle 输出句柄
+     * 读取原始文件全文，按 createEnhancedFileFooter() 生成 64 字节文件尾
+     * （含原始长度、CRC32 与 SHA-256），写入已打开的加密输出流。因需读取
+     * 全文计算摘要，仅适用于可完整加载的文件。
+     *
+     * @param string $inputFile 原始文件路径，需可读
+     * @param resource $outputHandle 输出句柄，需可写且已写入正文
      * @return void
+     * @throws RuntimeException 读取源文件或写入文件尾失败时抛出
      * @access private
      */
     private function writeIntegrityData(string $inputFile, $outputHandle): void
@@ -1399,12 +1477,17 @@ class AES
     }
 
     /**
-     * 验证文件完整性
+     * 校验解密结果的文件完整性
      *
-     * @param string $inputFile 输入文件
-     * @param string $outputFile 输出文件
-     * @param resource $inputHandle 输入句柄
+     * 从输入句柄当前位置读取 64 字节文件尾，并对已解密的输出文件重新计算摘要，
+     * 交由 validateEnhancedFileFooter() 比对长度、CRC32 与 SHA-256。任一不符
+     * 即抛出异常，调用方应视该输出文件为损坏。
+     *
+     * @param string $inputFile 加密文件路径（仅用于日志与定位）
+     * @param string $outputFile 已解密的输出文件路径
+     * @param resource $inputHandle 加密文件句柄，定位在文件尾起始处
      * @return void
+     * @throws RuntimeException 文件尾读取失败、输出文件不可读或校验不通过时抛出
      * @access private
      */
     private function verifyFileIntegrity(string $inputFile, string $outputFile, $inputHandle): void
@@ -1428,10 +1511,14 @@ class AES
     }
 
     /**
-     * 获取文件信息
+     * 汇总文件的基础元信息
      *
-     * @param string $filePath 文件路径
-     * @return array 文件信息
+     * 返回文件大小、修改时间、CRC32 与 SHA-256 摘要，用于写入文件头或做
+     * 后续一致性比对。stat 失败或文件不可读时抛出异常。
+     *
+     * @param string $filePath 待读取的文件路径
+     * @return array{size:int,mtime:string,crc32:int,sha256:string} 文件大小、格式化修改时间、CRC32 与 SHA-256
+     * @throws RuntimeException 无法获取文件状态或读取内容时抛出
      * @access private
      */
     private function getFileInfo(string $filePath): array
@@ -1690,9 +1777,12 @@ class AES
     }
 
     /**
-     * 获取初始化向量
+     * 获取当前实例使用的初始化向量
      *
-     * @return string 初始化向量
+     * 返回构造函数中生成或注入的原始 IV 字节串（非 Base64 编码）；ECB 等
+     * 不需要 IV 的模式下可能为空串。
+     *
+     * @return string 初始化向量原始字节
      */
     public function getIV(): string
     {
@@ -1700,9 +1790,13 @@ class AES
     }
 
     /**
-     * 获取加密密钥
+     * 获取当前实例使用的加密密钥
      *
-     * @return string 加密密钥
+     * 返回构造函数中传入或生成的原始密钥字节串（非 Base64 编码），长度与
+     * 所选算法匹配（AES-128 为 16 字节，AES-256 为 32 字节，XTS 为新规长度
+     * 的两倍）。调用方应避免将返回值写入日志。
+     *
+     * @return string 加密密钥原始字节
      */
     public function getKey(): string
     {
@@ -1733,12 +1827,16 @@ class AES
     }
 
     /**
-     * 验证HMAC签名
+     * 验证 HMAC 签名（时序安全比较）
+     *
+     * 使用 hash_equals 比较，避免「短路」字符串比较带来的时序侧信道泄露。
+     * 注意：HMAC 使用实例密钥 $this->key 计算，可同时验证数据完整性与来源真实性。
      *
      * @param string $data 原始数据
-     * @param string $hmac HMAC签名
-     * @param string $algorithm 哈希算法
-     * @return bool 验证结果
+     * @param string $hmac 待验证的 HMAC 签名（Base64 编码）
+     * @param string $algorithm 哈希算法，默认 sha256
+     * @return bool 验证通过返回 true，否则 false
+     * @throws InvalidArgumentException 当算法不被支持时抛出
      *
      * 使用示例：
      * $valid = $aes->verifyHMAC('数据内容', $hmacSignature, 'sha256');
@@ -1750,11 +1848,16 @@ class AES
     }
 
     /**
-     * 加密并签名数据
+     * 加密并签名数据（加密 + HMAC 两步封装）
+     *
+     * 先对明文加密，再对「原始明文」计算 HMAC（注意不是对密文签名，避免密文替换攻击），
+     * 返回包含密文、签名、算法、时间戳等的数组，便于传输与后续验签。
      *
      * @param string $data 要加密的数据
-     * @param string $hmacAlgorithm HMAC算法
-     * @return array 包含加密数据和签名的数组
+     * @param string $hmacAlgorithm HMAC 算法，默认 sha256
+     * @return array{encrypted_data:string,signature:string,hmac_algorithm:string,timestamp:int,method:string,data_size:int} 数据包
+     * @throws InvalidArgumentException 当 HMAC 算法不被支持时抛出
+     * @throws RuntimeException 当加密或签名失败时抛出
      *
      * 使用示例：
      * $package = $aes->encryptAndSign('敏感数据', 'sha256');
@@ -1855,6 +1958,9 @@ class AES
 
     /**
      * 重置性能统计
+     *
+     * 将加/解密次数、累计数据量与峰值内存清零，并以当前时刻作为新的统计
+     * 起点；重置后 getPerformanceStats() 的耗时与吞吐指标重新累计。
      *
      * @return void
      */

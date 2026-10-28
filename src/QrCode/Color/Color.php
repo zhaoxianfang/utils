@@ -166,7 +166,10 @@ class Color
     /**
      * 获取红色分量
      *
-     * @return int
+     * 返回构造时传入并已通过 0-255 范围校验的原始 R 通道值，
+     * 不涉及任何色彩空间或透明度换算。
+     *
+     * @return int 红色分量，取值 0-255
      */
     public function getRed(): int
     {
@@ -176,7 +179,10 @@ class Color
     /**
      * 获取绿色分量
      *
-     * @return int
+     * 返回构造时传入并已通过 0-255 范围校验的原始 G 通道值，
+     * 不涉及任何色彩空间或透明度换算。
+     *
+     * @return int 绿色分量，取值 0-255
      */
     public function getGreen(): int
     {
@@ -186,7 +192,10 @@ class Color
     /**
      * 获取蓝色分量
      *
-     * @return int
+     * 返回构造时传入并已通过 0-255 范围校验的原始 B 通道值，
+     * 不涉及任何色彩空间或透明度换算。
+     *
+     * @return int 蓝色分量，取值 0-255
      */
     public function getBlue(): int
     {
@@ -196,7 +205,11 @@ class Color
     /**
      * 获取透明度分量
      *
-     * @return int|null
+     * 采用 GD 库的 alpha 约定：0 表示完全不透明，127 表示完全透明。
+     * 若创建颜色时未指定透明度则以 null 返回，调用方通常会将其
+     * 视为完全不透明处理（例如 toHex() 不会输出 A 通道）。
+     *
+     * @return int|null 透明度值（0-127）；未设置时返回 null
      */
     public function getAlpha(): ?int
     {
@@ -245,7 +258,10 @@ class Color
     /**
      * 克隆颜色对象
      *
-     * @return self
+     * 逐项复制红、绿、蓝与透明度分量，返回一个与原对象取值完全相同
+     * 但互不影响的独立实例；透明度为 null 时同样原样保留。
+     *
+     * @return self 与原颜色等值的新颜色对象
      */
     public function cloneColor(): self
     {

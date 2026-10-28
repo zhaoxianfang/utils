@@ -27,6 +27,9 @@ class Event
     /**
      * 注册事件监听器
      *
+     * 事件名含 `*` 时登记到通配符表（不参与优先级排序，emit 时按注册顺序执行）；
+     * 否则按优先级分组存放并按优先级降序排列，同优先级内保持注册先后顺序。
+     *
      * @param string   $event    事件名称，支持 * 通配符（如 user.*）
      * @param Closure  $callback 回调函数，接收事件载荷
      * @param int      $priority 优先级（数值越大越先执行）
@@ -63,9 +66,12 @@ class Event
     /**
      * 触发事件
      *
+     * 先按优先级执行精确匹配的监听器，再执行所有命中的通配符监听器；
+     * 单个监听器的返回值不会被中断判断，全部收集后返回。
+     *
      * @param string $event  事件名称
      * @param mixed  ...$args 传递给监听器的参数
-     * @return array 所有监听器的返回值数组
+     * @return array 所有监听器的返回值数组（按执行顺序）
      */
     public function emit(string $event, mixed ...$args): array
     {
@@ -172,6 +178,10 @@ class Event
 
     /**
      * 清空所有监听器
+     *
+     * 同时清空精确匹配与通配符两组监听器，通常在请求结束或测试用例间重置状态时使用。
+     *
+     * @return void 无返回值
      */
     public function clear(): void
     {
@@ -181,10 +191,17 @@ class Event
 
     /**
      * 通配符匹配
+     *
+     * 先将模式转义为安全正则，再把 `*` 还原为 `.*`、`?` 还原为 `.`，整串锚定匹配；
+     * 因此 `user.*` 可匹配 `user.created`，但不匹配 `user`（点号与层级需对齐）。
+     *
+     * @param string $pattern 通配符模式，如 `user.*`
+     * @param string $subject 待匹配的事件名称
+     * @return bool 匹配成功返回 true，否则返回 false
      */
     private static function matchWildcard(string $pattern, string $subject): bool
     {
-        $regex = '/^' . str_replace(['*', '\\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/';
+        $regex = '/^' . str_replace(['\*', '\?'], ['.*', '.'], preg_quote($pattern, '/')) . '$/';
         return (bool) preg_match($regex, $subject);
     }
 }

@@ -89,6 +89,10 @@ class Locker
 
     /**
      * 释放锁
+     *
+     * 仅在当前实例确实持锁且句柄可用时解除 flock，重复调用安全；不关闭文件句柄。
+     *
+     * @return void 无返回值
      */
     public function unlock(): void
     {
@@ -101,7 +105,9 @@ class Locker
     /**
      * 是否持有锁
      *
-     * @return bool
+     * 反映的是当前实例自身的持锁状态，不探测其他进程是否占用同一把锁。
+     *
+     * @return bool 当前实例已加锁返回 true，否则返回 false
      */
     public function isLocked(): bool
     {
@@ -145,6 +151,11 @@ class Locker
         }
     }
 
+    /**
+     * 懒加载方式打开锁文件句柄
+     *
+     * 仅在句柄未初始化时创建/打开锁文件，失败时抛出 RuntimeException。
+     */
     private function open(): void
     {
         if ($this->handle === null) {
@@ -155,6 +166,9 @@ class Locker
         }
     }
 
+    /**
+     * 析构时释放锁并关闭文件句柄，避免句柄泄漏
+     */
     public function __destruct()
     {
         $this->unlock();

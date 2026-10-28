@@ -93,6 +93,9 @@ class BarcodeConfig
 
     /**
      * 转换为数组
+     *
+     * 输出包含全部配置项的关联数组，键名与 fromArray() 的入参一致，
+     * 因此可用于回写或与外部数组做 array_merge 合并。
      * 
      * @return array 返回配置数组
      */

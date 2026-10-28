@@ -9,21 +9,30 @@ use RuntimeException;
 
 /**
  * 哈希工具类
- * 提供多种哈希算法、HMAC、文件哈希和密码哈希功能
- * 基于PHP 8.2+ 原生hash扩展实现，支持时序安全比较
  *
- * 主要功能：
- * - 支持多种哈希算法（MD5, SHA家族, SHA3, BLAKE2等）
- * - 大文件流式哈希处理
- * - HMAC计算与验证
- * - 密码哈希封装（bcrypt, argon2）
- * - 时序安全比较
+ * 提供多种哈希算法、HMAC、文件哈希和密码哈希功能，基于 PHP 8.2+ 原生
+ * hash 扩展实现，并支持时序安全比较（hash_equals）。主要功能：
+ * - 支持多种哈希算法（MD5, SHA 家族, SHA3, BLAKE2 等）
+ * - 大文件流式哈希处理（避免一次性读入内存）
+ * - HMAC 计算与验证（时序安全比较防侧信道攻击）
+ * - 密码哈希封装（bcrypt / argon2）以及 PBKDF2、HKDF 密钥派生
+ * - 多重哈希、校验和文件生成与验证
  *
- * @package Crypto
+ * 注意：MD5 / SHA1 / CRC32 仅适用于校验场景，禁止用于安全敏感用途。
+ *
+ * @package zxf\Utils\Crypto
  * @author Security Team
  * @version 1.0.0
  * @license MIT
  * @created 2026-04-23
+ *
+ * @example
+ * // 计算字符串 SHA-256（十六进制），请勿将密钥硬编码到代码中
+ * $digest = \zxf\Utils\Crypto\Hash::calculate('hello world', 'sha256');
+ *
+ * // 计算 HMAC 并做时序安全验证（密钥使用占位符 'your-secret-key'）
+ * $hmac = \zxf\Utils\Crypto\Hash::hmac('message', 'your-secret-key', 'sha256');
+ * $ok   = \zxf\Utils\Crypto\Hash::verifyHmac('message', 'your-secret-key', $hmac);
  */
 class Hash
 {
@@ -175,7 +184,10 @@ class Hash
     }
 
     /**
-     * 计算HMAC值
+     * 计算 HMAC 值
+     *
+     * 先校验算法属于白名单且被当前 PHP 环境支持，再拒绝空密钥——空密钥会让
+     * HMAC 退化为无密钥哈希，失去消息认证能力。
      *
      * @param string $data      要计算HMAC的数据
      * @param string $key       HMAC密钥
@@ -183,13 +195,14 @@ class Hash
      * @param bool   $binary    是否返回二进制结果
      * @return string HMAC结果
      *
-     * @throws InvalidArgumentException 当算法不支持时抛出
+     * @throws InvalidArgumentException 当算法不支持或密钥为空时抛出
      */
     public static function hmac(string $data, string $key, string $algorithm = 'sha256', bool $binary = false): string
     {
         self::validateHmacAlgorithm($algorithm);
 
         if (empty($key)) {
+            // 密钥为空会退化为无密钥的普通哈希，彻底失去认证能力，故直接拒绝
             throw new InvalidArgumentException('HMAC密钥不能为空');
         }
 
@@ -283,11 +296,14 @@ class Hash
     }
 
     /**
-     * 验证密码
+     * 验证密码与哈希是否匹配
+     *
+     * 直接委托 PHP 原生 password_verify()，兼容 bcrypt/argon2 等由
+     * password_hash() 产出的格式；哈希串非法时返回 false 而不抛异常。
      *
      * @param string $password 明文密码
-     * @param string $hash     密码哈希值
-     * @return bool 验证结果
+     * @param string $hash     由 password() 生成的密码哈希值
+     * @return bool 匹配返回 true，否则返回 false
      */
     public static function verifyPassword(string $password, string $hash): bool
     {
@@ -384,17 +400,23 @@ class Hash
     }
 
     /**
-     * 生成盐值
+     * 生成密码学安全的随机盐值
      *
-     * @param int $length 盐值长度（字节），默认16
+     * 使用系统 CSPRNG 生成指定长度的二进制盐，不做编码转换，可直接与
+     * pbkdf2() 等派生函数配合使用。长度小于 8 字节时拒绝生成。
+     *
+     * @param int $length 盐值长度（字节），须不小于 8
      * @return string 随机盐值（二进制）
+     * @throws InvalidArgumentException 长度小于 8 字节时抛出
      */
     public static function generateSalt(int $length = 16): string
     {
         if ($length < 8) {
+            // 盐值过短会显著降低抵御彩虹表/字典攻击的能力，要求至少 8 字节
             throw new InvalidArgumentException('盐值长度至少为8字节');
         }
 
+        // random_bytes 使用系统 CSPRNG（如 /dev/urandom），保证盐值密码学不可预测
         return random_bytes($length);
     }
 
@@ -414,10 +436,13 @@ class Hash
     }
 
     /**
-     * 获取算法信息
+     * 获取指定算法的元信息
+     *
+     * 从内置白名单中返回该算法的配置（是否安全、输出长度等），仅供查询，
+     * 不代表当前 PHP 环境一定支持；需要确认可用性请用 isAlgorithmSupported()。
      *
      * @param string $algorithm 算法名称
-     * @return array|null 算法信息，不存在时返回null
+     * @return array|null 算法信息（含 secure 等字段），不存在时返回null
      */
     public static function getAlgorithmInfo(string $algorithm): ?array
     {
@@ -485,12 +510,17 @@ class Hash
     }
 
     /**
-     * 验证校验和文件
+     * 按照校验和文件逐个验证文件
+     *
+     * 逐行解析 `hash  filename` 格式（与 shasum 输出兼容），以 `#` 开头的行
+     * 与字段数不足的行会被跳过。每个文件的比对使用时序安全比较，单个文件
+     * 读取失败只记录到该条目而不中断整体流程。
      *
      * @param string $checksumFile 校验和文件路径
-     * @param string $baseDir      文件所在基础目录
+     * @param string $baseDir      文件所在基础目录，空串表示按行内相对路径直接访问
      * @param string $algorithm    哈希算法，默认sha256
-     * @return array 验证结果
+     * @return array<string,array{valid:bool,expected:string,actual:string|null,error:string|null}> 以文件名为键的验证结果
+     * @throws InvalidArgumentException 校验和文件不存在时抛出
      */
     public static function verifyChecksumFile(string $checksumFile, string $baseDir = '', string $algorithm = 'sha256'): array
     {
@@ -536,9 +566,13 @@ class Hash
     }
 
     /**
-     * 验证算法有效性
+     * 校验算法是否被当前 PHP 环境支持
+     *
+     * 以 hash_algos() 的实际返回为准，与内置白名单无关，因此可用于判定
+     * 运行时是否真的可以调用该算法。
      *
      * @param string $algorithm 算法名称
+     * @return void
      * @throws InvalidArgumentException 当算法不支持时抛出
      */
     private static function validateAlgorithm(string $algorithm): void

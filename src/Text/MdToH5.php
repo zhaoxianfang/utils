@@ -8,7 +8,7 @@ declare(strict_types=1);
  * 完全独立的 PHP 8.2+ 实现，不依赖任何外部包
  * 支持完整 CommonMark 规范及 GitHub Flavored Markdown 扩展
  *
- * @package Modules\Docs\Utils
+ * @package zxf\Utils\Text
  * @version 1.0.0
  * @license MIT
  */
@@ -50,6 +50,10 @@ use Exception;
  *   ...配置...
  * ]);
  * echo $html = $converter->convert($markdownString);
+ *
+ * @package zxf\Utils\Text
+ * @version 1.0.0
+ * @license MIT
  */
 class MdToH5
 {
@@ -219,7 +223,12 @@ class MdToH5
     /**
      * 验证配置选项
      *
-     * @throws InvalidArgumentException
+     * 校验三处边界：max_nesting_level 需在 1~50、tab_width 需在 1~8、cache_ttl 不能为负；
+     * 由构造函数在应用配置后调用，任一不满足即中断实例化。
+     *
+     * @return void 无返回值
+     *
+     * @throws InvalidArgumentException 任一配置越界时抛出
      */
     private function validateOptions(): void
     {
@@ -301,6 +310,10 @@ class MdToH5
     /**
      * XSS 过滤
      *
+     * 三道处理：移除黑名单容器标签（如 script/style/iframe）、
+     * 删除 forbidden_attributes 中的属性、再按 allowed_html_tags 白名单移除其余标签。
+     * 属于正则层面的粗粒度过滤，不等同于完整的 HTML 净化器。
+     *
      * @param string $html HTML 内容
      * @return string 过滤后的 HTML
      */
@@ -341,7 +354,10 @@ class MdToH5
     /**
      * 重置内部状态
      *
-     * @return void
+     * 清零嵌套层级，并清空链接引用、脚注、脚注引用与缩写表；
+     * 不清理缓存与配置，每次 convert() 开始时调用以保证多次转换互不干扰。
+     *
+     * @return void 无返回值
      */
     private function resetState(): void
     {
@@ -389,6 +405,9 @@ class MdToH5
     /**
      * 智能标点转换
      *
+     * 按开关分别处理：成对直引号转中文弯引号、`...` 转省略号、`--` 转长破折号；
+     * 均在块级解析之前对全文执行，因此也会作用于代码块之外的普通文本。
+     *
      * @param string $text 原始文本
      * @return string 转换后的文本
      */
@@ -412,6 +431,10 @@ class MdToH5
 
     /**
      * 提取引用定义
+     *
+     * 扫描形如 `[id]: url "title"` 的独立行，把 ID（小写）映射到净化后的 URL 与标题存入
+     * linkReferences；URL 净化后为空则不登记。命中任一定义时整行从正文中移除，
+     * 未命中则原样返回。
      *
      * @param string $markdown Markdown 文本
      * @return string 移除引用定义后的文本
@@ -444,6 +467,9 @@ class MdToH5
     /**
      * 提取缩写定义
      *
+     * 扫描 `*[ABBR]: 说明` 形式的独立行，按「缩写 => 说明」存入 abbreviations 供后续
+     * 内联替换使用；命中时从正文移除这些定义行，未命中则原样返回。
+     *
      * @param string $markdown Markdown 文本
      * @return string 移除缩写定义后的文本
      */
@@ -465,6 +491,9 @@ class MdToH5
 
     /**
      * 提取脚注定义
+     *
+     * 扫描 `[^id]: 内容` 形式的独立行，内容先经内联解析再按 id 存入 footnotes；
+     * 命中时从正文移除定义行，未命中则原样返回。
      *
      * @param string $markdown Markdown 文本
      * @return string 移除脚注定义后的文本
@@ -531,7 +560,9 @@ class MdToH5
             }
 
             // 水平线
-            if (preg_match('/^([-*_])[ \t]*\1[ \t]*\1[ \t]*(\1[ \t]*)*$/', $trimmedLine)) {
+            // 写法等价但去掉了嵌套量词：(\1[ \t]*)* 这种「量词套量词」在长输入失败时
+            // 会指数级回溯。改为 (?:[ \t]*\1){2,} 后每个循环必消耗一个字符，回溯降为线性。
+            if (preg_match('/^([-*_])(?:[ \t]*\1){2,}[ \t]*$/', $trimmedLine)) {
                 $result[] = $this->options['xhtml'] ? '<hr />' : '<hr>';
                 $i++;
                 continue;
@@ -575,8 +606,11 @@ class MdToH5
     /**
      * 解析标题
      *
+     * 匹配 `#`~`######` 加空格的 ATX 标题，按 `#` 数量决定标签级别，
+     * 行尾的 `{#id}` 会被丢弃并改用自动生成的 id；不匹配时降级为段落。
+     *
      * @param string $line 标题行
-     * @return string HTML 标题
+     * @return string HTML 标题（h1~h6）或降级后的 p 标签
      */
     private function parseHeading(string $line): string
     {
@@ -595,8 +629,11 @@ class MdToH5
     /**
      * 生成标题 ID
      *
+     * 先去标签、转小写，再把非 ASCII 字母数字的连续字符替换为 `-` 并去掉首尾连字符；
+     * 结果为空（例如纯中文标题）时固定返回 `heading`，不会做唯一性去重。
+     *
      * @param string $text 标题文本
-     * @return string
+     * @return string 可用于锚点的 id 字符串
      */
     private function generateHeadingId(string $text): string
     {
@@ -611,9 +648,13 @@ class MdToH5
     /**
      * 解析代码块
      *
+     * 以三反引号围栏为界收集代码行，围栏后的语言标识会按 languageAliases 替换；
+     * safe_mode 开启时转义代码内容，语言非空时写入 `language-xxx` class。
+     * 未找到闭合围栏时收集到文末为止。
+     *
      * @param array<int, string> $lines 所有行
      * @param int $startIndex 开始索引
-     * @return array{html: string, nextIndex: int}
+     * @return array{html: string, nextIndex: int} HTML 片段与下一行的索引
      */
     private function parseCodeBlock(array $lines, int $startIndex): array
     {
@@ -658,9 +699,12 @@ class MdToH5
     /**
      * 解析引用块
      *
+     * 连续收集 `>` 开头的行（去掉引用标记），遇非引用行结束；中间的空行不会截断引用，
+     * 内容交由新建的同配置实例递归转换，从而支持嵌套引用与块内其它语法。
+     *
      * @param array<int, string> $lines 所有行
      * @param int $startIndex 开始索引
-     * @return array{html: string, nextIndex: int}
+     * @return array{html: string, nextIndex: int} HTML 片段（blockquote 包裹）与下一行的索引
      */
     private function parseBlockquote(array $lines, int $startIndex): array
     {
@@ -708,9 +752,12 @@ class MdToH5
     /**
      * 判断是否为表格
      *
+     * 判定条件：当前行与下一行都含 `|`，且下一行去掉 `|` 后仅由空白、`-`、`:` 组成
+     * （即分隔行）。末尾缺少下一行时直接返回 false。
+     *
      * @param array<int, string> $lines 所有行
      * @param int $index 当前索引
-     * @return bool
+     * @return bool 是表格起始返回 true，否则返回 false
      */
     private function isTable(array $lines, int $index): bool
     {
@@ -729,9 +776,12 @@ class MdToH5
     /**
      * 解析表格
      *
+     * 首行作表头、次行按 `:` 位置推断各列对齐（默认左对齐），其后连续含 `|` 的行作数据行；
+     * 输出带 table-wrapper 容器与 markdown-table 类名的表格，单元格内容走内联解析。
+     *
      * @param array<int, string> $lines 所有行
-     * @param int $startIndex 开始索引
-     * @return array{html: string, nextIndex: int}
+     * @param int $startIndex 开始索引（表头行）
+     * @return array{html: string, nextIndex: int} HTML 片段与下一行的索引
      */
     private function parseTable(array $lines, int $startIndex): array
     {
@@ -811,9 +861,13 @@ class MdToH5
     /**
      * 解析列表
      *
+     * 按首个标记决定 ul/ol（同一次解析不混用）；enable_task_lists 开启时识别
+     * `[ ]`/`[x]` 前缀并渲染为禁用复选框（此时强制为 ul）。
+     * 空行后若不再是列表项则结束列表。
+     *
      * @param array<int, string> $lines 所有行
      * @param int $startIndex 开始索引
-     * @return array{html: string, nextIndex: int}
+     * @return array{html: string, nextIndex: int} HTML 片段与下一行的索引
      */
     private function parseList(array $lines, int $startIndex): array
     {
@@ -884,9 +938,12 @@ class MdToH5
     /**
      * 解析段落
      *
+     * 连续收集非空行直至空行或遇到其它块级标记（标题、代码块、引用、列表），
+     * 多行以空格拼接；nl2br 开启时先转换换行再加 p 标签。无内容时返回空片段。
+     *
      * @param array<int, string> $lines 所有行
      * @param int $startIndex 开始索引
-     * @return array{html: string, text: string, nextIndex: int}
+     * @return array{html: string, text: string, nextIndex: int} HTML 片段、原始文本与下一行的索引
      */
     private function parseParagraph(array $lines, int $startIndex): array
     {
@@ -934,8 +991,12 @@ class MdToH5
     /**
      * 解析内联元素
      *
+     * 固定顺序依次处理：反斜杠转义 → 行内代码 → 图片 → 链接 → 粗体 → 斜体 →
+     * 删除线 → 脚注引用 → 缩写 → 表情 → 自动链接；删除线/脚注/缩写/表情/自动链接
+     * 受对应配置开关控制。行内代码最先处理可避免其内容被其它语法改写。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseInlineElements(string $text): string
     {
@@ -1008,8 +1069,11 @@ class MdToH5
     /**
      * 解析图片
      *
+     * 转换 `![alt](url "title")`：alt 与 title 做 HTML 转义、URL 经 sanitizeUrl 净化，
+     * URL 不合法时原样保留原始语法；自闭合写法由 xhtml 配置决定。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseImages(string $text): string
     {
@@ -1036,8 +1100,12 @@ class MdToH5
     /**
      * 解析链接
      *
+     * 转换 `[text](url "title")`：链接文字递归走内联解析，URL 经 sanitizeUrl 净化，
+     * 始终附加 `target="_blank"` 与 `rel="nofollow noopener noreferrer"`；
+     * URL 不合法时原样保留原始语法。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseLinks(string $text): string
     {
@@ -1061,8 +1129,10 @@ class MdToH5
     /**
      * 解析粗体
      *
+     * 将 `**text**` 与 `__text__` 转为 strong 标签，采用非贪婪匹配，不做嵌套配对处理。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseBold(string $text): string
     {
@@ -1076,8 +1146,10 @@ class MdToH5
     /**
      * 解析斜体
      *
+     * 将 `*text*` 与 `_text_` 转为 em 标签，用前后瞻断言避开与粗体标记（`**`/`__`）冲突。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseItalic(string $text): string
     {
@@ -1091,8 +1163,12 @@ class MdToH5
     /**
      * 解析自动链接
      *
+     * 先把裸 `http(s)://` 地址转为链接（链接文字做 HTML 转义），再把邮箱地址转为 mailto 链接；
+     * 已位于 a 标签内的 URL 与非法 URL 会被跳过。注意邮箱替换未加边界保护，
+     * 对已生成的 HTML 属性值也可能命中。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseAutoLinks(string $text): string
     {
@@ -1120,8 +1196,11 @@ class MdToH5
     /**
      * 解析表情符号
      *
+     * 遍历 emojiMap 做字符串级替换（`:smile:` → 😊），无边界判断，
+     * 因此代码块等位置出现的同形文本也会被替换（此时应关闭 enable_emoji）。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 替换后的文本
      */
     private function parseEmoji(string $text): string
     {
@@ -1134,8 +1213,11 @@ class MdToH5
     /**
      * 解析脚注
      *
+     * 把 `[^id]` 转为带上标的锚点链接，并把该 id 记入 footnoteRefs 以便
+     * 生成反向链接；不校验脚注定义是否存在。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseFootnotes(string $text): string
     {
@@ -1155,8 +1237,11 @@ class MdToH5
     /**
      * 解析缩写
      *
+     * 逐个把 abbreviations 中的缩写按词边界替换为带 title 的 abbr 标签，
+     * 说明文本做 HTML 转义；多组缩写按登记顺序依次替换。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 转换后的 HTML 片段
      */
     private function parseAbbreviations(string $text): string
     {
@@ -1176,7 +1261,10 @@ class MdToH5
     /**
      * 渲染脚注
      *
-     * @return string
+     * 在正文末尾输出 footnotes 区块（分隔线 + 有序列表），每项一个 ↩ 反向链接；
+     * 无脚注定义时返回空字符串。
+     *
+     * @return string 脚注区块 HTML，无脚注时为空字符串
      */
     private function renderFootnotes(): string
     {
@@ -1203,8 +1291,11 @@ class MdToH5
     /**
      * 解析反斜杠转义
      *
+     * 把 `\x` 形式的转义（x 为 Markdown 特殊符号，见方法内的字符表）还原为字面字符 x，
+     * 使这些符号不再参与后续的加粗、链接等解析。
+     *
      * @param string $text 文本内容
-     * @return string
+     * @return string 去掉转义反斜杠后的文本
      */
     private function parseBackslashEscape(string $text): string
     {
@@ -1259,8 +1350,10 @@ class MdToH5
     /**
      * 清理多余空白
      *
+     * 把连续空行压缩为一个空行并去掉首尾空白，避免输出中堆积无意义换行。
+     *
      * @param string $html HTML 字符串
-     * @return string
+     * @return string 清理后的 HTML
      */
     private function cleanupWhitespace(string $html): string
     {
@@ -1273,9 +1366,9 @@ class MdToH5
     /**
      * 设置单个配置选项
      *
-     * @param string $key 配置键名
-     * @param mixed $value 配置值
-     * @return self
+     * @param string $key   配置键名（仅允许已存在的键）
+     * @param mixed  $value 配置值
+     * @return self 支持链式调用
      */
     public function setOption(string $key, $value): self
     {
@@ -1336,9 +1429,12 @@ class MdToH5
     /**
      * 添加语言别名
      *
+     * 登记代码块围栏语言标识的映射（如 js → javascript），影响后续生成的语言 class；
+     * 同名别名会被覆盖，对已转换过的内容不生效（缓存亦不失效）。
+     *
      * @param string $alias 别名（如 js）
      * @param string $language 实际语言名（如 javascript）
-     * @return self
+     * @return self 当前实例，便于链式调用
      */
     public function addLanguageAlias(string $alias, string $language): self
     {
@@ -1349,7 +1445,9 @@ class MdToH5
     /**
      * 清除缓存
      *
-     * @return void
+     * 清空已缓存的转换结果；修改配置或表情/别名映射后建议调用，避免命中旧结果。
+     *
+     * @return void 无返回值
      */
     public function clearCache(): void
     {

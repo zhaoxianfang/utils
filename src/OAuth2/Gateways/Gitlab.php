@@ -23,6 +23,13 @@ class Gitlab extends Gateway
     protected $AccessTokenURL = 'https://gitlab.com/oauth/token';
     protected $UserInfoURL = 'api/v4/user';
 
+    /**
+     * 获取授权跳转地址
+     *
+     * 根据配置拼装 GitLab OAuth2 授权页面的 URL，并在拼装前保存 state 防止 CSRF。
+     *
+     * @return string 授权跳转地址（含查询参数）
+     */
     public function getRedirectUrl()
     {
         $this->saveState();
@@ -36,6 +43,13 @@ class Gitlab extends Gateway
         return $this->AuthorizeURL . '?' . http_build_query($params);
     }
 
+    /**
+     * 获取格式化后的用户信息
+     *
+     * 调用 getUserInfo() 获取原始数据并统一映射为本 SDK 的标准用户结构。
+     *
+     * @return array 标准化用户信息（含 open_id、nickname、avatar 等）
+     */
     public function userInfo()
     {
         $result = $this->getUserInfo();
@@ -52,6 +66,15 @@ class Gitlab extends Gateway
         ];
     }
 
+    /**
+     * 获取原始接口返回的用户信息
+     *
+     * 内部先确保已获取 access_token，再以 Bearer 头调用 GitLab 用户接口。
+     * 解析失败时抛出 OAuthException。
+     *
+     * @return array 原始用户信息数组
+     * @throws OAuthException 当接口未返回用户标识时抛出
+     */
     public function getUserInfo()
     {
         $this->getToken();

@@ -20,9 +20,21 @@ use zxf\Utils\BarCode\Exceptions\InvalidDataException;
 
 /**
  * 条形码工厂类
- * 
- * 用于创建各种条形码生成器实例
- * 提供统一的创建接口
+ *
+ * 用于创建各种条形码生成器实例，提供统一的创建接口，并维护类型别名到规范名的映射。
+ *
+ * @package zxf\Utils\BarCode
+ * @version 1.0.0
+ * @license MIT
+ *
+ * @example
+ * ```php
+ * use zxf\Utils\BarCode\BarcodeFactory;
+ *
+ * // 创建 EAN-13 生成器（别名 ean-13 亦可）
+ * $generator = BarcodeFactory::create('ean13');
+ * $bars = $generator->generate('690123456789');
+ * ```
  */
 class BarcodeFactory
 {
@@ -71,6 +83,10 @@ class BarcodeFactory
 
     /**
      * 创建条码生成器
+     *
+     * 类型名统一转为小写后查表实例化对应生成器，并注入配置对象；
+     * 未传配置时由生成器自行使用默认配置。别名（如 ean-13、isbn-10）
+     * 与规范名均可识别。
      * 
      * @param string             $type   条码类型
      * @param BarcodeConfig|null $config 配置对象

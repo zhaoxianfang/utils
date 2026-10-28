@@ -103,6 +103,10 @@ final class Version
 
     /**
      * Returns the version number.
+     *
+     * 版本号即 QR 规范中的 1~40，决定矩阵尺寸、对齐图案位置与容量。
+     *
+     * @return int 版本号，取值 1~40
      */
     public function getVersionNumber() : int
     {
@@ -121,6 +125,11 @@ final class Version
 
     /**
      * Returns the total number of codewords.
+     *
+     * 由该版本各纠错块的数据码字数与纠错码字数累加得出，
+     * 在构造时计算并缓存，与所选的纠错级别无关。
+     *
+     * @return int 该版本包含的码字总数
      */
     public function getTotalCodewords() : int
     {
@@ -129,6 +138,11 @@ final class Version
 
     /**
      * Calculates the dimension for the current version.
+     *
+     * 按规范公式 17 + 4 × 版本号 计算，得到含功能图案在内的边长
+     * （版本 1 为 21×21，版本 40 为 177×177）。
+     *
+     * @return int 该版本二维码矩阵的边长（模块数）
      */
     public function getDimensionForVersion() : int
     {
@@ -137,6 +151,12 @@ final class Version
 
     /**
      * Returns the number of EC blocks for a specific EC level.
+     *
+     * 纠错块信息在构造时已按纠错级别的序号（ordinal）索引保存，
+     * 此处按传入级别的序号直接取出对应集合。
+     *
+     * @param ErrorCorrectionLevel $ecLevel 目标纠错级别（L/M/Q/H）
+     * @return EcBlocks 该版本在该纠错级别下的纠错块集合
      */
     public function getEcBlocksForLevel(ErrorCorrectionLevel $ecLevel) : EcBlocks
     {
@@ -146,7 +166,12 @@ final class Version
     /**
      * Gets a provisional version number for a specific dimension.
      *
-     * @throws InvalidArgumentException if dimension is not 1 mod 4
+     * 由 (dimension - 17) / 4 反推版本号，不做 1~40 之外的范围校验，
+     * 因此传入不受支持的大尺寸时会交由 getVersionForNumber() 抛异常。
+     *
+     * @param int $dimension 二维码矩阵边长（模块数），须满足 1 mod 4
+     * @return self 该边长对应的版本对象
+     * @throws InvalidArgumentException 如果 dimension 不满足 1 mod 4，或推导出的版本号超出 1~40
      */
     public static function getProvisionalVersionForDimension(int $dimension) : self
     {
@@ -160,7 +185,11 @@ final class Version
     /**
      * Gets a version instance for a specific version number.
      *
-     * @throws InvalidArgumentException if version number is out of range
+     * 版本实例由 versions() 统一缓存，相同版本号总是返回同一个对象。
+     *
+     * @param int $versionNumber 版本号，取值 1~40
+     * @return self 对应的版本单例
+     * @throws InvalidArgumentException 当版本号不在 1~40 之间时抛出
      */
     public static function getVersionForNumber(int $versionNumber) : self
     {
@@ -173,6 +202,13 @@ final class Version
 
     /**
      * Decodes version information from an integer and returns the version.
+     *
+     * 先查表做精确匹配（表中仅含版本 7~40）；未命中时遍历所有合法码字
+     * 取汉明距离最小者，只有差异位不超过 3 才认定匹配成功。版本 1~6
+     * 不携带版本信息区，因而无法通过此方法识别。
+     *
+     * @param int $versionBits 从版本信息区读出的 18 位版本比特
+     * @return self|null 解析出的版本；无可信匹配时返回 null
      */
     public static function decodeVersionInformation(int $versionBits) : ?self
     {
@@ -201,6 +237,12 @@ final class Version
 
     /**
      * Builds the function pattern for the current version.
+     *
+     * 生成与矩阵同尺寸的 BitMatrix，并把所有非数据区置位：三个定位图案
+     * 及其分隔符、格式信息区、对齐图案、定时图案，以及版本 7 及以上才
+     * 存在的版本信息区。结果用于编码时跳过功能图案所占的模块。
+     *
+     * @return BitMatrix 标记了全部功能图案位置的矩阵，true 表示该模块不可用于数据
      */
     public function buildFunctionPattern() : BitMatrix
     {

@@ -45,6 +45,11 @@ class PngRenderer extends BaseRenderer
     /** @var int 水印原始像素字号（TTF 渲染路径使用，不再受 GD 位图 1-5 档限制） */
     protected int $watermarkFontSizePx = 16;
 
+    /**
+     * 构造 PNG 渲染器
+     *
+     * @param BarcodeConfig|null $config 条码配置对象；为 null 时使用默认配置
+     */
     public function __construct(?BarcodeConfig $config = null)
     {
         parent::__construct($config);
@@ -52,6 +57,16 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 渲染条形码为PNG
+     *
+     * 用传入的 $config 覆盖实例配置后重新计算模块大小与本次静区宽度，
+     * 依次创建画布、绘条、Bearer Bar、文字、水印与边框，最终返回 PNG
+     * 二进制数据。渲染完成后 image 资源被释放，实例可复用。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @param string $data 原始数据（用于下方文字）
+     * @param array<string, mixed> $config 单次渲染的配置覆盖项
+     * @return string PNG 二进制数据
+     * @throws RenderException GD 扩展缺失或画布创建失败时抛出
      */
     public function render(array $barcodeData, string $data, array $config = []): string
     {
@@ -92,6 +107,15 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 直接输出到浏览器
+     *
+     * 先完成一次完整渲染，再以 image/png 类型、正确 Content-Length 与
+     * 禁止缓存的响应头把 PNG 数据输出到标准输出。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @param string $data 原始数据（用于下方文字）
+     * @param array<string, mixed> $config 单次渲染的配置覆盖项
+     * @return void
+     * @throws RenderException GD 扩展缺失或画布创建失败时抛出
      */
     public function outputToBrowser(array $barcodeData, string $data, array $config = []): void
     {
@@ -104,6 +128,17 @@ class PngRenderer extends BaseRenderer
         echo $pngData;
     }
 
+    /**
+     * 渲染并将 PNG 写入文件
+     *
+     * 目标目录不存在时自动递归创建。写入失败（如目录不可写）返回 false。
+     *
+     * @param array<int> $barcodeData 条空模式数组
+     * @param string $data 显示文字
+     * @param string $filename 目标 PNG 文件路径
+     * @param array<string, mixed> $config 渲染配置项，可选
+     * @return bool 写入成功返回 true，失败返回 false
+     */
     public function saveToFile(array $barcodeData, string $data, string $filename, array $config = []): bool
     {
         $pngData = $this->render($barcodeData, $data, $config);
@@ -153,6 +188,14 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 创建图像资源
+     *
+     * 按模块总数与左右静区算出画布宽，按条区高度、上下边距、文字行高与
+     * Bearer Bar 占位算出画布高，并填充背景。背景为 transparent 时启用
+     * alpha 通道；背景与条色对比度不足 3:1 时强制改写为黑白。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @return void
+     * @throws RenderException GD 扩展缺失或 imagecreatetruecolor 失败时抛出
      */
     protected function createImage(array $barcodeData): void
     {
@@ -218,6 +261,13 @@ class PngRenderer extends BaseRenderer
      * 绘制条形码并分析结构
      * 
      * 【关键】在绘制过程中分析条码结构，记录关键位置
+     *
+     * 逐元素累加 x 坐标，仅对条（正值）落笔；长条按 longBarHeightRatio 加高，
+     * 渐变可用时逐列绘制，否则按圆角/直角两种方式填充。结束时把全部条的
+     * 几何信息交给 analyzeBarcodeStructure()。image 为空时直接返回。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @return void
      */
     protected function drawBarcode(array $barcodeData): void
     {
@@ -286,6 +336,12 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制文字（动态定位）
+     *
+     * 先清理控制字符得到可显示文本：无长条结构时按对齐方式整段绘制
+     * （Code 39 会先去掉首尾 * 定界符），有长条结构时走分段逐字定位。
+     *
+     * @param string $data 原始数据，绘制前会做控制字符清理
+     * @return void
      */
     protected function drawText(string $data): void
     {
@@ -321,6 +377,9 @@ class PngRenderer extends BaseRenderer
      *
      * GD 的 imagestring 无法正确渲染 ASCII 控制字符（0-31、127），
      * 会导致空白或乱码。此方法将其替换为空格，确保视觉显示正常。
+     *
+     * @param string $data 原始待显示文本
+     * @return string 控制字符已替换为空格、长度不变的文本
      */
     protected function sanitizeDisplayText(string $data): string
     {
@@ -344,6 +403,12 @@ class PngRenderer extends BaseRenderer
      * 2. 根据数据区域宽度动态计算字号
      * 3. 每段数字在各自区域内均匀分布
      * 4. 文字紧贴长竖线底部
+     *
+     * 区域信息或分段结果缺失时回退为整段对齐绘制，避免文字整体丢失。
+     *
+     * @param string $data 已清理的显示文本
+     * @param int $textColor GD 颜色索引
+     * @return void
      */
     protected function drawSegmentedText(string $data, int $textColor): void
     {
@@ -378,6 +443,9 @@ class PngRenderer extends BaseRenderer
      *
      * 与 HTML 渲染器共用 BaseRenderer::splitDisplaySegments() 的实现，
      * 保证同一数据在 PNG/HTML 两种输出下的分段完全一致。
+     *
+     * @param string $data 已清理的显示文本
+     * @return list<array{text: string, region: string, type: string}> 分段列表，不适用时为空数组
      */
     protected function determineSegments(string $data): array
     {
@@ -386,6 +454,14 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 计算动态参数（字号、偏移等）
+     *
+     * 以多字符分段的平均单字宽度为准调整字号（±1），无可用分段时回退到
+     * 按总宽度判断；GD 内置字体仅支持 1-5，最终会显式夹取到该区间。
+     * 文字偏移取字号相关值与长条溢出高度的较大者，最小 3px。
+     *
+     * @param list<array{text: string, region: string, type: string}> $segments 文字分段列表
+     * @param array<string, array<string, int>> $regions 各区域边界（left/right/center）
+     * @return void
      */
     protected function calculateDynamicParameters(array $segments, array $regions): void
     {
@@ -453,6 +529,15 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制单个分段
+     *
+     * 单字符分段定位到区域中心（优先用预置 center 坐标）；多字符分段把区域
+     * 宽度等分后逐字居中。区域不存在或文本为空时直接返回，不绘制任何内容。
+     *
+     * @param array{text: string, region: string, type: string} $segment 单个分段
+     * @param array<string, array<string, int>> $regions 各区域边界（left/right/center）
+     * @param int $textY 文字基线 y 坐标（像素）
+     * @param int $textColor GD 颜色索引
+     * @return void
      */
     protected function drawSegment(array $segment, array $regions, int $textY, int $textColor): void
     {
@@ -488,6 +573,12 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 移除分隔符
+     *
+     * 去掉 Code 39 显示文本首尾的 * 定界符，仅影响肉眼可读文字，
+     * 不影响条空编码。
+     *
+     * @param string $data 待处理的显示文本
+     * @return string 去掉首尾 * 后的文本
      */
     protected function removeDelimiters(string $data): string
     {
@@ -496,6 +587,14 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制对齐的文本
+     *
+     * 支持多行（按 \n 拆分）。配置了存在且可读的 TTF 字体时走 TTF 绘制，
+     * 否则回退到 GD 内置字体，此时字号按 fontSize/3 折算并限制在 1-5。
+     * 水平位置由 textAlign 决定（左/中/右）。
+     *
+     * @param string $data 待绘制的显示文本，可含换行符
+     * @param int $textColor GD 颜色索引
+     * @return void
      */
     protected function drawAlignedText(string $data, int $textColor): void
     {
@@ -539,6 +638,15 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 使用 TTF 字体绘制多行对齐文本
+     *
+     * 以样本字符串 "Mg" 的 bbox 推算行高，逐行按 textAlign 计算起点后
+     * 写入画布，字号直接取配置的 fontSize（像素）。
+     *
+     * @param array<int, string> $lines 按行拆分后的文本
+     * @param int $baseY 首行文字顶部的 y 坐标（像素）
+     * @param int $imgWidth 画布宽度（像素），用于右对齐与居中计算
+     * @param int $textColor GD 颜色索引
+     * @return void
      */
     protected function drawAlignedTextTtf(array $lines, int $baseY, int $imgWidth, int $textColor): void
     {
@@ -574,6 +682,16 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制单个字符
+     *
+     * 以给定 x 为字符中心反推左边距，并夹紧到画布范围内，防止越界字符
+     * 被裁切；y 取字符顶部的视觉对齐位置。
+     *
+     * @param string $char 要绘制的单个字符
+     * @param int $x 字符中心点的 x 坐标（像素）
+     * @param int $y 字符参考 y 坐标（像素）
+     * @param int $textColor GD 颜色索引
+     * @param int $fontSize GD 内置字号（1-5）
+     * @return void
      */
     protected function drawChar(string $char, int $x, int $y, int $textColor, int $fontSize = 5): void
     {
@@ -597,6 +715,15 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制渐变条
+     *
+     * 按宽度逐列在起止色之间线性插值，每列画一条竖线拼出水平渐变；
+     * 颜色未做对比度校验，调用前应由 gradientUsable() 把关。
+     *
+     * @param int $x 条的左上角 x 坐标（像素）
+     * @param int $y 条的左上角 y 坐标（像素）
+     * @param int $width 条宽（像素）
+     * @param int $height 条高（像素）
+     * @return void
      */
     protected function drawGradientBar(int $x, int $y, int $width, int $height): void
     {
@@ -616,6 +743,17 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制圆角矩形
+     *
+     * 用两个交叉矩形铺出中间区域，再用四个实心椭圆补出四角圆角。
+     * 调用方需保证条宽大于两倍半径，否则圆角会互相覆盖导致形状异常。
+     *
+     * @param int $x 左上角 x 坐标（像素）
+     * @param int $y 左上角 y 坐标（像素）
+     * @param int $width 矩形宽度（像素）
+     * @param int $height 矩形高度（像素）
+     * @param int $radius 圆角半径（像素）
+     * @param int $color GD 颜色索引
+     * @return void
      */
     protected function drawRoundedRect(int $x, int $y, int $width, int $height, int $radius, int $color): void
     {
@@ -713,6 +851,14 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 使用TTF字体绘制水印
+     *
+     * 仅在设置了水印字体路径时生效；字号取原始像素值（不小于 8），
+     * 用 bbox 量出文本尺寸后按位置解析出坐标并绘制。bbox 计算失败则跳过。
+     *
+     * @param int $imgWidth 画布宽度（像素）
+     * @param int $imgHeight 画布高度（像素）
+     * @param int $color GD 颜色索引
+     * @return void
      */
     protected function drawTtfWatermark(int $imgWidth, int $imgHeight, int $color): void
     {
@@ -746,7 +892,15 @@ class PngRenderer extends BaseRenderer
     /**
      * 根据位置解析水印坐标
      *
-     * @return array{0:int,1:int} [x, y]
+     * 按九宫格位置计算左上角坐标，边距固定 10px；$baselineOffset 用于把
+     * GD 内置字体的左上角坐标换算到 TTF 基线坐标。结果按 0 下界夹紧。
+     *
+     * @param int $imgWidth 画布宽度（像素）
+     * @param int $imgHeight 画布高度（像素）
+     * @param int $textWidth 水印文本宽度（像素）
+     * @param int $textHeight 水印文本高度（像素）
+     * @param int $baselineOffset 基线偏移量（像素），GD 内置字体传 0
+     * @return array{0:int,1:int} [x, y] 坐标
      */
     protected function resolveWatermarkPosition(int $imgWidth, int $imgHeight, int $textWidth, int $textHeight, int $baselineOffset): array
     {
@@ -799,6 +953,15 @@ class PngRenderer extends BaseRenderer
     
     /**
      * 绘制旋转和平铺的水印
+     *
+     * 按字号推算横纵间距，把绘制范围外扩到画布对角线以覆盖旋转后的区域，
+     * 每个格点先画到临时透明画布、旋转后再合成到主图。仅绘制落在画布
+     * 附近的水印，避免无效开销。
+     *
+     * @param int $imgWidth 画布宽度（像素）
+     * @param int $imgHeight 画布高度（像素）
+     * @param int $color GD 颜色索引
+     * @return void
      */
     protected function drawRotatedWatermark(int $imgWidth, int $imgHeight, int $color): void
     {
@@ -867,6 +1030,12 @@ class PngRenderer extends BaseRenderer
     
     /**
      * 解析颜色字符串
+     *
+     * 支持 6 位十六进制（可带 #），返回分量的关联数组；长度不符或含
+     * 非法字符时不做校验，统一回退为默认灰色 #CCCCCC。
+     *
+     * @param string $color 十六进制颜色值
+     * @return array{r:int,g:int,b:int} RGB 分量（0-255）
      */
     protected function parseColor(string $color): array
     {
@@ -886,6 +1055,11 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 绘制边框
+     *
+     * 沿画布四边各画一条实心矩形，宽度取 borderWidth 且向内占位。
+     * 边框宽度不大于 0 或画布未创建时不绘制。
+     *
+     * @return void
      */
     protected function drawBorder(): void
     {
@@ -910,6 +1084,12 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 输出PNG数据
+     *
+     * 通过输出缓冲截获 imagepng() 的产物并返回二进制字符串，同时把
+     * image 置空以释放资源，避免同一实例重复渲染时内存累积。
+     *
+     * @return string PNG 二进制数据
+     * @throws RenderException 画布未创建或 PNG 编码失败时抛出
      */
     protected function outputPng(): string
     {
@@ -932,6 +1112,12 @@ class PngRenderer extends BaseRenderer
 
     /**
      * 十六进制颜色转GD颜色
+     *
+     * 支持 3 位缩写与 6 位写法，分配并返回 GD 颜色索引。画布尚未创建时
+     * 无法分配颜色，返回 0。
+     *
+     * @param string $hex 十六进制颜色值，可带 # 前缀
+     * @return int GD 颜色索引；画布为空时为 0
      */
     protected function hexToColor(string $hex): int
     {

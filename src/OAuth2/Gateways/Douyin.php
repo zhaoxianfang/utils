@@ -161,8 +161,15 @@ class Douyin extends Gateway
     }
 
     /**
-     * @return array|mixed|null
-     * @throws OAuthException
+     * 小程序登录：用前端获取的 code（或 anonymous_code）换取会话凭证
+     *
+     * 参数由 jscode2sessionParams() 组装（appid/secret + 请求中的 code、
+     * anonymous_code），请求抖音 jscode2session 接口后交给 parseToken() 解析，
+     * 解析结果会同时写入 $this->token 缓存并作为返回值，后续 openid() 等方法
+     * 可直接复用，无需重复请求。
+     *
+     * @return array|mixed|null 会话数据（含 openid/session_key 等，具体结构由 parseToken 决定）
+     * @throws OAuthException 请求或解析失败时抛出
      */
     public function applets(){
         /** 获取参数 */

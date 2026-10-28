@@ -144,8 +144,11 @@ class QrCode
     /**
      * 创建二维码实例
      *
+     * 工厂方法：总是返回新的实例并带上默认样式（黑色前景、白色背景），
+     * 传入非空数据等价于链式调用 data()，空串则只创建空白配置对象。
+     *
      * @param string $data 二维码数据
-     * @return self
+     * @return self 新建的二维码配置对象
      */
     public static function make(string $data = ''): self
     {
@@ -171,8 +174,12 @@ class QrCode
     /**
      * 设置二维码尺寸
      *
+     * 该值是二维码区域（含静默区）的目标边长（像素），会被钳制为不小于 21；
+     * 渲染时按「模块数 + 2 × margin」换算出单个模块的像素大小，外部 padding
+     * 不计入该值，而是额外叠加到最终图像上。
+     *
      * @param int $size 尺寸（像素）
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function size(int $size): self
     {
@@ -229,12 +236,16 @@ class QrCode
     /**
      * 设置水印
      *
+     * 一次性配置水印的全部参数：透明度与字号会被钳制到有效区间
+     * （0~100、不小于 8），位置不在支持列表内时回退为 center。
+     * 水印使用 GD 内置字体绘制，字号主要影响定位与行高。
+     *
      * @param string $text 水印文本
-     * @param int $opacity 透明度（0-100）
+     * @param int $opacity 透明度（0-100，100 为完全不透明）
      * @param int $fontSize 字号（像素）
-     * @param string $color 颜色（十六进制）
-     * @param string $position 位置
-     * @return self
+     * @param string $color 颜色（十六进制，如 #CCCCCC）
+     * @param string $position 位置，支持 center/top/bottom/left/right 及四角
+     * @return self 当前对象，便于链式调用
      */
     public function watermark(string $text, int $opacity = 50, int $fontSize = 16, string $color = '#CCCCCC', string $position = 'center'): self
     {
@@ -249,8 +260,11 @@ class QrCode
     /**
      * 设置水印位置
      *
-     * @param string $position 位置
-     * @return self
+     * 仅接受 center/top/bottom/left/right 与四个角共 9 个取值，其余输入
+     * 会被静默纠正为 center，不会抛异常。
+     *
+     * @param string $position 位置标识
+     * @return self 当前对象，便于链式调用
      */
     public function watermarkPosition(string $position): self
     {
@@ -293,8 +307,11 @@ class QrCode
     /**
      * 设置边距
      *
+     * 即二维码四周的静默区宽度，单位为模块而不是像素，最终会乘上模块
+     * 尺寸换算成像素；负数会被钳制为 0。
+     *
      * @param int $margin 边距（模块数量）
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function margin(int $margin): self
     {
@@ -332,8 +349,12 @@ class QrCode
     /**
      * 设置二维码版本
      *
+     * 0 表示由内容长度自动选择版本；1~40 表示强制指定，若数据量超过该
+     * 版本的容量，编码阶段会再行调整或抛异常。超出 0~40 直接抛异常。
+     *
      * @param int $version 版本号（1-40，0表示自动）
-     * @return self
+     * @return self 当前对象，便于链式调用
+     * @throws Exception 当版本号不在 0~40 之间时抛出
      */
     public function version(int $version): self
     {
@@ -347,8 +368,12 @@ class QrCode
     /**
      * 设置前景色
      *
+     * 即二维码深色模块的颜色：字符串按十六进制解析，Color 对象直接使用；
+     * 其他类型会抛出异常。
+     *
      * @param Color|string $color 颜色对象或十六进制值
-     * @return self
+     * @return self 当前对象，便于链式调用
+     * @throws Exception 当传入既非字符串也非 Color 对象时抛出
      */
     public function foregroundColor($color): self
     {
@@ -365,8 +390,12 @@ class QrCode
     /**
      * 设置背景色
      *
+     * 即二维码浅色模块与留白区域的颜色；字符串按十六进制解析，Color 对象
+     * 直接使用，其他类型抛出异常。启用透明背景时该颜色会被忽略。
+     *
      * @param Color|string $color 颜色对象或十六进制值
-     * @return self
+     * @return self 当前对象，便于链式调用
+     * @throws Exception 当传入既非字符串也非 Color 对象时抛出
      */
     public function backgroundColor($color): self
     {
@@ -543,8 +572,11 @@ class QrCode
     /**
      * 设置背景图片
      *
+     * 会立即校验文件存在、可读且能识别图片信息，任一不满足即抛异常；
+     * 传入 null 表示取消背景图。图片在渲染阶段按正方形居中裁剪后铺满。
+     *
      * @param string|null $backgroundImagePath 背景图片路径，null表示不使用
-     * @return self
+     * @return self 当前对象，便于链式调用
      * @throws Exception 如果背景图片文件不存在或无效
      */
     public function backgroundImage(?string $backgroundImagePath): self
@@ -676,8 +708,11 @@ class QrCode
     /**
      * 设置标签配置
      *
+     * 直接替换已有的标签配置对象；传入 null 表示移除标签。若要按文本快速
+     * 生成配置，可使用 labelText()。
+     *
      * @param LabelOptions|null $labelOptions 标签配置
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function label(?LabelOptions $labelOptions): self
     {
@@ -688,9 +723,13 @@ class QrCode
     /**
      * 设置标签文本
      *
+     * 便于快速使用的便捷方法：内部用 LabelOptions::create() 新建配置并
+     * 覆盖原有标签设置，字体未指定时使用内置默认字体。
+     *
      * @param string $text 标签文本
      * @param string|null $fontPath 字体路径（null使用默认字体）
-     * @return self
+     * @return self 当前对象，便于链式调用
+     * @throws Exception 当字体无法解析时抛出
      */
     public function labelText(string $text, ?string $fontPath = null): self
     {
@@ -712,8 +751,12 @@ class QrCode
     /**
      * 设置输出格式
      *
-     * @param string $format 格式（png/jpeg/gif/jpg/webp）
-     * @return self
+     * 输入会先转小写再校验，仅接受 png/jpeg/jpg/gif/webp/svg；其他取值
+     * 直接抛异常。格式同时影响渲染分支（如 svg）与最终保存方式。
+     *
+     * @param string $format 格式（png/jpeg/gif/jpg/webp/svg）
+     * @return self 当前对象，便于链式调用
+     * @throws Exception 当格式不在支持列表内时抛出
      */
     public function format(string $format): self
     {
@@ -729,8 +772,11 @@ class QrCode
     /**
      * 设置图片质量
      *
+     * 用于 JPEG/WEBP 的压缩质量，超出 0~100 会被钳制到边界值；PNG 走
+     * 压缩级别参数，不受此值影响。
+     *
      * @param int $quality 质量值（0-100）
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function quality(int $quality): self
     {
@@ -741,8 +787,12 @@ class QrCode
     /**
      * 设置字符编码
      *
+     * 决定 BYTE 模式下内容从 UTF-8 转换的目标字符集，以及是否写入 ECI
+     * 前缀；会被 Encoder 归一化为标准名称（如 utf8 → UTF-8），因此拼写
+     * 大小写与常见别名都能识别。
+     *
      * @param string $encoding 编码
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function encoding(string $encoding): self
     {
@@ -766,11 +816,6 @@ class QrCode
     }
 
     /**
-     * 获取二维码信息（用于调试和验证）
-     *
-     * @return array 二维码详细信息
-     */
-    /**
      * 获取二维码原始矩阵（用于诊断或高级处理）
      *
      * @return array 二维码布尔矩阵
@@ -784,6 +829,12 @@ class QrCode
         return $this->encodeWithBacon();
     }
 
+    /**
+     * 获取二维码当前配置与状态信息（用于调试和验证）
+     *
+     * @return array 包含数据内容、尺寸、边距、版本、纠错级别、编码、
+     *               是否含 Logo/标签/水印等信息的关联数组
+     */
     public function getInfo(): array
     {
         return [
@@ -808,18 +859,13 @@ class QrCode
     }
 
     /**
-     * 生成二维码并返回GD图像资源
+     * 渲染二维码图像并返回 GD 图像资源
      *
-     * @return resource GD图像资源
-     * @throws Exception
-     */
-    /**
-     * 渲染二维码图像
-     * 优化了二维码在目标图片中的居中逻辑，确保二维码内容完美居中
-     * 支持透明背景、padding、标签等高级布局功能
+     * 支持透明背景、padding、标签、Logo、水印等高级布局，并对二维码在目标
+     * 图片中的位置做居中处理。启用对比度校验时会先验证颜色是否可扫描识别。
      *
-     * @return resource|GdImage GD图像资源
-     * @throws Exception 如果无法创建图像
+     * @return resource|\GdImage GD 图像资源
+     * @throws Exception 数据为空或无法创建图像时抛出
      */
     public function render()
     {
@@ -932,16 +978,10 @@ class QrCode
     }
 
     /**
-     * 使用BaconQrCode进行编码
+     * 编码二维码（使用本包自带的编码器）
      *
-     * @return array 二维码矩阵
-     * @throws Exception
-     */
-    /**
-     * 编码二维码（使用我们自己的类）
-     *
-     * @return array 二维码矩阵
-     * @throws Exception
+     * @return array 二维码布尔矩阵
+     * @throws Exception 编码失败时抛出
      */
     private function encodeWithBacon(): array
     {
@@ -1013,6 +1053,13 @@ class QrCode
 
     /**
      * 缩放图像到目标尺寸
+     *
+     * 按 targetWidth/targetHeight 缩放，任一为 0 时该维度保持原尺寸；
+     * 两者都等于原尺寸时直接返回原图。新建画布会先填充背景色，透明背景
+     * 且格式为 png 时改填全透明色，最后用重采样高质量缩放。
+     *
+     * @param GdImage $image 待缩放的源图像
+     * @return GdImage 缩放后的新图像；无需缩放或创建失败时返回原图像
      */
     private function resizeImage(GdImage $image): GdImage
     {
@@ -1049,6 +1096,13 @@ class QrCode
 
     /**
      * 绘制水印
+     *
+     * 未设置水印文本时直接返回。透明度会换算为 GD 的 alpha 值后绘制；
+     * 文本宽度按「字符数 × 字号 × 0.6」估算，因此中文等多字节文本的
+     * 居中位置会偏左。实际字形使用 GD 内置字体（字号被折算为 1~5 级），
+     * 设置的字号主要影响定位高度。
+     *
+     * @param GdImage $image 目标图像，水印会就地绘制到该图像上
      */
     private function drawWatermark(GdImage $image): void
     {
@@ -1107,6 +1161,13 @@ class QrCode
 
     /**
      * 将十六进制颜色转换为RGB数组
+     *
+     * 支持 3 位简写（#RGB，每位重复一次扩展）与 6 位（#RRGGBB）；不校验
+     * 字符合法性，含非十六进制字符或长度不符时按截取到的部分解析，
+     * 结果可能为 0 或异常值。
+     *
+     * @param string $hex 十六进制颜色值，可带 # 前缀
+     * @return int[] 形如 [R, G, B] 的整数数组，每项 0~255
      */
     private function hexToRgb(string $hex): array
     {
@@ -1123,6 +1184,11 @@ class QrCode
 
     /**
      * 绘制二维码矩阵
+     *
+     * 以 (startX, startY) 为内容区左上角，按 moduleSize 逐格填充深色模块：
+     * 普通模式用整数坐标的实心矩形保证相邻模块无缝拼接，圆点模式则交给
+     * drawRoundedModule() 绘制。仅 x、y 均小于 moduleCount 时才绘制，
+     * 因此传入的矩阵需至少为 moduleCount × moduleCount。
      *
      * @param GdImage $image 图像资源
      * @param array $matrix 二维码矩阵
@@ -1186,6 +1252,10 @@ class QrCode
 
     /**
      * 绘制背景图片
+     *
+     * 加载背景图后按 size × size 的正方形居中裁剪（横图裁宽、竖图裁高）
+     * 再缩放到目标尺寸，最后整块覆盖到图像 (0,0) 位置。图片加载失败时
+     * 静默返回，不改变原图。
      *
      * @param GdImage $image 图像资源
      * @param string $bgImagePath 背景图片路径
@@ -1489,8 +1559,11 @@ class QrCode
     /**
      * 加载图像
      *
+     * 便捷包装，内部直接转发给 loadLogoImage()，因此支持的后缀由
+     * IMAGETYPE_* 判定（png/jpeg/gif/webp），走文件内容而非扩展名。
+     *
      * @param string $path 图像路径
-     * @return GdImage|false
+     * @return GdImage|false 加载成功返回图像资源，类型不支持或读取失败返回 false
      */
     private function loadImage(string $path)
     {
@@ -2165,7 +2238,9 @@ class QrCode
     /**
      * 获取二维码数据
      *
-     * @return string
+     * 返回待编码的原始字符串，未调用 data()/make() 传入数据时为空串。
+     *
+     * @return string 二维码数据
      */
     public function getData(): string
     {
@@ -2175,7 +2250,9 @@ class QrCode
     /**
      * 获取二维码尺寸
      *
-     * @return int
+     * 返回 size() 设置的二维码区域边长（像素，含静默区，不含外部 padding）。
+     *
+     * @return int 尺寸（像素）
      */
     public function getSize(): int
     {
@@ -2185,7 +2262,10 @@ class QrCode
     /**
      * 获取边距
      *
-     * @return int
+     * 返回静默区宽度，单位为模块数量（默认 4 个模块）；换算成像素需乘以
+     * 渲染时算出的单个模块尺寸。
+     *
+     * @return int 边距（模块数量）
      */
     public function getMargin(): int
     {
@@ -2205,7 +2285,9 @@ class QrCode
     /**
      * 获取前景色
      *
-     * @return Color
+     * 返回用于绘制深色模块的颜色对象，构造函数中已默认初始化为黑色。
+     *
+     * @return Color 前景色对象
      */
     public function getForegroundColor(): Color
     {
@@ -2215,7 +2297,9 @@ class QrCode
     /**
      * 获取背景色
      *
-     * @return Color
+     * 返回用于绘制浅色模块与留白的颜色对象，构造函数中已默认初始化为白色。
+     *
+     * @return Color 背景色对象
      */
     public function getBackgroundColor(): Color
     {
@@ -2225,7 +2309,10 @@ class QrCode
     /**
      * 获取外边距
      *
-     * @return int
+     * 注意此处返回的是 padding（图像四周的像素留白），与 margin() 表示的
+     * 模块级静默区是两个不同概念。
+     *
+     * @return int 外边距（像素）
      */
     public function getPadding(): int
     {
@@ -2235,7 +2322,10 @@ class QrCode
     /**
      * 获取二维码版本
      *
-     * @return int
+     * 返回配置的版本号，0 表示尚未指定、由编码阶段按容量自动选择；
+     * 该值不是最终实际使用的版本。
+     *
+     * @return int 版本号（0 表示自动）
      */
     public function getVersion(): int
     {
@@ -2245,7 +2335,10 @@ class QrCode
     /**
      * 获取编码格式
      *
-     * @return string|null
+     * 返回 encoding() 配置的字符集名称，默认为 UTF-8；该值会参与 BYTE 模式的
+     * 转码与 ECI 前缀判定。
+     *
+     * @return string|null 字符集名称
      */
     public function getEncoding(): ?string
     {
@@ -2265,7 +2358,9 @@ class QrCode
     /**
      * 获取输出格式
      *
-     * @return string
+     * 返回值始终为小写（format() 已统一转换），默认 png。
+     *
+     * @return string 输出格式标识
      */
     public function getFormat(): string
     {
@@ -2275,7 +2370,9 @@ class QrCode
     /**
      * 获取图片质量
      *
-     * @return int
+     * 返回 0~100 的压缩质量，仅对 JPEG/WEBP 输出生效。
+     *
+     * @return int 质量值
      */
     public function getQuality(): int
     {
@@ -2295,7 +2392,10 @@ class QrCode
     /**
      * 获取圆点半径
      *
-     * @return float
+     * 返回圆点模式下的半径比例（相对于模块尺寸），实际绘制时还会被限制
+     * 在模块尺寸的 55%~70% 之间以保证可扫描性。
+     *
+     * @return float 半径比例，通常为 0~1
      */
     public function getRoundedRadius(): float
     {
@@ -2427,9 +2527,12 @@ class QrCode
     /**
      * 生成短信二维码
      *
+     * 内容按 smsto:号码[:内容] 的 URI 方案拼接，内容存在时会做 URL 编码；
+     * 空内容只生成带号码的短信入口，不预填正文。
+     *
      * @param string $phone 电话号码
      * @param string $message 短信内容
-     * @return self
+     * @return self 以该 URI 为数据的新二维码对象
      */
     public static function sms(string $phone, string $message = ''): self
     {
@@ -2659,8 +2762,11 @@ class QrCode
     /**
      * 生成抖音二维码
      *
+     * 以 https://www.douyin.com/user/{sec_uid} 的形式拼出用户主页链接，
+     * sec_uid 不做编码与校验，需由调用方保证格式正确。
+     *
      * @param string $secUid 抖音用户sec_uid
-     * @return self
+     * @return self 以该主页链接为数据的新二维码对象
      */
     public static function douyin(string $secUid): self
     {
@@ -3481,11 +3587,14 @@ class QrCode
     /**
      * 生成游戏二维码
      *
+     * 把游戏 ID、类型、邀请码与可选奖励链接打包成 JSON（保留中文、
+     * 不做转义），rewardUrl 为空时该字段为空白字符串。
+     *
      * @param string $gameId 游戏ID
      * @param string $gameType 游戏类型
      * @param string $inviteCode 邀请码
      * @param string $rewardUrl 奖励URL
-     * @return self
+     * @return self 以该 JSON 为数据的新二维码对象
      */
     public static function gaming(string $gameId, string $gameType, string $inviteCode, string $rewardUrl = ''): self
     {

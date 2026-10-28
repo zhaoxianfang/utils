@@ -122,8 +122,13 @@ class Code39Generator extends BaseGenerator
 
     /**
      * 编码单个字符
+     *
+     * 按字符查 9 位编码表（5 条 4 空，w 为宽、n 为窄），逐个把宽度追加到
+     * 条空数组：偶数位为条（正值）、奇数位为空（负值）。字符不在字符集内
+     * 时直接返回，不追加任何元素，也不报错。
      * 
      * @param string $char 要编码的字符
+     * @return void
      */
     protected function encodeCharacter(string $char): void
     {
@@ -150,6 +155,9 @@ class Code39Generator extends BaseGenerator
 
     /**
      * 验证数据格式
+     *
+     * 要求数据非空且所有字符都落在 Code 39 字符集内（数字、大写字母及
+     * -.$/+% 空格）。此处不做大小写转换，小写字母视为非法。
      * 
      * @param string $data 要验证的数据
      * @return bool 数据有效返回true
@@ -187,6 +195,11 @@ class Code39Generator extends BaseGenerator
         return $charsetArray[$checksumIndex];
     }
 
+    /**
+     * 获取条码类型标识
+     *
+     * @return string 固定返回 'Code 39'
+     */
     public function getType(): string
     {
         return self::TYPE;

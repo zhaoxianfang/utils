@@ -548,6 +548,16 @@ abstract class Minify
         }
     }
 
+    /**
+     * 仅替换字符串中首次出现的子串
+     *
+     * 与 str_replace 不同，本方法只替换 $subject 中第一次出现的 $search。
+     *
+     * @param string $search  待替换的子串
+     * @param string $replace 替换后的内容
+     * @param string $subject 原字符串
+     * @return string 替换首次出现后的字符串
+     */
     protected static function str_replace_first($search, $replace, $subject)
     {
         $pos = strpos($subject, $search);

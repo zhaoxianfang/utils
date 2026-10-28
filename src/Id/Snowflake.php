@@ -19,9 +19,15 @@ use RuntimeException;
  * - 5位工作节点ID（0-31）
  * - 12位序列号（每毫秒每节点最多4096个ID）
  *
- * @package Id
+ * @package zxf\Utils\Id
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * $sf = new \zxf\Utils\Id\Snowflake(1, 1); // 数据中心 1，节点 1
+ * $id = $sf->nextId();                       // 生成 64 位唯一 ID
+ * $ids = $sf->nextIds(10);                   // 批量生成 10 个
+ * $info = Snowflake::parse($id);             // 反解：时间/数据中心/节点/序列号
  */
 class Snowflake
 {

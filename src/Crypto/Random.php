@@ -9,11 +9,19 @@ use RuntimeException;
 
 /**
  * 密码学安全随机数生成器
- * 提供安全随机字节、字符串、整数、UUID和Token生成
  *
- * @package Crypto
+ * 基于 PHP 原生 random_bytes() / random_int() 提供密码学安全的随机字节、整数、
+ * 字符串、UUID（v4 / v7）、Token、OTP 等生成能力。所有随机源均为 CSPRNG
+ * （密码学安全伪随机数生成器），绝对禁止用其替代普通随机数用途。
+ *
+ * @package zxf\Utils\Crypto
  * @version 1.0.0
- * @license MIT
+ * @license  MIT
+ *
+ * @example
+ * // 生成 32 字节（256 位熵）的 URL 安全令牌，可用于会话标识 / API Key
+ * // 注意：以下仅为占位示例，真实密钥请勿硬编码到代码中
+ * $token = \zxf\Utils\Crypto\Random::token(32);
  */
 class Random
 {
@@ -37,6 +45,7 @@ class Random
      *
      * @param int $length 字节长度
      * @return string 随机字节串
+     * @throws InvalidArgumentException 当 $length 小于 1 时抛出
      */
     public static function bytes(int $length): string
     {
@@ -59,11 +68,15 @@ class Random
     }
 
     /**
-     * 生成随机字符串
+     * 生成指定长度的随机字符串
      *
-     * @param int    $length  长度
-     * @param string $charset 自定义字符集
+     * 逐字符从字符集中使用 random_int（CSPRNG）取值，字符集按字节处理，
+     * 因此多字节字符会被拆开。长度小于 1 或字符集为空时抛出异常。
+     *
+     * @param int    $length  长度（字符数，按字节计）
+     * @param string $charset 自定义字符集，默认字母数字
      * @return string 随机字符串
+     * @throws InvalidArgumentException 当 $length 小于 1 或 $charset 为空时抛出
      */
     public static function string(int $length, string $charset = self::DEFAULT_CHARSET): string
     {
@@ -162,6 +175,7 @@ class Random
      * @param int    $length  长度，默认6
      * @param bool   $numeric 是否纯数字
      * @return string OTP字符串
+     * @throws InvalidArgumentException 当 $length 小于 1 或纯数字长度超过 18 时抛出
      */
     public static function otp(int $length = 6, bool $numeric = true): string
     {
@@ -181,10 +195,14 @@ class Random
     }
 
     /**
-     * 生成随机浮点数
+     * 生成区间内的随机浮点数
      *
-     * @param float $min 最小值
-     * @param float $max 最大值
+     * 以 PHP_INT_MAX 为精度基准做整数随机后线性映射到 [$min, $max]，结果
+     * 落在左闭右闭区间，精度受双精度浮点限制。调用方应保证 $min <= $max，
+     * 否则返回值的区间语义将反转。
+     *
+     * @param float $min 最小值（含）
+     * @param float $max 最大值（含）
      * @return float 随机浮点数
      */
     public static function float(float $min = 0.0, float $max = 1.0): float
@@ -198,6 +216,7 @@ class Random
      *
      * @param array $array 输入数组
      * @return mixed 随机元素
+     * @throws InvalidArgumentException 当 $array 为空时抛出
      */
     public static function choice(array $array): mixed
     {
@@ -237,6 +256,8 @@ class Random
     /**
      * 生成随机布尔值
      *
+     * 以 random_int(0, 1) 取值，true/false 各占约 50%，随机源为系统 CSPRNG。
+     *
      * @return bool 随机布尔值
      */
     public static function bool(): bool
@@ -245,11 +266,17 @@ class Random
     }
 
     /**
-     * 生成随机日期时间
+     * 生成指定区间内的随机日期时间
      *
-     * @param string $start 开始时间
-     * @param string $end   结束时间
+     * 两端均以 strtotime 可解析的相对/绝对时间描述传入，取值后在 [$start, $end]
+     * 时间戳区间内随机，再按 $format 格式化输出。任一描述无法解析时抛出异常；
+     * 若 $start 晚于 $end，random_int 会抛出 ValueError。
+     *
+     * @param string $start  开始时间描述，默认 '-1 year'
+     * @param string $end    结束时间描述，默认 'now'
+     * @param string $format 输出格式，遵循 date() 语法，默认 'Y-m-d H:i:s'
      * @return string 格式化的日期时间
+     * @throws InvalidArgumentException 当时间范围无法解析时抛出
      */
     public static function dateTime(string $start = '-1 year', string $end = 'now', string $format = 'Y-m-d H:i:s'): string
     {
@@ -258,6 +285,11 @@ class Random
 
         if ($startTime === false || $endTime === false) {
             throw new InvalidArgumentException('无效的时间范围');
+        }
+
+        // 起止顺序颠倒时交换，避免 random_int() 因 min > max 抛 ValueError
+        if ($startTime > $endTime) {
+            [$startTime, $endTime] = [$endTime, $startTime];
         }
 
         $timestamp = random_int($startTime, $endTime);

@@ -26,10 +26,19 @@ use zxf\Utils\OAuth2\Helper\ConstCode;
 use zxf\Utils\OAuth2\Helper\Str;
 
 /**
- * Class Alipay
+ * 支付宝 OAuth2 网关
+ *
+ * 封装蚂蚁金服（支付宝）开放平台的 OAuth2 授权登录流程，支持 PC 网页与 APP 登录，
+ * 通过 RSA2/RSA 签名请求换取 access_token 并获取用户基本信息。
+ *
  * @package zxf\Utils\OAuth2\Gateways
- * *
- * @Created: 2018/11/9
+ * @version 1.0.0
+ * @license MIT
+ *
+ * @example
+ * // 构造网关并获取用户信息
+ * $alipay = new \zxf\Utils\OAuth2\Gateways\Alipay($config);
+ * $user   = $alipay->userInfo(); // 返回统一格式的用户信息数组
  */
 class Alipay extends Gateway
 {
@@ -52,7 +61,10 @@ class Alipay extends Gateway
     protected $sign_type = 'RSA2';
 
     /**
-     * @param $config
+     * 初始化支付宝网关，调用父类完成基础配置，并将获取 Token 的地址指向统一网关
+     *
+     * @param mixed $config 网关配置数组（含 app_id、app_secret、回调地址、RSA 密钥等）
+     * @throws OAuthException 当配置为空时由父类抛出
      */
     public function __construct($config)
     {

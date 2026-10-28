@@ -122,6 +122,11 @@ final class MatrixUtil
 
     /**
      * Clears a given matrix.
+     *
+     * 把所有单元重置为 -1，作为“尚未写入”的标记，后续嵌入功能图案时可
+     * 借此判断某个位置是否已被占用。
+     *
+     * @param ByteMatrix $matrix 待清空的矩阵
      */
     public static function clearMatrix(ByteMatrix $matrix) : void
     {
@@ -130,6 +135,15 @@ final class MatrixUtil
 
     /**
      * Builds a complete matrix.
+     *
+     * 按「清空 → 嵌入基础图案 → 嵌入格式信息 → 嵌入版本信息（≥7 时）→
+     * 嵌入数据比特」的顺序一次性生成完整矩阵，结果写入传入的 $matrix。
+     *
+     * @param BitArray $dataBits 已完成纠错交织的最终比特流
+     * @param ErrorCorrectionLevel $level 纠错级别，用于生成格式信息
+     * @param Version $version 二维码版本，决定尺寸与图案布局
+     * @param int $maskPattern 数据掩码编号（0~7），-1 表示不做掩码（仅调试用）
+     * @param ByteMatrix $matrix 输出矩阵，内容会被整体覆盖
      */
     public static function buildMatrix(
         BitArray $dataBits,
@@ -149,6 +163,11 @@ final class MatrixUtil
      * Removes the position detection patterns from a matrix.
      *
      * This can be useful if you need to render those patterns separately.
+     *
+     * 将左上、右上、左下三个 7×7 定位图案区域全部置 0，其余模块不受影响；
+     * 矩阵尺寸按宽度取用，因此仅适用于正方形矩阵。
+     *
+     * @param ByteMatrix $matrix 待处理的矩阵，会被就地修改
      */
     public static function removePositionDetectionPatterns(ByteMatrix $matrix) : void
     {
@@ -161,6 +180,13 @@ final class MatrixUtil
 
     /**
      * Embeds type information into a matrix.
+     *
+     * 生成 15 位格式信息后，按位分别写入左上角与右上/左下两处冗余位置，
+     * 两处内容相同，便于解码时容错。
+     *
+     * @param ErrorCorrectionLevel $level 纠错级别
+     * @param int $maskPattern 数据掩码编号（0~7）
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedTypeInfo(ErrorCorrectionLevel $level, int $maskPattern, ByteMatrix $matrix) : void
     {
@@ -192,6 +218,12 @@ final class MatrixUtil
     /**
      * Generates type information bits and appends them to a bit array.
      *
+     * 由 2 位纠错级别与 3 位掩码编号拼成 5 位值，追加 10 位 BCH 校验码后
+     * 与固定掩码 0x5412 异或，最终得到 15 位格式信息。
+     *
+     * @param ErrorCorrectionLevel $level 纠错级别
+     * @param int $maskPattern 数据掩码编号（0~7）
+     * @param BitArray $bits 目标比特流，会被追加 15 位并就地异或
      * @throws RuntimeException if bit array resulted in invalid size
      */
     private static function makeTypeInfoBits(ErrorCorrectionLevel $level, int $maskPattern, BitArray $bits) : void
@@ -213,6 +245,12 @@ final class MatrixUtil
 
     /**
      * Embeds version information if required.
+     *
+     * 仅版本 7 及以上需要写入版本信息（18 位）；低于 7 时直接返回。
+     * 同一份数据会分别写入右上区域与左下区域，形成两处冗余。
+     *
+     * @param Version $version 当前版本
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function maybeEmbedVersionInfo(Version $version, ByteMatrix $matrix) : void
     {
@@ -239,6 +277,10 @@ final class MatrixUtil
     /**
      * Generates version information bits and appends them to a bit array.
      *
+     * 追加 6 位版本号及其 12 位 BCH 校验码，共 18 位；此处不做过掩码处理。
+     *
+     * @param Version $version 当前版本（需为 7 及以上）
+     * @param BitArray $bits 目标比特流，会被追加 18 位
      * @throws RuntimeException if bit array resulted in invalid size
      */
     private static function makeVersionInfoBits(Version $version, BitArray $bits) : void
@@ -255,6 +297,13 @@ final class MatrixUtil
 
     /**
      * Calculates the BCH code for a value and a polynomial.
+     *
+     * 先把值左移到与生成多项式最高位对齐，再反复用多项式做异或消去高位，
+     * 余数即为校验码；$poly 的位数决定校验码长度。
+     *
+     * @param int $value 需要计算校验码的原始值（如格式信息或版本号）
+     * @param int $poly 生成多项式（如 0x537 用于格式信息、0x1f25 用于版本信息）
+     * @return int 计算得到的校验码余数
      */
     private static function calculateBchCode(int $value, int $poly) : int
     {
@@ -270,6 +319,12 @@ final class MatrixUtil
 
     /**
      * Finds and MSB set.
+     *
+     * 通过不断右移统计有效位数，得到最高置位的位置（1 表示最高位在 bit0），
+     * 传入 0 时返回 0。
+     *
+     * @param int $value 待测量的非负整数
+     * @return int 最高置位的位置，也等于该值的二进制有效位数
      */
     private static function findMsbSet(int $value) : int
     {
@@ -285,6 +340,12 @@ final class MatrixUtil
 
     /**
      * Embeds basic patterns into a matrix.
+     *
+     * 依次嵌入定位图案与分隔符、左下角固定黑点、按版本决定的对齐图案，
+     * 以及横竖定时图案；须在写入格式信息与数据比特之前调用。
+     *
+     * @param Version $version 当前版本，决定是否需要对齐图案
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedBasicPatterns(Version $version, ByteMatrix $matrix) : void
     {
@@ -296,6 +357,11 @@ final class MatrixUtil
 
     /**
      * Embeds position detection patterns and separators into a byte matrix.
+     *
+     * 在三个角嵌入 7×7 定位图案，随后补齐它们内侧的水平与垂直分隔线
+     * （共 9 处）；分隔线写入前会校验目标格为空，避免覆盖已有图案。
+     *
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedPositionDetectionPatternsAndSeparators(ByteMatrix $matrix) : void
     {
@@ -320,6 +386,13 @@ final class MatrixUtil
 
     /**
      * Embeds a single position detection pattern into a byte matrix.
+     *
+     * 从 ($xStart, $yStart) 开始铺一个 7×7 的定位图案，直接覆盖目标区域
+     * 原有内容，不做占位校验。
+     *
+     * @param int $xStart 图案左上角列坐标
+     * @param int $yStart 图案左上角行坐标
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedPositionDetectionPattern(int $xStart, int $yStart, ByteMatrix $matrix) : void
     {
@@ -330,6 +403,13 @@ final class MatrixUtil
         }
     }
 
+    /**
+     * 将单个定位探测图案区域清零（用于单独移除一个定位图案）
+     *
+     * @param int        $xStart 起始列坐标
+     * @param int        $yStart 起始行坐标
+     * @param ByteMatrix $matrix 待处理的矩阵
+     */
     private static function removePositionDetectionPattern(int $xStart, int $yStart, ByteMatrix $matrix) : void
     {
         for ($y = 0; $y < 7; ++$y) {
@@ -342,6 +422,12 @@ final class MatrixUtil
     /**
      * Embeds a single horizontal separation pattern.
      *
+     * 在给定起点向右铺 8 个浅色（0）模块，构成定位图案下方的水平分隔线；
+     * 任一格已被占用（非 -1）即说明布局冲突并抛出异常。
+     *
+     * @param int $xStart 分隔线起始列坐标
+     * @param int $yStart 分隔线所在行坐标
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      * @throws RuntimeException if a byte was already set
      */
     private static function embedHorizontalSeparationPattern(int $xStart, int $yStart, ByteMatrix $matrix) : void
@@ -358,6 +444,12 @@ final class MatrixUtil
     /**
      * Embeds a single vertical separation pattern.
      *
+     * 在给定起点向下铺 7 个浅色（0）模块，构成定位图案右侧的垂直分隔线；
+     * 任一格已被占用（非 -1）即说明布局冲突并抛出异常。
+     *
+     * @param int $xStart 分隔线所在列坐标
+     * @param int $yStart 分隔线起始行坐标
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      * @throws RuntimeException if a byte was already set
      */
     private static function embedVerticalSeparationPattern(int $xStart, int $yStart, ByteMatrix $matrix) : void
@@ -374,6 +466,10 @@ final class MatrixUtil
     /**
      * Embeds a dot at the left bottom corner.
      *
+     * 在坐标 (8, height-8) 写入固定黑点；写入前若该格已是 0 则说明与
+     * 已有图案冲突，抛出异常。
+     *
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      * @throws RuntimeException if a byte was already set to 0
      */
     private static function embedDarkDotAtLeftBottomCorner(ByteMatrix $matrix) : void
@@ -387,6 +483,13 @@ final class MatrixUtil
 
     /**
      * Embeds position adjustment patterns if required.
+     *
+     * 版本 1 没有对齐图案，直接返回；其余版本按坐标表两两组合出候选中心，
+     * 跳过空坐标，并仅在该中心仍为空（-1）时以 (x-2, y-2) 为左上角绘制，
+     * 从而避开已存在的定位图案。
+     *
+     * @param Version $version 当前版本
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function maybeEmbedPositionAdjustmentPatterns(Version $version, ByteMatrix $matrix) : void
     {
@@ -417,6 +520,13 @@ final class MatrixUtil
 
     /**
      * Embeds a single position adjustment pattern.
+     *
+     * 从 ($xStart, $yStart) 开始铺一个 5×5 的对齐图案，会覆盖目标区域
+     * 原有内容。
+     *
+     * @param int $xStart 图案左上角列坐标
+     * @param int $yStart 图案左上角行坐标
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedPositionAdjustmentPattern(int $xStart, int $yStart, ByteMatrix $matrix) : void
     {
@@ -429,6 +539,11 @@ final class MatrixUtil
 
     /**
      * Embeds timing patterns into a matrix.
+     *
+     * 在第 6 行与第 6 列、避开两端定位图案的区域（8 ~ width-9）交替写入
+     * 深浅模块；仅填充仍为 -1 的空格，已有图案不会被覆盖。
+     *
+     * @param ByteMatrix $matrix 目标矩阵，会被就地写入
      */
     private static function embedTimingPatterns(ByteMatrix $matrix) : void
     {
@@ -453,6 +568,13 @@ final class MatrixUtil
      * For debugging purposes, it skips masking process if "getMaskPattern" is -1. See 8.7 of JISX0510:2004 (p.38) for
      * how to embed data bits.
      *
+     * 从右下角开始，以两列为一组上下交替地蛇形填充，跳过第 6 列定时图案
+     * 与所有已占用的功能图案；比特用尽后剩余空格补 0。若最终消费的比特数
+     * 与比特流长度不一致，说明数据量不匹配并抛出异常。
+     *
+     * @param BitArray $dataBits 已完成纠错交织的比特流
+     * @param int $maskPattern 掩码编号（0~7），-1 表示不做掩码（仅调试用）
+     * @param ByteMatrix $matrix 目标矩阵，空单元会被逐格填充
      * @throws WriterException if not all bits could be consumed
      */
     private static function embedDataBits(BitArray $dataBits, int $maskPattern, ByteMatrix $matrix) : void

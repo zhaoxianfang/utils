@@ -92,6 +92,10 @@ abstract class AbstractEnum
     /**
      * 创建枚举值
      *
+     * 以常量值数组作为构造参数实例化子类，再回填名称与序号，并把实例
+     * 写入按类名隔离的静态缓存，因此同名枚举在进程内始终是同一个对象
+     * （单例语义）。调用方需保证该名称此前未被缓存。
+     *
      * @param string $name 名称
      * @param int $ordinal 序号
      * @param array $arguments 构造参数
@@ -140,7 +144,11 @@ abstract class AbstractEnum
     /**
      * 获取类常量
      *
-     * @return array
+     * 通过反射只收集 protected 常量（public/private 会被忽略），按声明顺序
+     * 从 0 开始分配序号，并把常量值规范为数组（非数组时退化为空数组）；
+     * 结果按类名静态缓存，只解析一次。
+     *
+     * @return array<string, array{0: int, 1: array}> 以常量名为键、[序号, 构造参数] 为值的映射
      */
     private static function constants() : array
     {

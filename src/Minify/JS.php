@@ -107,6 +107,12 @@ class JS extends Minify
      */
     protected $operatorsAfter = array();
 
+    /**
+     * 初始化 JS 压缩器并加载字典数据
+     *
+     * 复用父类构造函数加载源码，并从内置字典目录载入关键字、运算符等列表，
+     * 为 JS 特有的压缩优化（字符串/正则抽取、空白剥离、属性简写等）做准备。
+     */
     public function __construct()
     {
         call_user_func_array(array('\\zxf\\Utils\\Minify\\Minify', '__construct'), func_get_args());

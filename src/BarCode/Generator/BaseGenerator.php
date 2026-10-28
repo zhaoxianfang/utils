@@ -66,6 +66,9 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
 
     /**
      * 设置配置
+     *
+     * 整体替换生成器持有的配置对象引用，后续生成按新配置执行；
+     * 不会与旧配置合并，也不会重新计算已生成的条空数据。
      * 
      * @param BarcodeConfig $config 配置对象
      * @return self 支持链式调用
@@ -78,6 +81,9 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
 
     /**
      * 获取配置
+     *
+     * 返回生成器当前持有的配置对象（引用而非副本），修改返回值会直接影响
+     * 后续生成行为。构造时未传入配置则返回默认配置实例。
      * 
      * @return BarcodeConfig 配置对象
      */
@@ -88,6 +94,9 @@ abstract class BaseGenerator implements BarcodeGeneratorInterface
 
     /**
      * 获取长竖线位置
+     *
+     * 返回条空数组中应加长的索引（如 EAN/UPC 的起始、中间、终止保护符），
+     * 渲染器据此绘制更长的保护条。未生成数据前返回空数组。
      * 
      * @return array<int> 长竖线索引数组
      */

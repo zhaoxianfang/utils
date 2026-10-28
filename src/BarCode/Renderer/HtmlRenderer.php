@@ -18,11 +18,27 @@ class HtmlRenderer extends BaseRenderer
     /** @var array<int> 最近一次渲染的条空模式（供文字分段结构分析使用） */
     protected array $barcodeData = [];
 
+    /**
+     * 构造 HTML 渲染器
+     *
+     * @param BarcodeConfig|null $config 条码配置对象；为 null 时使用默认配置
+     */
     public function __construct(?BarcodeConfig $config = null)
     {
         parent::__construct($config);
     }
 
+    /**
+     * 将条空模式渲染为 HTML/CSS 字符串
+     *
+     * 通过 flex 行内 div 模拟条与空，并按配置叠加边距、静区、边框、保护符长竖线、
+     * 渐变、圆角与文字/水印。config 数组支持以 *Class 后缀键覆盖各元素 CSS 类名。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数=条，负数=空，绝对值为模块数）
+     * @param string $data 要在条码下方显示的文字（通常为完整编码数据）
+     * @param array<string, mixed> $config 渲染配置项（CSS 类名、边距、颜色等），可选
+     * @return string 完整的 HTML 片段（单个外层 wrapper div）
+     */
     public function render(array $barcodeData, string $data, array $config = []): string
     {
         $cssClasses = [
@@ -197,6 +213,8 @@ class HtmlRenderer extends BaseRenderer
      * 渲染水印（纯 HTML/CSS：九宫格定位 + 旋转 + 透明度）
      *
      * 与 PNG/SVG 水印语义一致（同 watermarkPosition/watermarkOpacity/watermarkAngle 配置）。
+     *
+     * @return string 绝对定位的水印 div 片段，文本已做 HTML 转义
      */
     protected function renderWatermarkHtml(): string
     {
@@ -234,6 +252,21 @@ class HtmlRenderer extends BaseRenderer
      *
      * EAN/UPC 系列走「分段定位」：每个字符按保护符区域中心精确摆放，
      * 与 PNG 渲染器的分段逻辑保持一致；其余条码走 textAlign 对齐。
+     *
+     * 文字纵向位置按条区底部加 textOffset 计算，长条启用时再下移其溢出高度，
+     * 避免文字与长竖线重叠。
+     *
+     * @param string $data 要显示的完整条码数据
+     * @param array{text:string} $cssClasses 文字容器使用的 CSS 类名映射
+     * @param string $barColor 文字颜色（十六进制）
+     * @param int $wrapperWidth 外层容器宽度（像素）
+     * @param int $barcodeWidth 条码内容宽度（像素）
+     * @param int $marginLeft 左边距（像素）
+     * @param int $barsTop 条区顶部 y 坐标（像素）
+     * @param int $barHeight 条高（像素）
+     * @param bool $longBarsEnabled 是否启用了长竖线
+     * @param int $longBarOverhang 长竖线超出条区的长度（像素）
+     * @return string 文字区块的 HTML 片段
      */
     protected function renderTextBlock(
         string $data,
@@ -276,9 +309,12 @@ class HtmlRenderer extends BaseRenderer
         }
 
         // 结构分析（regions 为整个 wrapper 坐标系的绝对像素，条起点叠加 marginLeft）
+        // 注意：$barcodeWidth 只是内容宽度，缺左边距；analyzeBarcodeStructure() 内部会
+        // 再减去 marginLeft 得到内容宽度，故这里必须传「左内边距 + 内容宽度」的右边缘坐标，
+        // 否则 regions 整体左移 marginLeft，EAN/UPC 的分段文字会错位
         if (empty($this->barcodeStructure) || !isset($this->barcodeStructure['regions'])) {
             $bars = $this->buildBarGeometries($this->barcodeData, $marginLeft);
-            $this->analyzeBarcodeStructure($bars, $barcodeWidth, $marginLeft);
+            $this->analyzeBarcodeStructure($bars, $marginLeft + $barcodeWidth, $marginLeft);
         }
 
         $regions = $this->barcodeStructure['regions'] ?? [];
@@ -316,6 +352,15 @@ class HtmlRenderer extends BaseRenderer
 
     /**
      * 生成单字符 span（按中心点定位）
+     *
+     * 根据中心点与字符宽度反推 left 值，左侧越界时夹紧到 0，
+     * 保证首字符不会被裁出容器。
+     *
+     * @param string $char 单个字符
+     * @param int $centerX 字符中心点的 x 坐标（像素）
+     * @param int $charWidth 字符宽度（像素）
+     * @param int $fontSize 字号（像素），用于行高与垂直居中
+     * @return string 绝对定位的 span 片段
      */
     protected function textSpan(string $char, int $centerX, int $charWidth, int $fontSize): string
     {
@@ -329,6 +374,17 @@ class HtmlRenderer extends BaseRenderer
             . '">' . htmlspecialchars($char, ENT_QUOTES, 'UTF-8') . '</span>' . "\n";
     }
 
+    /**
+     * 渲染并将 HTML 写入文件
+     *
+     * 目标目录不存在时自动递归创建。写入失败（如目录不可写）返回 false。
+     *
+     * @param array<int> $barcodeData 条空模式数组
+     * @param string $data 显示文字
+     * @param string $filename 目标 HTML 文件路径
+     * @param array<string, mixed> $config 渲染配置项，可选
+     * @return bool 写入成功返回 true，失败返回 false
+     */
     public function saveToFile(array $barcodeData, string $data, string $filename, array $config = []): bool
     {
         $html = $this->render($barcodeData, $data, $config);
@@ -339,6 +395,16 @@ class HtmlRenderer extends BaseRenderer
         return file_put_contents($filename, $html) !== false;
     }
 
+    /**
+     * 直接输出 HTML 到浏览器
+     *
+     * 设置 text/html 响应头并打印渲染结果；调用前请确保未发送任何输出。
+     *
+     * @param array<int> $barcodeData 条空模式数组
+     * @param string $data 显示文字
+     * @param array<string, mixed> $config 渲染配置项，可选
+     * @return void
+     */
     public function outputToBrowser(array $barcodeData, string $data, array $config = []): void
     {
         $html = $this->render($barcodeData, $data, $config);

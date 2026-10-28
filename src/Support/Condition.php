@@ -44,11 +44,22 @@ final class Condition
 
     private bool $matchFirst = true;
 
+    /**
+     * 私有构造函数，创建条件构建器实例
+     *
+     * @param mixed $value 待判断的源值，供后续 when/equals/in 等条件引用
+     */
     private function __construct(mixed $value)
     {
         $this->value = $value;
     }
 
+    /**
+     * 创建条件构建器实例
+     *
+     * @param mixed $value 待判断的源值
+     * @return static
+     */
     public static function make(mixed $value): self
     {
         return new self($value);
@@ -56,6 +67,13 @@ final class Condition
 
     /**
      * 添加条件分支
+     *
+     * 按注册顺序登记一条「条件 + 回调」；条件回调接收源值并返回 bool，
+     * 命中时以源值为参数执行回调。是否短路由 matchFirst() 控制。
+     *
+     * @param Closure $condition 条件回调，签名 `function (mixed $value): bool`
+     * @param Closure $callback 命中后的处理回调，签名 `function (mixed $value): mixed`
+     * @return self 当前实例，便于链式调用
      */
     public function when(Closure $condition, Closure $callback): self
     {
@@ -65,6 +83,12 @@ final class Condition
 
     /**
      * 添加否定条件分支
+     *
+     * 条件结果为 false 时执行回调，等价于 when() 取反，注册顺序与 when() 一致。
+     *
+     * @param Closure $condition 条件回调，签名 `function (mixed $value): bool`
+     * @param Closure $callback 条件不成立时的处理回调
+     * @return self 当前实例，便于链式调用
      */
     public function unless(Closure $condition, Closure $callback): self
     {
@@ -73,6 +97,12 @@ final class Condition
 
     /**
      * 设置默认回调
+     *
+     * 所有分支均未命中时执行，以源值作为入参；后设置会覆盖先前设置。
+     * 未设置默认回调且无分支命中时 evaluate() 返回 null。
+     *
+     * @param Closure $callback 默认回调，签名 `function (mixed $value): mixed`
+     * @return self 当前实例，便于链式调用
      */
     public function default(Closure $callback): self
     {
@@ -82,6 +112,11 @@ final class Condition
 
     /**
      * 是否只匹配第一个满足的条件（默认 true）
+     *
+     * 为 true 时命中首个分支立即返回；为 false 时收集所有命中分支的结果并以数组返回。
+     *
+     * @param bool $match 是否只取第一个命中结果，默认 true
+     * @return self 当前实例，便于链式调用
      */
     public function matchFirst(bool $match = true): self
     {
@@ -91,6 +126,11 @@ final class Condition
 
     /**
      * 执行条件判断并返回结果
+     *
+     * 依次求值各分支条件：matchFirst 为 true 时返回首个命中分支的回调结果；
+     * 为 false 时返回全部命中结果的数组；均未命中时执行默认回调，无默认回调则返回 null。
+     *
+     * @return mixed 命中分支的结果、命中结果数组或默认回调的返回值
      */
     public function evaluate(): mixed
     {
@@ -117,6 +157,12 @@ final class Condition
 
     /**
      * 匹配值等于指定值时执行
+     *
+     * 使用全等（===）比较，因此类型不同不会命中。
+     *
+     * @param mixed $compare 期望相等的目标值
+     * @param Closure $callback 命中后的处理回调
+     * @return self 当前实例，便于链式调用
      */
     public function equals(mixed $compare, Closure $callback): self
     {
@@ -125,6 +171,12 @@ final class Condition
 
     /**
      * 匹配值在数组中时执行
+     *
+     * 使用 in_array() 严格模式比较，避免类型隐式转换导致的误命中。
+     *
+     * @param array $values 候选值集合
+     * @param Closure $callback 命中后的处理回调
+     * @return self 当前实例，便于链式调用
      */
     public function in(array $values, Closure $callback): self
     {
@@ -133,6 +185,12 @@ final class Condition
 
     /**
      * 匹配值类型时执行
+     *
+     * 与 gettype() 的返回值比较（如 'integer'、'string'、'array'），需注意是类型名而非类名。
+     *
+     * @param string $type 期望的类型名（gettype() 返回值）
+     * @param Closure $callback 命中后的处理回调
+     * @return self 当前实例，便于链式调用
      */
     public function type(string $type, Closure $callback): self
     {
@@ -141,6 +199,12 @@ final class Condition
 
     /**
      * 匹配值 instanceof 时执行
+     *
+     * 值需为对象且是 $class 或其子类的实例才会命中；非对象值不会命中。
+     *
+     * @param string $class 目标类名或接口名（含命名空间）
+     * @param Closure $callback 命中后的处理回调
+     * @return self 当前实例，便于链式调用
      */
     public function instance(string $class, Closure $callback): self
     {
@@ -149,6 +213,14 @@ final class Condition
 
     /**
      * 快捷执行
+     *
+     * 按 $cases 的「键 => 回调」批量注册 equals 分支后立即求值；
+     * 非可调用值会被跳过，$default 存在时作为兜底分支。
+     *
+     * @param mixed $value 待判断的源值
+     * @param array $cases 键为期望值、值为命中回调的映射
+     * @param Closure|null $default 全部未命中时的默认回调
+     * @return mixed 命中分支的结果或默认回调返回值
      */
     public static function match(mixed $value, array $cases, ?Closure $default = null): mixed
     {

@@ -20,6 +20,10 @@ use InvalidArgumentException;
  * 4. 支持复杂嵌套数组结构
  * 5. 高度可配置的转换规则
  *
+ * @package zxf\Utils\Xml
+ * @version 1.0.0
+ * @license MIT
+ *
  * @example 用法详见 readme.md 文件
  */
 class Array2XML
@@ -82,7 +86,7 @@ class Array2XML
             }
 
             // 验证编码
-            if (! is_string($this->config['encoding']) || ! in_array(strtoupper($this->config['encoding']), ['UTF-8', 'ISO-8859-1', 'US-ASCII'])) {
+            if (! is_string($this->config['encoding']) || ! in_array(strtoupper($this->config['encoding']), ['UTF-8', 'ISO-8859-1', 'US-ASCII'], true)) {
                 throw new InvalidArgumentException('不支持的编码格式');
             }
 
@@ -108,7 +112,12 @@ class Array2XML
     /**
      * 初始化根元素
      *
-     * @throws InvalidArgumentException 当根元素无效时抛出
+     * 标准化 rootName（空名视为非法）、按 rootAttributes 与 defaultNamespace 创建根节点，
+     * 追加配置中的命名空间声明后挂到文档上；整个过程失败时统一转为 InvalidArgumentException。
+     *
+     * @return void 无返回值，结果写入 $this->document
+     *
+     * @throws InvalidArgumentException 当根元素名称无效或创建失败时抛出
      */
     private function initRootElement(): void
     {
@@ -172,13 +181,16 @@ class Array2XML
     /**
      * 创建XML元素
      *
+     * 按需标准化名称、附加属性并写入值（数组转子节点、标量转文本）；
+     * 非严格模式下遇到 DOMException 会退化为一个名为 element 的空节点，不中断转换。
+     *
      * @param  string  $name  元素名称
      * @param  mixed  $value  元素值
      * @param  array  $attributes  元素属性
      * @param  string|null  $namespace  命名空间URI
      * @return DOMElement 创建的DOM元素
      *
-     * @throws InvalidArgumentException 当元素创建失败时抛出
+     * @throws InvalidArgumentException 当元素名称为空或严格模式下创建失败时抛出
      */
     public function createElement(
         string $name,
@@ -261,8 +273,15 @@ class Array2XML
     /**
      * 添加属性到元素
      *
+     * 跳过非字符串键与标准化后为空的属性名；含 `:` 的名称按命名空间属性写入
+     * （前缀未在配置中声明时回退到 xmlns 命名空间），其余按普通属性写入。
+     * 单个属性失败时仅严格模式抛异常，否则跳过该属性。
+     *
      * @param  DOMElement  $element  目标元素
      * @param  array  $attributes  属性数组
+     * @return void 无返回值
+     *
+     * @throws InvalidArgumentException 严格模式下属性设置失败时抛出
      */
     private function addAttributes(DOMElement $element, array $attributes): void
     {
@@ -302,8 +321,11 @@ class Array2XML
     /**
      * 标准化属性名称
      *
+     * 仅保留字母、数字、下划线、连字符、点与冒号（用于命名空间前缀）；
+     * 清洗后为空则返回空串，由调用方跳过该属性。注意此处不做首字符合法性修正。
+     *
      * @param  string  $name  原始属性名
-     * @return string 标准化后的属性名
+     * @return string 标准化后的属性名，无效时为空字符串
      */
     private function normalizeAttributeName(string $name): string
     {
@@ -326,8 +348,11 @@ class Array2XML
     /**
      * 设置元素值
      *
+     * 按值类型分发：数组递归展开为子节点或文本内容，标量直接作为文本写入。
+     *
      * @param  DOMElement  $element  目标元素
      * @param  mixed  $value  元素值
+     * @return void 无返回值
      */
     private function setElementValue(DOMElement $element, $value): void
     {
@@ -403,10 +428,16 @@ class Array2XML
     /**
      * 处理特殊键名
      *
+     * 识别两类前缀：属性前缀（如 `@name`，写入属性）与特殊节点前缀
+     * （comment/pi/cdata，分别写入注释、处理指令与 CDATA 节点）。
+     * 属性名清洗后为空或写入失败时返回 false，交由调用方按普通元素处理（严格模式则抛异常）。
+     *
      * @param  DOMElement  $element  当前元素
      * @param  string  $key  键名
      * @param  mixed  $value  键值
-     * @return bool 是否处理了特殊键
+     * @return bool 已作为特殊键处理返回 true，未处理返回 false
+     *
+     * @throws InvalidArgumentException 严格模式下属性或特殊节点写入失败时抛出
      */
     private function handleSpecialKey(DOMElement $element, string $key, $value): bool
     {

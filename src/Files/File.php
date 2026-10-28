@@ -348,8 +348,17 @@ class File
     /**
      * 读取序列化文件 - 自动反序列化PHP数据
      *
+     * 通过 allowed_classes 白名单限制可反序列化的类：false（默认）会拒绝
+     * 反序列化出任何对象，仅允许数组/标量，可有效防御 POP 链攻击；
+     * 确需还原对象时请显式传入类名数组，切勿直接传 true。
+     * 反序列化失败（内容损坏或含被禁止的类）时抛异常，但内容恰为
+     * serialize(false) 的合法数据会正常返回 false。
+     *
      * @param string $filePath 序列化文件路径
+     * @param array|false $allowedClasses 允许反序列化的类名列表；false 表示禁止任何类
      * @return mixed 反序列化后的数据
+     *
+     * @throws RuntimeException 文件读取失败或反序列化失败时抛出
      */
     public static function readSerializedFile(string $filePath, array|false $allowedClasses = false): mixed
     {
@@ -1243,9 +1252,16 @@ class File
     /**
      * 更改文件扩展名
      *
-     * @param string $filePath 文件路径
-     * @param string $newExtension 新的扩展名
-     * @return bool 更改成功返回true
+     * 实际是「同目录另存为新文件名 + 移动原文件」，原文件名主体保持不变，
+     * 仅替换扩展名；$newExtension 前置的点会被自动去掉。
+     * 目标同名文件已存在时会被直接覆盖（move() 默认 overwrite=true）。
+     * 注意本方法只改文件名，不会转换文件内容格式。
+     *
+     * @param string $filePath 源文件路径，必须存在
+     * @param string $newExtension 新的扩展名，可带或不带前导点，如 'txt'、'.txt'
+     * @return bool 重命名成功返回 true，失败返回 false
+     *
+     * @throws RuntimeException 源文件不存在时抛出
      */
     public static function changeExtension(string $filePath, string $newExtension): bool
     {
@@ -1261,6 +1277,16 @@ class File
 
     /**
      * 创建过滤迭代器 - 内部工具方法
+     *
+     * 以 RecursiveDirectoryIterator（跳过 . 与 ..）为基础，可选套一层
+     * RecursiveCallbackFilterIterator 实现过滤，最终用 SELF_FIRST 模式遍历。
+     * 回调返回 false 时该条目及其子树都会被跳过，因此可用于排除目录。
+     *
+     * @param string $directory 起始目录路径
+     * @param callable|null $filter 过滤回调，签名为 function(SplFileInfo $file): bool，null 表示不过滤
+     * @return RecursiveIteratorIterator 递归迭代器
+     *
+     * @throws UnexpectedValueException 目录不存在或不可读时抛出
      */
     private static function createFilteredIterator(string $directory, ?callable $filter = null): RecursiveIteratorIterator
     {
@@ -1423,6 +1449,17 @@ class File
 
     /**
      * 递归构建目录树 - 修复和优化的内部工具方法
+     *
+     * 每个节点包含 name/path/type/size/size_formatted/modified/permissions；
+     * 目录节点额外带 children 子节点数组、file_count（递归文件数）与
+     * dir_count（递归子目录数）。当前深度达到 $maxDepth 时直接返回空数组，
+     * 即 $maxDepth 表示最多向下展开的层数。单个子目录不可访问时仅在该节点
+     * 记录 error 字段并继续处理同级其他条目，不会中断整体构建。
+     *
+     * @param string $directory 要遍历的目录路径
+     * @param int $maxDepth 最大展开深度，达到后不再下钻
+     * @param int $currentDepth 当前递归深度，由内部递归调用维护，外部调用应保持 0
+     * @return array 目录树数组（节点列表）
      */
     private static function buildTree(string $directory, int $maxDepth, int $currentDepth = 0): array
     {
@@ -1694,6 +1731,13 @@ class File
      * 递归统计目录下的子目录数量
      *
      * findFiles() 只收集文件，无法用于目录计数。
+     * 以 SELF_FIRST 模式递归遍历，凡 isDir() 的条目（含多级子目录）都计入，
+     * 起始目录自身不计入。目录不可读时会抛异常（由调用方决定是否捕获）。
+     *
+     * @param string $directory 目录路径
+     * @return int 子目录总数
+     *
+     * @throws UnexpectedValueException 目录不存在或不可读时抛出
      */
     private static function countDirectories(string $directory): int
     {
@@ -1743,8 +1787,13 @@ class File
     /**
      * 获取文件大小
      *
+     * 先规范化路径并校验目标确实是文件（传目录会抛异常），再读取 filesize。
+     * 返回值受文件系统与平台限制，超过 2GB 的文件在 32 位环境下可能溢出。
+     *
      * @param string $filePath 文件路径
      * @return int 文件大小（字节）
+     *
+     * @throws RuntimeException 文件不存在或无法获取大小时抛出
      */
     public static function getFileSize(string $filePath): int
     {
@@ -1875,8 +1924,12 @@ class File
     /**
      * 检查是否为文件
      *
+     * 先规范化路径再调用 is_file()，因此传入相对路径或含 "."/".." 的路径
+     * 也能正确判断；目录、符号链接指向的目录与不存在的路径均返回 false。
+     * 本方法不抛异常。
+     *
      * @param string $path 路径
-     * @return bool 是文件返回true
+     * @return bool 是普通文件返回 true
      */
     public static function isFile(string $path): bool
     {
@@ -1887,8 +1940,11 @@ class File
     /**
      * 检查是否为目录
      *
+     * 先规范化路径再调用 is_dir()，普通文件、失效链接与不存在的路径均返回 false；
+     * 指向目录的符号链接会返回 true（is_dir 会跟随链接）。本方法不抛异常。
+     *
      * @param string $path 路径
-     * @return bool 是目录返回true
+     * @return bool 是目录返回 true
      */
     public static function isDirectory(string $path): bool
     {
@@ -1923,8 +1979,11 @@ class File
     /**
      * 获取文件扩展名
      *
-     * @param string $filePath 文件路径
-     * @return string 文件扩展名
+     * 直接取 pathinfo 的扩展名部分（不含点），如 "a.tar.gz" 得到 "gz"；
+     * 无扩展名时返回空字符串。本方法仅做字符串解析，不校验文件是否存在。
+     *
+     * @param string $filePath 文件路径或文件名
+     * @return string 小写/大写保持原样的扩展名，无扩展名时为空字符串
      */
     public static function getExtension(string $filePath): string
     {
@@ -1956,8 +2015,12 @@ class File
     /**
      * 获取目录名
      *
+     * 取路径中最后一个分隔符之前的部分，末尾斜杠会被忽略；
+     * 相对路径没有目录部分时返回 "."（而非空字符串）。本方法仅做字符串解析，
+     * 不校验目录是否存在。
+     *
      * @param string $filePath 文件路径
-     * @return string 目录名
+     * @return string 目录路径，无目录部分时为 "."
      */
     public static function getDirname(string $filePath): string
     {
@@ -2111,9 +2174,16 @@ class File
     /**
      * 创建符号链接
      *
-     * @param string $target 目标路径
-     * @param string $link 链接路径
-     * @return bool 创建成功返回true
+     * 系统级软链接（symlink），目标可以不存在或指向目录，删除链接不影响目标。
+     * 链接路径已存在时抛异常，不会覆盖；注意 file_exists() 不识别失效的符号链接，
+     * 若该位置已有失效链接则会直接落到 symlink() 失败并返回 false。
+     * Windows 上需要相应权限，否则同样返回 false。
+     *
+     * @param string $target 链接指向的目标路径
+     * @param string $link 要创建的链接路径
+     * @return bool 创建成功返回 true，系统调用失败返回 false
+     *
+     * @throws RuntimeException 链接路径已存在时抛出
      */
     public static function createSymlink(string $target, string $link): bool
     {
@@ -2130,9 +2200,15 @@ class File
     /**
      * 创建硬链接
      *
-     * @param string $target 目标文件
-     * @param string $link 链接文件
-     * @return bool 创建成功返回true
+     * 与符号链接不同，硬链接共享同一 inode：删除任一路径文件内容仍保留，
+     * 且不能跨分区/文件系统创建、不能指向目录。调用前会校验目标必须是已存在
+     * 的普通文件，链接路径必须尚不存在。
+     *
+     * @param string $target 目标文件，必须存在
+     * @param string $link 要创建的链接路径
+     * @return bool 创建成功返回 true，系统调用失败返回 false
+     *
+     * @throws RuntimeException 目标文件不存在或链接路径已存在时抛出
      */
     public static function createHardlink(string $target, string $link): bool
     {
@@ -2208,10 +2284,16 @@ class File
     /**
      * 转换文件编码
      *
-     * @param string $filePath 文件路径
-     * @param string $fromEncoding 原编码
-     * @param string $toEncoding 目标编码
-     * @return bool 转换成功返回true
+     * 一次性读入整个文件，用 mb_convert_encoding 从 $fromEncoding 转到
+     * $toEncoding，然后覆盖写回原文件（加独占锁），因此原文件会被直接修改、
+     * 不保留备份。大文件会占用较多内存，转换前建议自行备份。
+     *
+     * @param string $filePath 文件路径，必须存在
+     * @param string $fromEncoding 原编码，如 'GBK'
+     * @param string $toEncoding 目标编码，默认 'UTF-8'
+     * @return bool 转换并写回成功返回 true，失败返回 false
+     *
+     * @throws RuntimeException 文件不存在、未启用 mbstring 扩展或写入失败时抛出
      */
     public static function convertFileEncoding(string $filePath, string $fromEncoding, string $toEncoding = 'UTF-8'): bool
     {

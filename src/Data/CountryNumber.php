@@ -5,7 +5,21 @@ declare(strict_types=1);
 namespace zxf\Utils\Data;
 
 /**
- * 国家区号、手机号码前缀
+ * 国家区号与手机号码前缀工具类
+ *
+ * 内置全球各国家/地区的国际区号（number）与手机号码前缀（prefix）数据，
+ * 支持按国家名查询区号、前缀、中英文名称，以及按区号/前缀反查国家。
+ * 注意：部分区号由多个国家/地区共用（如美国、加拿大共用区号 1）。
+ *
+ * @example
+ * $cn = CountryNumber::instance();
+ * $cn->getCountryNumber('China');        // '86'
+ * $cn->getCountryMobilePrefix('China');  // ['13','14','15','16','17','18','19']
+ * $cn->getCountryNameByNumber('81');     // ['Japan']
+ *
+ * @package zxf\Utils\Data
+ * @version 1.0.0
+ * @license MIT
  */
 class CountryNumber
 {
@@ -1578,7 +1592,11 @@ class CountryNumber
     ];
 
     /**
-     * 初始化实例
+     * 初始化实例（单例）
+     *
+     * 首次调用时创建实例；之后重复调用若传入非空数据则自动更新数据。
+     *
+     * @return static 当前单例实例
      */
     public static function instance(): ?static
     {
@@ -1590,9 +1608,14 @@ class CountryNumber
     }
 
     /**
-     * 获取国家代码
+     * 获取国家代码（完整信息条目）
+     *
+     * 按国家名（英文键，如 China）查表，返回该国的完整信息数组，包含
+     * number（国际区号）、prefix（手机号前缀）、cn_name 与 us_name；
+     * 未命中时回退为 Unknown 条目而非抛错，调用方需自行判断是否命中。
      *
      * @param  string  $country  国家名称 eg: China
+     * @return mixed 该国家的完整信息数组；未命中时返回 Unknown 条目
      */
     public function getCountryCode(string $country): mixed
     {
@@ -1607,6 +1630,7 @@ class CountryNumber
      * 获取国家手机号码前缀
      *
      * @param  string  $country  国家名称 eg: China
+     * @return mixed 手机号码前缀数组；未命中时返回 Unknown 条目的前缀
      */
     public function getCountryMobilePrefix(string $country): mixed
     {
@@ -1620,8 +1644,13 @@ class CountryNumber
     /**
      * 获取国家名称
      *
+     * 按国家英文名与语言代码取出对应名称，$lang 会拼接为 cn_name/us_name
+     * 作为键；未收录的语言键将触发未定义索引告警。国家未命中时回退为
+     * Unknown 对应语言的名称。
+     *
      * @param  string  $country  国家名称 eg: China
      * @param  string  $lang  语言 仅支持 cn,us 默认 cn
+     * @return mixed 国家名称字符串；未命中时返回 Unknown 对应语言的名称
      */
     public function getCountryName(string $country, string $lang = 'cn'): mixed
     {
@@ -1633,9 +1662,13 @@ class CountryNumber
     }
 
     /**
-     * 获取国家号码
+     * 获取国家号码（国际区号）
+     *
+     * 按国家英文名取出 number 字段，即不含前导 + 的国际区号字符串；国家
+     * 未命中时回退为 Unknown 条目的区号。
      *
      * @param  string  $country  国家名称 eg: China
+     * @return mixed 国际区号字符串；未命中时返回 Unknown 条目的区号
      */
     public function getCountryNumber(string $country): mixed
     {
@@ -1650,6 +1683,7 @@ class CountryNumber
      * 获取所有国家名称
      *
      * @param  string  $lang  语言 仅支持 cn,us 默认 cn
+     * @return array 国家名（键）=> 对应语言名称（值）的映射数组
      */
     public function getAllCountryName(string $lang = 'cn'): array
     {
@@ -1712,6 +1746,8 @@ class CountryNumber
 
     /**
      * 获取所有国家手机号码前缀
+     *
+     * @return array 国家名 => 去重后的手机号码前缀数组
      */
     public function getAllCountryMobilePrefix(): array
     {
@@ -1725,6 +1761,8 @@ class CountryNumber
 
     /**
      * 获取所有国家信息
+     *
+     * @return array 全部国家数据（含区号、前缀、中英文名称）
      */
     public function getAllCountry(): array
     {
@@ -1734,6 +1772,9 @@ class CountryNumber
     /**
      * 通过国家号码(区号)获取国家名称
      *  有些区号是多个国家共用一个区号
+     *
+     * @param  string  $number  国际区号（字符串，如 '86'）
+     * @return array 匹配的国家名称数组（可能包含多个国家）
      */
     public function getCountryNameByNumber(string $number): array
     {
@@ -1754,6 +1795,9 @@ class CountryNumber
     /**
      * 通过国家手机号码前缀获取国家名称
      *      有些手机号码前缀是多个国家都有的
+     *
+     * @param  string  $prefix  手机号码前缀（如 '13'）
+     * @return array 匹配的国家名称数组（可能包含多个国家）
      */
     public function getCountryNameByMobilePrefix(string $prefix): array
     {
@@ -1770,6 +1814,9 @@ class CountryNumber
     /**
      * 通过国家号码(区号) 获取国家手机号码前缀
      *      有些区号是多个国家共用一个区号
+     *
+     * @param  string  $number  国际区号（字符串，如 '86'）
+     * @return array 国家名 => 该国家手机号码前缀数组 的映射
      */
     public function getCountryMobilePrefixByNumber(string $number): array
     {

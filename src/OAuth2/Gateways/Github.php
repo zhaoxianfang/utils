@@ -132,15 +132,13 @@ class Github extends Gateway
 
 
     /**
-     * Description:  根据第三方授权页面样式切换跳转地址
+     * 解析 access_token 接口返回的原始响应
      *
-     */
-    /**
-     * Description:  解析access_token方法请求后的返回值
+     * 将 JSON 字符串解析为数组；若响应中不含 access_token，则抛出 OAuthException。
      *
-     * @param $token
-     * @return mixed
-     * @throws OAuthException
+     * @param string $token access_token 接口返回的原始响应体（JSON 字符串）
+     * @return array 解析后的令牌数据（至少包含 access_token）
+     * @throws OAuthException 响应非法或缺少 access_token 时抛出
      */
     protected function parseToken($token)
     {

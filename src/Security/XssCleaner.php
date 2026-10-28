@@ -37,6 +37,14 @@ use DOMElement;
 use DOMNode;
 use DOMText;
 
+/**
+ * XSS 清理工具
+ *
+ * 基于 DOMDocument 解析做多级过滤（危险标签移除、白名单过滤、实体转义），
+ * 避免正则实现易被绕过的缺陷。适用于用户输入过滤、富文本清理等场景。
+ *
+ * @package zxf\Utils\Security
+ */
 final class XssCleaner
 {
     /**
@@ -108,6 +116,12 @@ final class XssCleaner
      * 基础清理：移除危险标签、所有事件处理器属性与危险协议
      *
      * 保留其它标签与属性，适用于需要保留大部分富文本格式的场景。
+     * 会连同内容一起删除 DANGEROUS_TAGS 中的标签、递归清除注释节点，
+     * 并删除所有 on* 事件属性及协议非法的 URL 属性。
+     * 入参为空白串时直接返回空串；DOM 解析失败时退化为全量实体转义。
+     *
+     * @param string $html 待清理的 HTML 片段
+     * @return string 清理后的 HTML 片段
      */
     public static function clean(string $html): string
     {
@@ -134,8 +148,11 @@ final class XssCleaner
      * 与 `strip_tags()` 不同：本方法**同时过滤属性**，
      * 白名单之外的属性（含所有 on* 事件处理器）都会被删除，
      * 且 URL 属性会经过协议白名单校验。
+     * 注意：白名单之外的标签会连同其内部文本一起被移除，文本内容不会被保留。
      *
+     * @param string $html 待清理的 HTML 片段
      * @param array<string, array<string>> $allowed 白名单 [tag => [attr1, attr2]]，为空时使用默认白名单
+     * @return string 仅含白名单标签与属性的 HTML 片段
      */
     public static function strict(string $html, array $allowed = []): string
     {
@@ -167,6 +184,12 @@ final class XssCleaner
 
     /**
      * 转义 HTML 实体（输出到 HTML 上下文时的首选方案）
+     *
+     * 使用 ENT_QUOTES 同时转义单双引号，ENT_SUBSTITUTE 把非法 UTF-8 字节
+     * 替换为 U+FFFD，避免返回空串；这是唯一不依赖 DOM 扩展的方法。
+     *
+     * @param string $text 待转义的纯文本
+     * @return string 转义后的字符串，可直接拼接进 HTML 输出
      */
     public static function escape(string $text): string
     {
@@ -197,6 +220,12 @@ final class XssCleaner
 
     /**
      * 移除所有 HTML 标签
+     *
+     * 先用 strip_tags 去掉全部标签并 trim，再对结果整体做实体转义，
+     * 因此返回的是纯文本（标签形态的文本也会被转义显示，不会被浏览器解析）。
+     *
+     * @param string $html 待处理的 HTML 片段
+     * @return string 去掉标签并转义后的纯文本
      */
     public static function strip(string $html): string
     {
@@ -216,6 +245,8 @@ final class XssCleaner
      * short_open_tag 配置下安全，但一旦部署环境开启 short_open_tag，
      * 词法分析器对 `<?` 的处理可能出现差异；拆分拼接可彻底规避该风险，
      * 同时避免注释/字符串中误写 PHP 结束标签导致文件被提前截断。
+     *
+     * @return string XML 声明前缀，用于拼在 HTML 片段前强制按 UTF-8 解析
      */
     private static function htmlEncodingPrefix(): string
     {
@@ -226,6 +257,11 @@ final class XssCleaner
      * 把 HTML 片段载入 DOM
      *
      * LIBXML_NONET 禁止加载外部资源（防 XXE / SSRF）。
+     * 解析期间临时开启内部错误收集并在结束后还原，因此非法 HTML 不会产生
+     * 警告输出；DOM 扩展缺失或加载失败时返回 null，由调用方决定降级策略。
+     *
+     * @param string $html 待解析的 HTML 片段
+     * @return DOMDocument|null 解析成功返回文档对象，DOM 扩展缺失或加载失败返回 null
      */
     private static function loadDom(string $html): ?DOMDocument
     {
@@ -259,6 +295,13 @@ final class XssCleaner
 
     /**
      * 移除危险元素（含注释节点，防止条件注释绕过）
+     *
+     * 以 body（不存在时退化为 documentElement）为起点递归遍历：
+     * REMOVE_DANGEROUS_CONTENT 为 true 时把命中 DANGEROUS_TAGS 的元素连同子树
+     * 整体摘除，否则只摘掉标签本身、把子节点上提保留；最后递归清除注释节点。
+     *
+     * @param DOMDocument $doc 待处理的文档对象
+     * @return void
      */
     private static function removeDangerousElements(DOMDocument $doc): void
     {
@@ -301,7 +344,13 @@ final class XssCleaner
     /**
      * 应用标签/属性白名单
      *
+     * 不在白名单中的标签会连同内容整体移除（文本不保留）；命中白名单的标签
+     * 逐个检查属性，属性名不在该标签允许列表中、或未通过 isSafeAttribute()
+     * 校验（on* 事件、危险协议）的一律删除。最后递归清除注释节点。
+     *
+     * @param DOMDocument $doc 待处理的文档对象
      * @param array<string, array<string>> $allowed 已归一化为小写的白名单
+     * @return void
      */
     private static function applyWhitelist(DOMDocument $doc, array $allowed): void
     {
@@ -383,6 +432,7 @@ final class XssCleaner
      *
      * @param string $name  已小写的属性名
      * @param string $value 属性值
+     * @return bool 可保留返回 true；on* 事件、含危险 URL 的 style、协议非法的 URL 属性返回 false
      */
     private static function isSafeAttribute(string $name, string $value): bool
     {
@@ -412,7 +462,12 @@ final class XssCleaner
      *  2. 剔除所有空白与控制字符 —— 应对 `java\tscript:`、`java\nscript:`
      *  3. 统一小写
      *
+     * 归一化后为空视为安全；无显式协议的写法（相对路径、锚点、协议相对 URL）
+     * 一律放行，仅额外排除以两个反斜杠开头的形式；有协议时要求协议名在
+     * http/https/mailto/tel/ftp 白名单内，data:、javascript: 等均被拒绝。
+     *
      * @param string $url 原始 URL
+     * @return bool 协议允许或无显式协议返回 true，否则返回 false
      */
     public static function isSafeUrl(string $url): bool
     {
@@ -424,8 +479,14 @@ final class XssCleaner
 
         // 相对路径 / 锚点 / 协议相对 URL（//host/path）没有显式协议，放行
         if (! preg_match('/^([a-z][a-z0-9+.\-]*):/i', $normalized, $matches)) {
-            // 以 // 开头的协议相对 URL 在页面为 http(s) 时是安全的
-            return ! str_starts_with($normalized, '\\\\');
+            // 以 // 开头的协议相对 URL 在页面为 http(s) 时是安全的；
+            // 但反斜杠会被浏览器等价当作斜杠，需拒绝以 \ 或 /\ 开头的形式
+            // （如 \evil.com 会被解析成 //evil.com），避免借此跳到外部站点。
+            if (str_starts_with($normalized, '\\') || str_starts_with($normalized, '/\\')) {
+                return false;
+            }
+
+            return true;
         }
 
         return in_array(strtolower($matches[1]), self::ALLOWED_URL_SCHEMES, true);
@@ -433,6 +494,13 @@ final class XssCleaner
 
     /**
      * 判断字符串中是否包含危险协议（用于 style 等属性）
+     *
+     * 先做与 isSafeUrl() 相同的归一化，再用子串匹配查找
+     * javascript:/vbscript:/livescript:/mocha:/data: 以及 CSS 的
+     * expression( 与 url(javascript 片段；归一化后为空返回 false。
+     *
+     * @param string $value 属性值，如 style 的完整内容
+     * @return bool 命中任一危险特征返回 true，否则返回 false
      */
     private static function containsDangerousUrl(string $value): bool
     {
@@ -453,6 +521,12 @@ final class XssCleaner
 
     /**
      * URL 归一化：解码实体 → 剔除空白与控制字符 → 小写
+     *
+     * 实体最多解码两次以覆盖常见的多重编码绕过；随后用正则删除所有空白与
+     * C0/C1 控制字符（浏览器解析 URL 时会忽略它们），最后统一转小写便于比较。
+     *
+     * @param string $url 原始 URL 或属性值
+     * @return string 归一化后的字符串，可能为空
      */
     private static function normalizeUrl(string $url): string
     {
@@ -471,8 +545,12 @@ final class XssCleaner
      * 递归遍历所有元素节点并执行回调
      *
      * 先快照子节点列表再遍历，避免回调中删除节点导致迭代器失效。
+     * 仅对元素节点调用回调，并对「回调后仍挂在树上」的子元素继续递归；
+     * 文本与注释节点跳过，其他节点类型只要含子节点也会继续下探。
      *
+     * @param DOMNode $node 遍历起点，其自身不会传给回调
      * @param callable(DOMElement): void $callback
+     * @return void
      */
     private static function walkElements(DOMNode $node, callable $callback): void
     {
@@ -500,6 +578,12 @@ final class XssCleaner
 
     /**
      * 移除注释节点（防止 IE 条件注释等绕过手法）
+     *
+     * 递归遍历子节点，遇到注释节点直接删除，其余含子节点的节点继续下探；
+     * 先快照子节点列表，避免边遍历边删除导致遗漏。
+     *
+     * @param DOMNode $node 遍历起点
+     * @return void
      */
     private static function removeComments(DOMNode $node): void
     {
@@ -523,6 +607,13 @@ final class XssCleaner
 
     /**
      * 导出 body 内的 HTML 片段
+     *
+     * 优先取 body，输入不含 body（如纯 script 片段被吞进 head）时退化为
+     * documentElement，并跳过 head 子节点，只拼接其余子节点的 HTML 源码，
+     * 因此返回值不带 html/body 外壳。根节点缺失时返回空串。
+     *
+     * @param DOMDocument $doc 已清理的文档对象
+     * @return string 序列化后的 HTML 片段
      */
     private static function dumpBody(DOMDocument $doc): string
     {

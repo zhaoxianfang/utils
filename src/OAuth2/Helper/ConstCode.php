@@ -6,6 +6,22 @@ declare(strict_types=1);
  */
 namespace zxf\Utils\OAuth2\Helper;
 
+/**
+ * 第三方登录渠道与通用状态常量表。
+ *
+ * 集中定义各 OAuth2 平台的渠道标识（TYPE_*）、通用状态与性别常量，
+ * 避免魔法数字散落在业务代码与各 Gateway 中。
+ *
+ * @package zxf\Utils\OAuth2\Helper
+ * @version 1.0.0
+ * @license MIT
+ *
+ * @example
+ * ```php
+ * ConstCode::TYPE_WECHAT;                        // 2（微信）
+ * ConstCode::getTypeConst(ConstCode::TYPE_QQ, 'app'); // 21（QQ App）
+ * ```
+ */
 class ConstCode
 {
 
@@ -47,26 +63,39 @@ class ConstCode
     const TYPE_XIGUA            = 33; //西瓜
 
     /**
-     * Description:  getTypeConst
+     * 根据渠道与终端类型推导最终的渠道常量。
      *
-     * @param int $channel 渠道：登录方式
-     * @param bool|string $type 类型：app applets
-     * @return int
+     * 部分渠道在不同终端下有独立标识（如 QQ 在 App 内为 TYPE_QQ_APP），
+     * 本方法完成渠道 → 具体终端常量的映射；无对应映射时原样返回渠道值。
+     *
+     * 注意：微信渠道在「非 app / 非 applets」且当前处于微信内置浏览器时，
+     * 会进一步归为 TYPE_WECHAT_MOBILE（依赖全局函数 is_wechat_browser()）。
+     *
+     * @param  int           $channel  渠道：登录方式，取值为本类 TYPE_* 常量
+     * @param  bool|string   $type     终端类型：''（默认）/'app'/'applets'
+     * @return int 推导后的渠道常量
+     *
+     * @example
+     * ```php
+     * ConstCode::getTypeConst(ConstCode::TYPE_QQ, 'app');      // 21 (TYPE_QQ_APP)
+     * ConstCode::getTypeConst(ConstCode::TYPE_WECHAT, 'app');  // 22 (TYPE_WECHAT_APP)
+     * ConstCode::getTypeConst(ConstCode::TYPE_GITHUB, '');     // 5  (原样返回)
+     * ```
      */
     static public function getTypeConst(int $channel, bool|string $type=""): int
     {
         switch ($channel){
             case self::TYPE_QQ:
-                if($type == 'app'){
+                if($type === 'app'){
                     $typeConst = self::TYPE_QQ_APP;//qqApp
                 }else{
                     $typeConst = $channel;
                 }
                 break;
             case self::TYPE_WECHAT:
-                if($type == 'app'){
+                if($type === 'app'){
                     $typeConst = self::TYPE_WECHAT_APP;//微信App
-                }else if($type == 'applets'){
+                }else if($type === 'applets'){
                     $typeConst =  self::TYPE_WECHAT_APPLETS;//微信小程序
                 }else if(is_wechat_browser()){
                     $typeConst =  self::TYPE_WECHAT_MOBILE;//微信mobile

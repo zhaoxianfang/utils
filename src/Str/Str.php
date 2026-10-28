@@ -44,6 +44,8 @@ final class Str implements Stringable
 
     /**
      * 获取当前持有的字符串
+     *
+     * @return string 当前持有的字符串
      */
     public function value(): string
     {
@@ -51,7 +53,9 @@ final class Str implements Stringable
     }
 
     /**
-     * 字符串化
+     * 字符串化（对象当作字符串使用时返回所持有的字符串）
+     *
+     * @return string 当前持有的字符串
      */
     public function __toString(): string
     {
@@ -60,6 +64,9 @@ final class Str implements Stringable
 
     /**
      * 判断两个字符串是否相等
+     *
+     * @param string $other 待比较的字符串
+     * @return bool 完全相同（含大小写）时返回 true
      */
     public function is(string $other): bool
     {
@@ -68,6 +75,8 @@ final class Str implements Stringable
 
     /**
      * 当前字符串是否为空（不含任何字符，空白字符视为非空）
+     *
+     * @return bool 为空字符串时返回 true
      */
     public function isEmpty(): bool
     {
@@ -76,6 +85,8 @@ final class Str implements Stringable
 
     /**
      * 获取字符串长度（字符数，多字节安全）
+     *
+     * @return int 字符数
      */
     public function length(): int
     {
@@ -85,7 +96,10 @@ final class Str implements Stringable
     /**
      * 转换为字符数组
      *
-     * @return list<string>
+     * 按「字符」而非字节拆分（依赖 mb_str_split），因此中文等多字节字符会
+     * 各自成为一个元素；空字符串返回空数组，结果下标从 0 连续递增。
+     *
+     * @return list<string> 字符数组，空串时为 []
      */
     public function chars(): array
     {
@@ -96,6 +110,8 @@ final class Str implements Stringable
      * 把方法调用转发到 StringHelper 的同名静态方法
      *
      * @param array<int, mixed> $arguments
+     *
+     * @return mixed 字符串结果包装为新的 Str 实例（可继续链式调用），其它结果原样返回
      *
      * @throws BadMethodCallException 底层不存在对应静态方法，或首个参数不是字符串时抛出
      */
@@ -120,6 +136,8 @@ final class Str implements Stringable
      * 静态转发：Str::camel('foo-bar') 等价于 u_str('foo-bar')->camel()
      *
      * @param array<int, mixed> $arguments
+     *
+     * @return mixed 字符串结果包装为新的 Str 实例（可继续链式调用），其它结果原样返回
      *
      * @throws BadMethodCallException 首个参数不是字符串时抛出
      */

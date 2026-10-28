@@ -101,6 +101,12 @@ class QrCodeHelper
         return 'byte';
     }
 
+    /**
+     * 判断数据是否全部由 QR 字母数字字符集（0-9, A-Z 及空格等 9 个符号）组成
+     *
+     * @param string $data 待检测的数据
+     * @return bool 全部命中字母数字字符集返回 true，否则 false
+     */
     private static function isAlphanumeric(string $data): bool
     {
         $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
@@ -110,6 +116,14 @@ class QrCodeHelper
         return true;
     }
 
+    /**
+     * 判断数据是否为 Shift-JIS 汉字（Kanji）编码
+     *
+     * 依据双字节区间（0x81-0x9F、0xE0-0xEA 起始）进行探测，用于选择 Kanji 编码模式。
+     *
+     * @param string $data 待检测的数据
+     * @return bool 命中 Kanji 双字节序列返回 true，否则 false
+     */
     private static function isKanji(string $data): bool
     {
         $len = strlen($data);
@@ -127,6 +141,12 @@ class QrCodeHelper
         return $len > 0;
     }
 
+    /**
+     * 统计数据中的 Kanji 字符数量（按双字节计为 1 个字符）
+     *
+     * @param string $data 待统计的数据
+     * @return int Kanji 字符个数
+     */
     private static function countKanji(string $data): int
     {
         $count = 0;
@@ -511,6 +531,14 @@ class QrCodeHelper
         return $vevent;
     }
 
+    /**
+     * 生成 MeCard 名片二维码字符串
+     *
+     * MeCard 是较旧的名片格式，字段以 `;` 分隔；支持姓名、电话、邮箱、网址、地址、备注。
+     *
+     * @param array $data 名片数据，键支持 name/phone/email/url/address/memo
+     * @return string MeCard 格式字符串（以 MECARD: 开头、; 结尾）
+     */
     public static function generateMeCardString(array $data): string
     {
         $parts = ['MECARD:'];
@@ -540,16 +568,37 @@ class QrCodeHelper
         return str_replace(',', '\,', $value);
     }
 
+    /**
+     * 生成 FedEx 快递追踪二维码字符串
+     *
+     * @param string $trackingNumber 快递单号
+     * @return string FedEx 追踪链接
+     */
     public static function generateFedExString(string $trackingNumber): string
     {
         return 'https://www.fedex.com/apps/fedextrack/?tracknumbers=' . urlencode($trackingNumber);
     }
 
+    /**
+     * 生成 PayPal 收款二维码字符串
+     *
+     * @param string $email 收款 PayPal 账号邮箱
+     * @param float $amount 金额
+     * @param string $currency 货币代码（默认 USD）
+     * @return string PayPal.me 收款链接
+     */
     public static function generatePayPalString(string $email, float $amount, string $currency = 'USD'): string
     {
         return 'https://www.paypal.com/paypalme/' . urlencode($email) . '/' . $amount . $currency;
     }
 
+    /**
+     * 生成 WhatsApp 聊天二维码字符串
+     *
+     * @param string $phone 手机号（可含国家区号及符号，会自动剔除非数字字符）
+     * @param string $message 预填消息内容（可选）
+     * @return string wa.me 聊天链接
+     */
     public static function generateWhatsAppString(string $phone, string $message = ''): string
     {
         $url = 'https://wa.me/' . preg_replace('/[^0-9]/', '', $phone);
@@ -557,11 +606,25 @@ class QrCodeHelper
         return $url;
     }
 
+    /**
+     * 生成 Skype 呼叫/聊天二维码字符串
+     *
+     * @param string $username Skype 用户名
+     * @param string $action 动作（默认 chat，可改为 call 等）
+     * @return string skype: 协议链接
+     */
     public static function generateSkypeString(string $username, string $action = 'chat'): string
     {
         return 'skype:' . urlencode($username) . '?' . $action;
     }
 
+    /**
+     * 生成 Zoom 会议二维码字符串
+     *
+     * @param string $meetingId 会议 ID
+     * @param string $password 会议密码（可选）
+     * @return string Zoom 会议加入链接
+     */
     public static function generateZoomString(string $meetingId, string $password = ''): string
     {
         $url = 'https://zoom.us/j/' . urlencode($meetingId);
@@ -569,21 +632,46 @@ class QrCodeHelper
         return $url;
     }
 
+    /**
+     * 生成 Instagram 主页二维码字符串
+     *
+     * @param string $username Instagram 用户名（可带 @ 前缀，会自动去除）
+     * @return string Instagram 主页链接
+     */
     public static function generateInstagramString(string $username): string
     {
         return 'https://www.instagram.com/' . urlencode(ltrim($username, '@'));
     }
 
+    /**
+     * 生成 LinkedIn 主页二维码字符串
+     *
+     * @param string $profileUrl LinkedIn 用户名或资料路径（可带前导 /，会自动去除）
+     * @return string LinkedIn 资料链接
+     */
     public static function generateLinkedInString(string $profileUrl): string
     {
         return 'https://www.linkedin.com/in/' . urlencode(ltrim($profileUrl, '/'));
     }
 
+    /**
+     * 生成 YouTube 视频二维码字符串
+     *
+     * @param string $videoId YouTube 视频 ID
+     * @return string YouTube 观看链接
+     */
     public static function generateYouTubeString(string $videoId): string
     {
         return 'https://www.youtube.com/watch?v=' . urlencode($videoId);
     }
 
+    /**
+     * 生成 App Store 应用二维码字符串
+     *
+     * @param string $appId 应用 ID
+     * @param string $country 国家/地区代码（默认 us）
+     * @return string App Store 应用链接
+     */
     public static function generateAppStoreString(string $appId, string $country = 'us'): string
     {
         return 'https://apps.apple.com/' . strtolower($country) . '/app/id' . urlencode($appId);

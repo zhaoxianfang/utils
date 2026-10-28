@@ -14,6 +14,12 @@
  * @license     MIT
  * @link        https://github.com/zhaoxianfang/utils
  * @since       1.0.0
+ *
+ * @example
+ * use zxf\Utils\Text\Template;
+ * $tpl = Template::make('Hello {{name|upper}}!');
+ * echo $tpl->with('name', 'world')->render(); // Hello WORLD!
+ * // 支持 {{if}} / {{foreach}} / {{else}} 块与 |escape 等过滤器
  */
 
 declare(strict_types=1);
@@ -23,6 +29,14 @@ namespace zxf\Utils\Text;
 use InvalidArgumentException;
 use RuntimeException;
 
+/**
+ * 轻量级模板引擎
+ *
+ * 通过 {{var}}、{{var|filter}} 语法进行变量替换，并支持 {{if}}/{{foreach}} 块级逻辑。
+ * 变量默认进行 HTML 转义（防 XSS），可用 |raw 原样输出、|escape 显式转义。
+ *
+ * @package zxf\Utils\Text
+ */
 final class Template
 {
     private string $template = '';
@@ -55,6 +69,12 @@ final class Template
         'float'   => 'floatval',
     ];
 
+    /**
+     * 创建模板引擎实例
+     *
+     * @param string $template 模板字符串，可后续通过 with() 注入变量
+     * @return static
+     */
     public static function make(string $template = ''): self
     {
         $instance = new self();
@@ -64,6 +84,13 @@ final class Template
 
     /**
      * 从文件加载模板
+     *
+     * 读取文件全部内容作为模板字符串；文件不存在或读取失败时抛出异常，
+     * 不会静默返回空模板。
+     *
+     * @param string $path 模板文件路径
+     * @return static 模板实例（支持链式调用）
+     * @throws RuntimeException 文件不存在或读取失败时抛出
      */
     public static function fromFile(string $path): self
     {
@@ -79,6 +106,13 @@ final class Template
 
     /**
      * 设置模板变量
+     *
+     * 传关联数组时与已有变量合并（同名键覆盖），传字符串时设置单个变量；
+     * 变量在 render() 时才会被解析与转义。
+     *
+     * @param string|array $key   变量名，或「变量名 => 值」的关联数组
+     * @param mixed         $value 变量值（当 $key 为字符串时使用）
+     * @return static 支持链式调用
      */
     public function with(string|array $key, mixed $value = null): self
     {
@@ -91,7 +125,11 @@ final class Template
     }
 
     /**
-     * 注册自定义过滤器
+     * 注册自定义过滤器（可覆盖内置同名过滤器）
+     *
+     * @param string   $name     过滤器名称
+     * @param callable $callback 过滤器回调，签名为 (mixed $value, ?string $arg): mixed
+     * @return static 支持链式调用
      */
     public function filter(string $name, callable $callback): self
     {
@@ -100,7 +138,9 @@ final class Template
     }
 
     /**
-     * 渲染模板
+     * 渲染模板并返回结果字符串
+     *
+     * @return string 渲染后的内容（变量默认 HTML 转义，除非使用 |raw）
      */
     public function render(): string
     {
@@ -108,7 +148,11 @@ final class Template
     }
 
     /**
-     * 渲染并保存到文件
+     * 渲染模板并写入文件
+     *
+     * @param string $path 输出文件路径
+     * @return void
+     * @throws RuntimeException 目标目录创建失败或文件写入失败时抛出
      */
     public function save(string $path): void
     {
@@ -128,6 +172,12 @@ final class Template
      * - {{if}}/{{foreach}} 压栈；
      * - {{else}} 切换栈顶 if 的收集相位；
      * - {{/if}}/{{/foreach}} 弹栈并对块体递归 parse（此时外层循环变量已在 $data 中）。
+     *
+     * @param string $template 待解析的模板字符串
+     * @param array $data 渲染上下文变量表
+     * @return string 解析后的结果文本
+     *
+     * @throws RuntimeException 正则解析失败时抛出
      */
     private function parse(string $template, array $data): string
     {
@@ -264,7 +314,11 @@ final class Template
     }
 
     /**
-     * 获取嵌套值
+     * 按点路径从数据上下文中取值（如 user.name）
+     *
+     * @param string $path 点分隔的键路径
+     * @param array  $data 当前数据上下文
+     * @return mixed 取到的值；路径中任意一级不存在时返回空字符串
      */
     private function getValue(string $path, array $data): mixed
     {
@@ -279,7 +333,12 @@ final class Template
     }
 
     /**
-     * 应用过滤器
+     * 应用过滤器到值上
+     *
+     * @param string  $name  过滤器名称（内置或用户自定义）
+     * @param mixed   $value 待处理的值
+     * @param string|null $arg 过滤器参数（如 date 的格式字符串）
+     * @return mixed 处理后的值；未找到过滤器时原样返回
      */
     private function applyFilter(string $name, mixed $value, ?string $arg): mixed
     {
@@ -311,7 +370,13 @@ final class Template
     }
 
     /**
-     * 评估条件表达式
+     * 评估模板条件表达式
+     *
+     * 支持 !var 取反、var == value / var != value 比较，以及纯变量真值判断。
+     *
+     * @param string $expression 条件表达式
+     * @param array  $data       当前数据上下文
+     * @return bool 条件是否成立
      */
     private function evaluateCondition(string $expression, array $data): bool
     {

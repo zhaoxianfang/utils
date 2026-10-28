@@ -14,7 +14,8 @@ use DOMDocument;
 /**
  * Sitemap 站点地图生成器 - PHP 8.2+ 完整增强版
  *
- * @see https://weisifang.com/docs/doc/6_209 网站地图生成器
+ * 用于生成符合搜索引擎规范的站点地图，支持标准 URL、新闻、图片、
+ * 视频等多种条目，并可按 Google 规范对超大站点地图自动分片。
  *
  * 功能特性：
  * - 完全支持 PHP 8.2+ 特性
@@ -34,25 +35,16 @@ use DOMDocument;
  * - 自动提交到搜索引擎
  * - 缓存机制
  * - 性能监控
- */
-
-/**
- * 使用示例：
  *
- * // 创建 SitemapGenerator 实例
- * $sitemapDir = __DIR__;
- * $baseUrl = 'https://www.example.com';
- * $generator = new SiteMapGenerator($baseUrl, $sitemapDir, 'sitemaps');
+ * @see https://weisifang.com/docs/doc/6_209 网站地图生成器
  *
- * // 添加 URL
- * $generator->addUrl('/page1', '2024-09-24', 'daily', 0.8);
- *
- * // 获取 XML 字符串内容
- * $xmlContent = $generator->getSitemapXmlString();
- * echo $xmlContent;
- *
- * // 生成文件
- * $result = $generator->generateFile();
+ * @example
+ * ```php
+ * $generator = new SiteMapGenerator('https://www.example.com', __DIR__, 'sitemaps');
+ * $generator->addUrl('/page1', '2024-09-24', 'daily', 0.8); // 添加一条 URL
+ * echo $generator->getSitemapXmlString();                  // 取 XML 字符串
+ * $ok = $generator->generateFile();                        // 写入文件，返回是否成功
+ * ```
  */
 class SiteMapGenerator
 {
@@ -289,6 +281,14 @@ class SiteMapGenerator
 
     /**
      * 获取单个站点地图的 XML 字符串内容
+     *
+     * 不传 $urls 时使用当前已累积的 URL 列表；列表为空时输出只含命名空间的空 urlset。
+     * 启用缓存时按 URL 内容 md5 命中缓存，未命中则生成并写回缓存。
+     *
+     * @param array|null $urls 自定义 URL 条目数组，为 null 时取 $this->urls
+     * @return string 完整的站点地图 XML 文本
+     *
+     * @throws RuntimeException 生成过程中发生异常时包装抛出
      */
     public function getSitemapXmlString(?array $urls = null): string
     {
@@ -320,6 +320,13 @@ class SiteMapGenerator
 
     /**
      * 获取分片站点地图的 XML 字符串内容数组
+     *
+     * 按 $maxUrls 对 URL 列表分片，逐片生成 XML 并以「分片序号（从 1 开始）」为键返回；
+     * 无 URL 时返回仅含 1 个空 sitemap 的数组。启用缓存时整体缓存分片结果。
+     *
+     * @return array<int, string> 分片序号 => 该分片的 XML 文本
+     *
+     * @throws RuntimeException 任一分片生成失败时抛出
      */
     public function getChunkedSitemapXmlStrings(): array
     {
@@ -357,6 +364,14 @@ class SiteMapGenerator
 
     /**
      * 获取站点地图索引的 XML 字符串内容
+     *
+     * 生成 sitemapindex 文档，每个分片对应一条 <sitemap> 记录（含 loc 与 lastmod）；
+     * 不传 $sitemapUrls 时由 generateSitemapUrls() 按分片规则推导。
+     *
+     * @param array|null $sitemapUrls 索引条目数组，每项需含 loc 与 lastmod 键；为 null 时自动推导
+     * @return string 站点地图索引 XML 文本
+     *
+     * @throws RuntimeException 生成过程中发生异常时包装抛出
      */
     public function getSitemapIndexXmlString(?array $sitemapUrls = null): string
     {
@@ -397,6 +412,13 @@ class SiteMapGenerator
 
     /**
      * 获取指定分片的 XML 字符串内容
+     *
+     * 分片序号从 1 开始；内部缓冲为空时会先触发全量分片生成。
+     *
+     * @param int $chunkIndex 分片序号，必须大于等于 1
+     * @return string 该分片的 XML 文本
+     *
+     * @throws InvalidArgumentException 序号小于 1 或该分片不存在时抛出
      */
     public function getChunkXmlString(int $chunkIndex): string
     {
@@ -417,6 +439,14 @@ class SiteMapGenerator
 
     /**
      * 生成站点地图并返回多种格式的结果
+     *
+     * 按 $outputType 分发：字符串内容、分片内容数组或落盘文件；
+     * 并累加 url_processing_time 性能统计。
+     *
+     * @param string $outputType 输出类型，取 self::OUTPUT_STRING / OUTPUT_CHUNKED / OUTPUT_FILE
+     * @return string|array|bool 字符串类型返回 XML 文本，分片类型返回序号=>XML 的数组，文件类型返回是否写入成功
+     *
+     * @throws InvalidArgumentException 输出类型不受支持时抛出
      */
     public function generate(string $outputType = self::OUTPUT_FILE): string|array|bool
     {
@@ -437,6 +467,11 @@ class SiteMapGenerator
 
     /**
      * 设置 XML 输出是否美化格式
+     *
+     * 开启后经 DOMDocument 重新缩进输出；关闭则使用 SimpleXML 的紧凑格式。
+     *
+     * @param bool $pretty 是否美化输出，默认 true
+     * @return self 当前实例，便于链式调用
      */
     public function setPrettyFormat(bool $pretty = true): self
     {
@@ -446,6 +481,13 @@ class SiteMapGenerator
 
     /**
      * 设置 XML 编码格式
+     *
+     * 仅接受 UTF-8、ISO-8859-1、US-ASCII（大小写不敏感），编码会写入 XML 声明。
+     *
+     * @param string $encoding 编码名称，如 'UTF-8'
+     * @return self 当前实例，便于链式调用
+     *
+     * @throws InvalidArgumentException 编码不受支持时抛出
      */
     public function setEncoding(string $encoding): self
     {
@@ -460,6 +502,10 @@ class SiteMapGenerator
 
     /**
      * 导出站点地图数据为数组格式
+     *
+     * 注意：导出过程会顺带触发分片与索引 XML 的生成（结果同样进入缓存）。
+     *
+     * @return array 包含 base_url、total_urls、urls、chunks、index、stats 与 config 的关联数组
      */
     public function exportToArray(): array
     {
@@ -482,6 +528,12 @@ class SiteMapGenerator
 
     /**
      * 从数组数据导入站点地图配置
+     *
+     * 仅识别 urls 键：存在且为数组时覆盖当前 URL 列表并同步 totalUrls；
+     * 其余键（base_url、config 等）暂不生效。导入后不会自动清理已有缓存。
+     *
+     * @param array $data 待导入的数据，通常为 exportToArray() 的结果
+     * @return self 当前实例，便于链式调用
      */
     public function importFromArray(array $data): self
     {
@@ -495,6 +547,10 @@ class SiteMapGenerator
 
     /**
      * 清空所有 URL 数据但保留配置
+     *
+     * 同时重置 totalUrls、分片缓存与分片计数，并清空缓存区。
+     *
+     * @return self 当前实例，便于链式调用
      */
     public function clearUrls(): self
     {
@@ -508,6 +564,10 @@ class SiteMapGenerator
 
     /**
      * 获取 URL 条目数量
+     *
+     * 以当前内存中累积的 URL 数组为准（自动分片落盘后数组会被清空，此时可能小于 totalUrls）。
+     *
+     * @return int 当前 URL 条目数
      */
     public function getUrlCount(): int
     {
@@ -516,6 +576,11 @@ class SiteMapGenerator
 
     /**
      * 检查是否包含指定 URL
+     *
+     * 入参支持相对路径（自动拼接 baseUrl）或完整 URL，按 loc 字段全等比较。
+     *
+     * @param string $url 待检查的 URL（相对路径或完整 URL）
+     * @return bool 存在返回 true，否则返回 false
      */
     public function containsUrl(string $url): bool
     {
@@ -532,6 +597,12 @@ class SiteMapGenerator
 
     /**
      * 移除指定 URL
+     *
+     * 入参支持相对路径或完整 URL，按 loc 全等匹配并移除全部同名条目；
+     * 成功移除时同步 totalUrls、丢弃分片缓存并清空缓存区。
+     *
+     * @param string $url 待移除的 URL（相对路径或完整 URL）
+     * @return bool 实际移除到条目返回 true，未找到返回 false
      */
     public function removeUrl(string $url): bool
     {
@@ -554,6 +625,11 @@ class SiteMapGenerator
 
     /**
      * 批量移除 URL
+     *
+     * 逐个调用 removeUrl()，不存在的条目跳过；每次都命中时会重复清理缓存。
+     *
+     * @param array $urls URL 列表，元素可为相对路径或完整 URL
+     * @return int 实际移除的 URL 条数
      */
     public function removeUrls(array $urls): int
     {
@@ -570,6 +646,16 @@ class SiteMapGenerator
 
     /**
      * 添加多语言 URL 支持（hreflang）
+     *
+     * $alternates 以「语言代码 => 该语言页面路径」形式给出，会转换为 xhtml:link 的
+     * rel=alternate + hreflang + href 属性；未指定 lastmod 时取当天日期。
+     *
+     * @param string $url 主页面 URL（相对路径或完整 URL）
+     * @param array $alternates 语言代码 => 对应语言版本 URL
+     * @param string|null $lastModified 最后修改日期（Y-m-d），为 null 时取当天
+     * @param string $changeFrequency 更新频率，取 CHANGE_FREQUENCY_* 常量，默认 weekly
+     * @param float $priority 优先级（0.0~1.0），默认 0.5
+     * @return self 当前实例，便于链式调用
      */
     public function addMultilingualUrl(
         string $url,
@@ -603,6 +689,16 @@ class SiteMapGenerator
 
     /**
      * 添加移动端 URL 支持
+     *
+     * 生成一条带 media 属性的 xhtml:link（only screen and (max-width: 640px)）指向移动版页面；
+     * 未指定 lastmod 时取当天日期。
+     *
+     * @param string $url 桌面版页面 URL（相对路径或完整 URL）
+     * @param string $mobileUrl 移动版页面 URL（相对路径或完整 URL）
+     * @param string|null $lastModified 最后修改日期（Y-m-d），为 null 时取当天
+     * @param string $changeFrequency 更新频率，取 CHANGE_FREQUENCY_* 常量，默认 weekly
+     * @param float $priority 优先级（0.0~1.0），默认 0.5
+     * @return self 当前实例，便于链式调用
      */
     public function addMobileUrl(
         string $url,
@@ -634,6 +730,13 @@ class SiteMapGenerator
 
     /**
      * 设置搜索引擎自动提交
+     *
+     * 传入 $engines 时用其与内置 SEARCH_ENGINE_URLS 求交集重建提交配置（未知名称会被忽略）；
+     * 不传则保留当前配置。
+     *
+     * @param bool $autoSubmit 是否开启自动提交
+     * @param array $engines 允许提交的搜索引擎名称列表，如 ['google', 'bing']；空数组表示不改变现有配置
+     * @return self 当前实例，便于链式调用
      */
     public function setAutoSubmit(bool $autoSubmit, array $engines = []): self
     {
@@ -649,6 +752,13 @@ class SiteMapGenerator
 
     /**
      * 提交站点地图到搜索引擎
+     *
+     * 逐个请求 `{引擎 ping 地址}{urlencode(baseUrl + 'sitemap.xml')}`，超时 10 秒；
+     * 单个引擎失败只记录到结果与 $errors，不影响其他引擎。
+     * 注意：此处仅发送提交请求，不保证文件已落盘。
+     *
+     * @param array|null $engines 指定引擎名称列表；为 null 时使用 setAutoSubmit() 配置的引擎
+     * @return array<string, array{success: bool, response: string|false, url: string}> 引擎名 => 提交结果
      */
     public function submitToSearchEngines(?array $engines = null): array
     {
@@ -688,6 +798,12 @@ class SiteMapGenerator
 
     /**
      * 验证站点地图 XML 内容
+     *
+     * 先做 XML 语法检查（临时开启 libxml 内部错误收集，结束后恢复调用方原有状态），
+     * 再校验 URL 数量与文件大小是否超出上限。
+     *
+     * @param string $xmlContent 待验证的站点地图 XML 文本
+     * @return array<int, string> 错误信息列表，空数组表示验证通过
      */
     public function validateSitemap(string $xmlContent): array
     {
@@ -734,6 +850,12 @@ class SiteMapGenerator
 
     /**
      * 设置验证规则
+     *
+     * 与已有规则合并（同名键覆盖），未指定的键保持原值；
+     * 可配置项：max_url_length、allow_duplicate_urls、validate_urls、check_lastmod_format。
+     *
+     * @param array $rules 待合并的规则数组
+     * @return self 当前实例，便于链式调用
      */
     public function setValidationRules(array $rules): self
     {
@@ -743,6 +865,8 @@ class SiteMapGenerator
 
     /**
      * 获取内存使用情况
+     *
+     * @return array{current: int, peak: int, url_count: int, estimated_size: int} 当前占用、峰值、URL 数量与序列化估算大小（字节）
      */
     public function getMemoryUsage(): array
     {
@@ -756,6 +880,12 @@ class SiteMapGenerator
 
     /**
      * 批量添加 URL 并优化内存使用
+     *
+     * 按 $batchSize 分块调用 addUrls()，每块结束后若内存占用超过上限 80% 则主动触发 GC。
+     *
+     * @param array $urls URL 条目数组（元素结构同 addUrl()）
+     * @param int $batchSize 每批处理条数，默认 1000
+     * @return self 当前实例，便于链式调用
      */
     public function addUrlsBatch(array $urls, int $batchSize = 1000): self
     {
@@ -775,6 +905,11 @@ class SiteMapGenerator
 
     /**
      * 启用或禁用缓存
+     *
+     * 禁用时会立即清空已有缓存，避免后续读到陈旧结果。
+     *
+     * @param bool $enable 是否启用，默认 true
+     * @return self 当前实例，便于链式调用
      */
     public function enableCaching(bool $enable = true): self
     {
@@ -787,6 +922,10 @@ class SiteMapGenerator
 
     /**
      * 清空缓存
+     *
+     * 仅清空内存缓存区，不改变 enableCaching 开关状态。
+     *
+     * @return self 当前实例，便于链式调用
      */
     public function clearCache(): self
     {
@@ -796,6 +935,12 @@ class SiteMapGenerator
 
     /**
      * 设置 URL 过滤器
+     *
+     * 回调接收单个 URL 条目数组，返回修改后的条目（写入）或 null（丢弃该条目）。
+     * 过滤器在 addUrlItem() 中添加时即时生效。
+     *
+     * @param callable $filter 过滤回调，签名 `function (array $urlItem): ?array`
+     * @return self 当前实例，便于链式调用
      */
     public function setUrlFilter(callable $filter): self
     {
@@ -805,6 +950,10 @@ class SiteMapGenerator
 
     /**
      * 获取性能统计信息
+     *
+     * 未触发析构时以当前时间作为结束时间；时长与内存均格式化为易读字符串。
+     *
+     * @return array{execution_time: string, url_processing_time: string, memory_peak: string, total_urls: int, sitemap_files: int, generated_files: int} 统计项（时长带 s 后缀，内存带单位）
      */
     public function getPerformanceStats(): array
     {
@@ -823,6 +972,12 @@ class SiteMapGenerator
 
     /**
      * 设置自定义数据
+     *
+     * 存入内部数组供调用方挂载业务数据，不参与 XML 生成。
+     *
+     * @param string $key 数据键
+     * @param mixed $value 任意值
+     * @return self 当前实例，便于链式调用
      */
     public function setCustomData(string $key, $value): self
     {
@@ -832,6 +987,12 @@ class SiteMapGenerator
 
     /**
      * 获取自定义数据
+     *
+     * 键不存在时返回传入的默认值。
+     *
+     * @param string $key 数据键
+     * @param mixed $default 键不存在时的默认返回值
+     * @return mixed 已存储的值或默认值
      */
     public function getCustomData(string $key, $default = null)
     {
@@ -842,6 +1003,12 @@ class SiteMapGenerator
 
     /**
      * 添加 URL 项目（内部使用）
+     *
+     * 先经 URL 过滤器处理（返回 null 则丢弃该条目），再追加到列表并累加计数、清空缓存；
+     * 当条目数达到 $maxUrls 时自动触发一次 generateSitemap() 落盘。
+     *
+     * @param array $urlItem URL 条目，需含 loc，可选 lastmod/changefreq/priority/custom/images/videos/news/xhtml_links
+     * @return void 无返回值
      */
     private function addUrlItem(array $urlItem): void
     {
@@ -864,6 +1031,11 @@ class SiteMapGenerator
 
     /**
      * 生成空的站点地图 XML
+     *
+     * 输出仅带命名空间声明的空 urlset；未设置自定义 header 时按当前 encoding 生成 XML 声明，
+     * 并按 prettyFormat 决定是否美化。
+     *
+     * @return string 空站点地图 XML 文本
      */
     private function generateEmptySitemapXml(): string
     {
@@ -886,6 +1058,14 @@ class SiteMapGenerator
 
     /**
      * 生成站点地图 XML 内容
+     *
+     * 以 urlset 为根节点逐条写入 URL（含图片/视频/新闻/多语言扩展），
+     * 未设置自定义 header 时按当前 encoding 生成 XML 声明。
+     *
+     * @param array $urls URL 条目数组
+     * @return string 站点地图 XML 文本
+     *
+     * @throws RuntimeException 构建或序列化 XML 出错时抛出
      */
     private function generateSitemapXml(array $urls): string
     {
@@ -938,6 +1118,12 @@ class SiteMapGenerator
 
     /**
      * 格式化 XML 字符串（美化输出）
+     *
+     * 用 DOMDocument 重新加载（忽略原有空白、开启 formatOutput）后输出，
+     * 会顺带按当前 encoding 重写 XML 声明。
+     *
+     * @param string $xml 待格式化的 XML 文本
+     * @return string 缩进后的 XML 文本
      */
     private function formatXml(string $xml): string
     {
@@ -951,6 +1137,11 @@ class SiteMapGenerator
 
     /**
      * 生成站点地图 URL 数组
+     *
+     * 分片数取「1、已生成分片数、按当前 URL 数估算的分片数」三者最大值，
+     * 保证 addUrlItem() 自动落盘清空 $urls 后索引仍完整。
+     *
+     * @return array<int, array{loc: string, lastmod: string}> 索引条目列表（loc 为分片文件地址，lastmod 为当天日期）
      */
     private function generateSitemapUrls(): array
     {
@@ -972,6 +1163,13 @@ class SiteMapGenerator
 
     /**
      * 添加 URL 数据到 XML 文档
+     *
+     * 依次写入 loc（缺失时写空串兜底）、lastmod、changefreq、priority、custom 自定义节点，
+     * 以及 xhtml_links 多语言链接和 images/videos/news 扩展节点；未提供的键会被跳过。
+     *
+     * @param SimpleXMLElement $xml urlset 根节点
+     * @param array $url 单条 URL 条目
+     * @return void 无返回值
      */
     private function addUrlToXml(SimpleXMLElement $xml, array $url): void
     {
@@ -1033,6 +1231,13 @@ class SiteMapGenerator
 
     /**
      * 添加图片信息到 XML 节点
+     *
+     * 生成 image:image 节点，按 url/title/caption/geo_location/license 逐项写入，
+     * 空值字段跳过。
+     *
+     * @param SimpleXMLElement $urlEntry 所属的 url 节点
+     * @param array $image 图片信息数组
+     * @return void 无返回值
      */
     private function addImageToXml(SimpleXMLElement $urlEntry, array $image): void
     {
@@ -1061,6 +1266,13 @@ class SiteMapGenerator
 
     /**
      * 添加视频信息到 XML 节点
+     *
+     * 生成 video:video 节点，写入标题、描述、缩略图、content_loc（取自 url 键）、
+     * 时长、发布日期、播放器地址、过期时间、评分、播放量与家庭友好标记，空值字段跳过。
+     *
+     * @param SimpleXMLElement $urlEntry 所属的 url 节点
+     * @param array $video 视频信息数组
+     * @return void 无返回值
      */
     private function addVideoToXml(SimpleXMLElement $urlEntry, array $video): void
     {
@@ -1113,6 +1325,13 @@ class SiteMapGenerator
 
     /**
      * 添加新闻信息到 XML 节点
+     *
+     * 生成 news:news 节点；publication 子数组存在时写入 news:publication
+     * （含 news:name 与 news:language，语言缺省为 zh_CN），随后写入标题、发布日期、关键词与体裁。
+     *
+     * @param SimpleXMLElement $urlEntry 所属的 url 节点
+     * @param array $news 新闻信息数组
+     * @return void 无返回值
      */
     private function addNewsToXml(SimpleXMLElement $urlEntry, array $news): void
     {
@@ -1155,6 +1374,10 @@ class SiteMapGenerator
 
     /**
      * 估计内存使用量
+     *
+     * 逐个序列化 URL 条目并累加字符串长度，作为内存占用的粗略估算值（非真实内存开销）。
+     *
+     * @return int 估算字节数
      */
     private function estimateMemoryUsage(): int
     {
@@ -1167,6 +1390,10 @@ class SiteMapGenerator
 
     /**
      * 检查内存使用是否过高
+     *
+     * 以 memory_limit 的 80% 为阈值；memory_limit 为 -1（不限制）时始终返回 false。
+     *
+     * @return bool 已超过阈值返回 true，否则返回 false
      */
     private function isMemoryUsageHigh(): bool
     {
@@ -1183,6 +1410,11 @@ class SiteMapGenerator
 
     /**
      * 转换内存限制为字节
+     *
+     * 识别结尾的 K/M/G 单位（大小写不敏感）并按 1024 进制换算；无单位或无法识别时按整数解析。
+     *
+     * @param string $memoryLimit 形如 '128M'、'1G'、'536870912' 的内存限制字符串
+     * @return int 换算后的字节数
      */
     private function convertToBytes(string $memoryLimit): int
     {
@@ -1199,6 +1431,12 @@ class SiteMapGenerator
 
     /**
      * 格式化字节数为易读格式
+     *
+     * 按 1024 进制自动选择 B/KB/MB/GB/TB（最大到 TB），负数按 0 处理。
+     *
+     * @param int $bytes 字节数
+     * @param int $precision 保留的小数位数，默认 2
+     * @return string 形如 '1.5 MB' 的可读字符串
      */
     private function formatBytes(int $bytes, int $precision = 2): string
     {
@@ -1213,30 +1451,66 @@ class SiteMapGenerator
 
     // ==================== 原有的公共方法 ====================
 
+    /**
+     * 设置自定义 XML 头部内容
+     *
+     * @param string $header 自定义 XML 头部（如声明、处理指令）
+     * @return self
+     */
     public function setHeader(string $header): self
     {
         $this->header = $header;
         return $this;
     }
 
+    /**
+     * 设置自定义 XML 尾部内容（追加在每个站点地图文件末尾）
+     *
+     * @param string $footer 自定义 XML 尾部
+     * @return self
+     */
     public function setFooter(string $footer): self
     {
         $this->footer = $footer;
         return $this;
     }
 
+    /**
+     * 启用或禁用 GZIP 压缩（生成 .gz 副本）
+     *
+     * @param bool $enable 是否启用压缩（默认 true）
+     * @return self
+     */
     public function enableCompression(bool $enable = true): self
     {
         $this->useCompression = $enable;
         return $this;
     }
 
+    /**
+     * 追加或覆盖一个 XML 命名空间声明
+     *
+     * @param string $prefix 命名空间前缀（如 image、video）
+     * @param string $url    命名空间 URI
+     * @return self
+     */
     public function addNamespace(string $prefix, string $url): self
     {
         $this->namespaces[$prefix] = $url;
         return $this;
     }
 
+    /**
+     * 添加单个 URL 到站点地图（自动拼接 baseUrl 并做合法性校验）
+     *
+     * @param string $url            相对路径（以 / 开头）或完整 URL
+     * @param string|null $lastModified 最后修改日期（Y-m-d），null 时使用当天
+     * @param string $changeFrequency 更新频率，默认 weekly
+     * @param float  $priority       优先级（0.0-1.0），默认 0.5
+     * @param array  $customTags     额外自定义子节点键值对
+     * @return self
+     * @throws InvalidArgumentException 当 URL/频率/优先级/日期非法时抛出
+     */
     public function addUrl(
         string $url,
         ?string $lastModified = null,
@@ -1268,6 +1542,12 @@ class SiteMapGenerator
         return $this;
     }
 
+    /**
+     * 批量添加 URL（兼容 [url, lastmod, freq, priority, tags] 形式的数组元素）
+     *
+     * @param array $urls 多条 URL 数据组成的数组
+     * @return self
+     */
     public function addUrls(array $urls): self
     {
         foreach ($urls as $urlData) {
@@ -1284,6 +1564,11 @@ class SiteMapGenerator
         return $this;
     }
 
+    /**
+     * 将已添加的 URL 生成站点地图文件及索引文件，并按需提交搜索引擎
+     *
+     * @return bool 生成成功返回 true；发生错误时记录到 errors 并返回 false
+     */
     public function generateFile(): bool
     {
         try {
@@ -1307,26 +1592,51 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 获取站点地图文件实际存储目录
+     *
+     * @return string 站点地图目录的绝对路径
+     */
     public function getSitemapDir(): string
     {
         return $this->sitemapDir;
     }
 
+    /**
+     * 获取站点地图索引文件的路径
+     *
+     * @return string 索引文件绝对路径
+     */
     public function getIndexFilePath(): string
     {
         return $this->indexFilePath;
     }
 
+    /**
+     * 获取本次运行已生成的所有文件路径列表
+     *
+     * @return array 文件路径数组
+     */
     public function getGeneratedFiles(): array
     {
         return $this->generatedFiles;
     }
 
+    /**
+     * 获取生成过程中收集的错误信息
+     *
+     * @return array 错误描述数组
+     */
     public function getErrors(): array
     {
         return $this->errors;
     }
 
+    /**
+     * 获取生成器的综合统计信息
+     *
+     * @return array 包含 URL 总数、文件数、错误数、压缩状态、目录、分片数等统计
+     */
     public function getStats(): array
     {
         return [
@@ -1346,12 +1656,22 @@ class SiteMapGenerator
         ];
     }
 
+    /**
+     * 清空已收集的错误信息
+     *
+     * @return self
+     */
     public function clearErrors(): self
     {
         $this->errors = [];
         return $this;
     }
 
+    /**
+     * 重置生成器状态（清空 URL、文件、错误、缓存与性能统计，保留配置）
+     *
+     * @return self
+     */
     public function reset(): self
     {
         $this->urls = [];
@@ -1372,6 +1692,16 @@ class SiteMapGenerator
 
     // ==================== 原有的验证和辅助方法 ====================
 
+    /**
+     * 校验构造函数传入的基础目录与参数是否合法
+     *
+     * @param string $baseUrl    网站基础 URL
+     * @param string $baseDir   站点地图存储目录
+     * @param int    $maxUrls   单个文件最大 URL 数（1-50000）
+     * @param int    $maxFileSize 单个文件最大字节数（1-50MB）
+     * @return void
+     * @throws InvalidArgumentException 任意参数不合法时抛出
+     */
     private function validateParameters(string $baseUrl, string $baseDir, int $maxUrls, int $maxFileSize): void
     {
         if (!is_dir($baseDir) || !is_writable($baseDir)) {
@@ -1395,6 +1725,13 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 创建（如不存在）站点地图按日期命名的子目录并返回其路径
+     *
+     * @param string $baseDir 基础目录
+     * @return string 站点地图目录路径
+     * @throws RuntimeException 目录创建失败或不可写时抛出
+     */
     private function createSitemapDirectory(string $baseDir): string
     {
         $sitemapDir = rtrim($baseDir, '/') . '/' . $this->mapsDirName . '/' . $this->dateFolder . '/';
@@ -1412,6 +1749,13 @@ class SiteMapGenerator
         return $sitemapDir;
     }
 
+    /**
+     * 校验单条 URL 是否为空或以 / 开头的相对路径（或完整 URL）
+     *
+     * @param string $url 待校验的 URL
+     * @return void
+     * @throws InvalidArgumentException 当 URL 为空或格式不合法时抛出
+     */
     private function validateUrl(string $url): void
     {
         if (empty($url)) {
@@ -1423,6 +1767,13 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 校验更新频率是否落在预定义枚举值之内
+     *
+     * @param string $frequency 更新频率字符串
+     * @return void
+     * @throws InvalidArgumentException 频率非法时抛出
+     */
     private function validateChangeFrequency(string $frequency): void
     {
         $validFrequencies = [
@@ -1440,6 +1791,13 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 校验优先级是否处于 0.0 到 1.0 的闭区间
+     *
+     * @param float $priority 优先级
+     * @return void
+     * @throws InvalidArgumentException 超出范围时抛出
+     */
     private function validatePriority(float $priority): void
     {
         if ($priority < 0.0 || $priority > 1.0) {
@@ -1447,6 +1805,13 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 校验日期字符串是否为合法的 YYYY-MM-DD 格式
+     *
+     * @param string $date 日期字符串
+     * @return void
+     * @throws InvalidArgumentException 格式或日期无效时抛出
+     */
     private function validateDate(string $date): void
     {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
@@ -1462,6 +1827,12 @@ class SiteMapGenerator
 
     // ==================== 原有的生成方法 ====================
 
+    /**
+     * 将当前累积的 URL 写入一个站点地图分片文件（并在启用压缩时生成 .gz）
+     *
+     * @return void
+     * @throws RuntimeException 写入失败或压缩失败时抛出
+     */
     private function generateSitemap(): void
     {
         if (empty($this->urls)) {
@@ -1489,6 +1860,12 @@ class SiteMapGenerator
         $this->urls = [];
     }
 
+    /**
+     * 生成站点地图索引文件，聚合所有已生成的分片
+     *
+     * @return void
+     * @throws RuntimeException 索引写入失败时抛出
+     */
     private function generateIndexFile(): void
     {
         if ($this->sitemapCount === 0) {
@@ -1519,6 +1896,13 @@ class SiteMapGenerator
         }
     }
 
+    /**
+     * 为指定站点地图文件生成 GZIP 压缩副本
+     *
+     * @param string $filePath 原始站点地图文件路径
+     * @return void
+     * @throws RuntimeException 读取或写入压缩文件失败时抛出
+     */
     private function createCompressedVersion(string $filePath): void
     {
         if (!function_exists('gzencode')) {

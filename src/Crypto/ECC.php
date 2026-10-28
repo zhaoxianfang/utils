@@ -189,7 +189,10 @@ class ECC
     }
 
     /**
-     * 记录调试信息
+     * 记录一条 ECC 调试日志
+     *
+     * 仅在调试模式开启时输出，否则静默丢弃。日志附带毫秒级时间戳与当前进程
+     * 内存占用（MB），便于排查密钥加载与签名流程；不参与任何业务判断。
      *
      * @param string $message 调试消息
      * @return void
@@ -426,11 +429,14 @@ class ECC
     }
 
     /**
-     * 加载公钥
+     * 加载 PEM/DER 格式公钥
      *
-     * @param string $publicKey 公钥字符串
+     * 交由 OpenSSL 解析公钥字符串并缓存句柄，随后调用 validateKeyCurve()
+     * 校验（或在兼容范围内自动修正）曲线名称。解析失败时抛出异常。
+     *
+     * @param string $publicKey 公钥字符串，支持 PEM 及 OpenSSL 可识别的格式
      * @return void
-     * @throws RuntimeException 当公钥加载失败时抛出
+     * @throws RuntimeException 公钥无法加载或曲线校验失败时抛出
      * @access private
      */
     private function loadPublicKey(string $publicKey): void
@@ -488,10 +494,14 @@ class ECC
     }
 
     /**
-     * 从私钥导出公钥
+     * 从私钥导出一致的公钥句柄
+     *
+     * 通过 openssl_pkey_get_details() 取私钥对应的 PEM 公钥并重新解析，
+     * 使 publicKey 与 privateKey 严格配对。私钥缺失或详情不含 key 字段时
+     * 抛出异常。构造流程中加载私钥后会自动调用。
      *
      * @return void
-     * @throws RuntimeException 当公钥导出失败时抛出
+     * @throws RuntimeException 私钥不可用、密钥详情获取失败或公钥解析失败时抛出
      * @access private
      */
     private function derivePublicKey(): void
@@ -1226,6 +1236,9 @@ class ECC
     /**
      * 重置性能统计
      *
+     * 将签名、验签、密钥交换次数与累计数据量清零，并以当前时刻作为新的
+     * 统计起点；重置后 getPerformanceStats() 的耗时与吞吐指标重新累计。
+     *
      * @return void
      */
     public function resetPerformanceStats(): void
@@ -1352,6 +1365,13 @@ class ECC
     /**
      * 构造 ECC 实例，并把 OpenSSL 层加载失败统一转换为 InvalidArgumentException
      * （JWK 数据无效 = 调用方输入错误，不属于运行时内部故障）
+     *
+     * @param string|null $privPem 私钥 PEM，仅公钥场景传 null
+     * @param string|null $pubPem 公钥 PEM，传 null 时由构造器从私钥派生
+     * @param string $curveName 已归一化的 OpenSSL 曲线名
+     * @return self 新建的 ECC 实例
+     * @throws InvalidArgumentException 密钥数据无法被 OpenSSL 加载时抛出
+     * @access private
      */
     private static function constructFromPem(?string $privPem, ?string $pubPem, string $curveName): self
     {
@@ -1363,7 +1383,14 @@ class ECC
     }
 
     /**
-     * 将 OpenSSL 曲线名与 RFC 7517 标准名统一为 OpenSSL 内部名
+     * 将 JWK 曲线名与 OpenSSL 别名归一化为 OpenSSL 内部曲线名
+     *
+     * 支持 P-256/P-384/P-521（RFC 7517 的 crv 命名）与 secp256r1 等别名；
+     * 无法识别的名称原样返回，交由 validateCurve() 抛出明确的错误信息。
+     *
+     * @param string $curve 待归一化的曲线名
+     * @return string OpenSSL 内部曲线名；未识别时返回原值
+     * @access private
      */
     private static function normalizeCurveName(string $curve): string
     {
@@ -1377,7 +1404,14 @@ class ECC
     }
 
     /**
-     * 将 OpenSSL 内部曲线名转为 RFC 7517 标准 crv 名
+     * 将 OpenSSL 内部曲线名转换为 RFC 7517 的 crv 标准名
+     *
+     * 例如 prime256v1 → P-256；secp256k1 本身即为标准名，其余未识别名称
+     * 原样返回，便于直接写入 JWK。
+     *
+     * @param string $curve OpenSSL 内部曲线名
+     * @return string RFC 7517 的 crv 名称；未识别时返回原值
+     * @access private
      */
     private static function standardCrvName(string $curve): string
     {
@@ -1390,7 +1424,14 @@ class ECC
     }
 
     /**
-     * 曲线坐标字节长度
+     * 返回指定曲线的单个坐标字节长度
+     *
+     * 用于 JWK 的 x/y/d 定长补零：P-256 与 secp256k1 为 32，P-384 为 48，
+     * P-521 为 66；未识别曲线按 32 处理（后续 DER 构造多半会失败）。
+     *
+     * @param string $curve OpenSSL 内部曲线名
+     * @return int 坐标字节数
+     * @access private
      */
     private static function ecCoordSizeByCurve(string $curve): int
     {
@@ -1403,7 +1444,15 @@ class ECC
     }
 
     /**
-     * 曲线 OID（点分字符串）
+     * 返回曲线的 OID 点分字符串
+     *
+     * 覆盖 secp256r1(prime256v1)、secp384r1、secp521r1 与 secp256k1，
+     * 供 DER 算法标识使用；不支持的曲线抛出异常而非回退默认值。
+     *
+     * @param string $curve OpenSSL 内部曲线名
+     * @return string 点分形式的 OID，如 1.2.840.10045.3.1.7
+     * @throws InvalidArgumentException 曲线不受支持时抛出
+     * @access private
      */
     private static function curveOid(string $curve): string
     {
@@ -1416,7 +1465,16 @@ class ECC
         };
     }
 
-    /** DER 长度编码（definite form） */
+    /**
+     * DER 长度编码（definite form）
+     *
+     * 小于 128 时输出单字节；否则首字节为 0x80|后续字节数，后接大端长度。
+     * 负数无合法 DER 表示，调用方须保证入参非负。
+     *
+     * @param int $length 内容字节数，须为非负整数
+     * @return string DER 长度字段字节串
+     * @access private
+     */
     private static function derLength(int $length): string
     {
         if ($length < 0x80) {
@@ -1430,17 +1488,40 @@ class ECC
         return chr(0x80 | strlen($bytes)) . $bytes;
     }
 
+    /**
+     * 将内容封装为 DER SEQUENCE
+     *
+     * @param string $content 已编码的子项字节串
+     * @return string 0x30 ‖ 长度 ‖ 内容的 DER 字节串
+     * @access private
+     */
     private static function derSequence(string $content): string
     {
         return "\x30" . self::derLength(strlen($content)) . $content;
     }
 
+    /**
+     * 将内容封装为 DER OCTET STRING
+     *
+     * @param string $content 原始字节串
+     * @return string 0x04 ‖ 长度 ‖ 内容的 DER 字节串
+     * @access private
+     */
     private static function derOctetString(string $content): string
     {
         return "\x04" . self::derLength(strlen($content)) . $content;
     }
 
-    /** 无符号整数 → DER INTEGER（必要时补 0x00 保证正数） */
+    /**
+     * 将无符号大端整数编码为 DER INTEGER
+     *
+     * 先去除前导零；若首字节最高位为 1，则补一个 0x00，避免被解析成负数。
+     * 空输入按数值 0 编码。
+     *
+     * @param string $bytes 无符号大端字节串（如 JWK 的 d 值解码结果）
+     * @return string 0x02 ‖ 长度 ‖ 整数的 DER 字节串
+     * @access private
+     */
     private static function derInteger(string $bytes): string
     {
         $bytes = ltrim($bytes, "\x00");
@@ -1453,19 +1534,47 @@ class ECC
         return "\x02" . self::derLength(strlen($bytes)) . $bytes;
     }
 
-    /** 未压缩点（0x04‖x‖y）→ DER BIT STRING（首字节为 unused bits=0） */
+    /**
+     * 将未压缩椭圆曲线点编码为 DER BIT STRING
+     *
+     * DER BIT STRING 需在内容前加一个字节表示未使用位数，此处固定为 0x00。
+     *
+     * @param string $bytes 未压缩点字节串（0x04 ‖ x ‖ y）
+     * @return string 0x03 ‖ 长度 ‖ 0x00 ‖ 点的 DER 字节串
+     * @access private
+     */
     private static function derBitString(string $bytes): string
     {
         return "\x03" . self::derLength(strlen($bytes) + 1) . "\x00" . $bytes;
     }
 
-    /** context-specific 显式标签 [n] EXPLICIT */
+    /**
+     * 构造 context-specific 显式标签 [n] EXPLICIT
+     *
+     * 标签字节为 0xa0|n，仅支持 0-31 的单字节标签号，用于 SEC1 私钥中
+     * 包裹曲线 OID 与公钥点。
+     *
+     * @param int $tag 标签号（0-31）
+     * @param string $content 已编码的子项字节串
+     * @return string 0xa0|tag ‖ 长度 ‖ 内容的 DER 字节串
+     * @access private
+     */
     private static function derContextExplicit(int $tag, string $content): string
     {
         return chr(0xa0 | $tag) . self::derLength(strlen($content)) . $content;
     }
 
-    /** 点分 OID → DER OID 字节 */
+    /**
+     * 将点分 OID 编码为 DER OBJECT IDENTIFIER
+     *
+     * 前两段合并为 40*a+b 的首字节，其余各段按 base-128 变长编码（高位续行）。
+     * 不足两段或含非数字字符时抛出异常。
+     *
+     * @param string $oid 点分形式的 OID，如 1.2.840.10045.2.1
+     * @return string 0x06 ‖ 长度 ‖ OID 内容的 DER 字节串
+     * @throws InvalidArgumentException OID 格式非法时抛出
+     * @access private
+     */
     private static function derOid(string $oid): string
     {
         $parts = explode('.', $oid);
@@ -1489,13 +1598,34 @@ class ECC
         return "\x06" . self::derLength(strlen($bytes)) . $bytes;
     }
 
-    /** DER → PEM */
+    /**
+     * 将 DER 字节串封装为 PEM 文本
+     *
+     * 按 64 字符折行的 Base64 输出，并在首尾加上指定标签的 BEGIN/END 行，
+     * 可直接交给 OpenSSL 解析。
+     *
+     * @param string $der DER 编码的二进制内容
+     * @param string $label PEM 标签，如 PUBLIC KEY、EC PRIVATE KEY
+     * @return string 带换行的 PEM 文本
+     * @access private
+     */
     private static function pemEncode(string $der, string $label): string
     {
         return "-----BEGIN {$label}-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END {$label}-----\n";
     }
 
-    /** 解码 JWK 的 base64url 坐标并补齐到曲线坐标长度 */
+    /**
+     * 解码 JWK 的 base64url 坐标并补齐到曲线坐标长度
+     *
+     * 先做 base64url 解码，长度超过坐标长度视为非法；不足时在左侧补零，
+     * 保证 DER 中的定长大端整数格式。解码失败或结果为空时抛出异常。
+     *
+     * @param string $value JWK 中的 base64url 编码坐标（x/y/d）
+     * @param int $coordSize 目标坐标字节数，可由 ecCoordSizeByCurve() 取得
+     * @return string 定长大端坐标字节串
+     * @throws InvalidArgumentException 解码失败、为空或超长时抛出
+     * @access private
+     */
     private static function decodeJwkCoord(string $value, int $coordSize): string
     {
         $bin = Base64::urlSafeDecode($value, true);
@@ -1753,9 +1883,13 @@ class ECC
     }
 
     /**
-     * 获取性能评级
+     * 获取曲线的性能评级
      *
-     * @return string 性能评级
+     * 按曲线在签名/验签速度上的大致表现返回中文评级：P-256 与 secp256k1
+     * 为「高性能」，P-384 为「平衡」，P-521 为「高安全」；未识别曲线返回
+     * 「未知」。评级仅用于展示，不参与安全判定。
+     *
+     * @return string 性能评级文案
      * @access private
      */
     private function getPerformanceRating(): string
@@ -1956,9 +2090,12 @@ class ECC
     }
 
     /**
-     * 获取标准符合性
+     * 获取当前曲线符合的标准与生态列表
      *
-     * @return array 标准符合性
+     * NIST 系列曲线返回 NIST / FIPS 186-4 / TLS 1.2/1.3，secp256k1 返回
+     * SECG / Bitcoin / Ethereum；未识别曲线返回 ['未知']。
+     *
+     * @return array<int,string> 标准或生态名称列表，至少含一个元素
      * @access private
      */
     private function getStandardCompliance(): array

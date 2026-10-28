@@ -124,8 +124,11 @@ class Archive
     /**
      * 设置压缩包注释
      *
+     * 写入 ZIP 归档级的注释（显示在压缩软件的文件属性中），不是单个条目的注释；
+     * 需在 close() 之前调用才会随归档一起保存，返回自身以支持链式调用。
+     *
      * @param string $comment 注释内容
-     * @return static
+     * @return static 当前实例，便于链式调用
      */
     public function setComment(string $comment): static
     {
@@ -277,10 +280,16 @@ class Archive
     /**
      * 快捷解压文件
      *
+     * 以只读方式打开已有 ZIP（不会新建），把全部条目解压到 $destination
+     * 并返回条目名列表；解压过程包含 Zip Slip 路径穿越校验，遇到越界路径
+     * 会抛异常并中止。完成后自动关闭归档句柄。
+     *
      * @param string      $zipFile     ZIP 文件路径
      * @param string      $destination 目标目录
      * @param string|null $password    解压密码
-     * @return array 解压的文件列表
+     * @return array 解压的文件列表（压缩包内的原始条目名）
+     *
+     * @throws RuntimeException ZIP 无法打开、条目名非法或解压失败时抛出
      */
     public static function decompress(string $zipFile, string $destination, ?string $password = null): array
     {
@@ -290,6 +299,9 @@ class Archive
         return $files;
     }
 
+    /**
+     * 析构时自动关闭并保存压缩包，释放 ZipArchive 资源
+     */
     public function __destruct()
     {
         $this->close();

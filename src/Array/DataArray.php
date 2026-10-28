@@ -32,6 +32,10 @@ use RecursiveIteratorIterator;
  * echo $data->get('list.*.name'); // 通配符查找
  *
  * @see https://yoc.cn/docs/doc/6_203 DataArray使用文档
+ *
+ * @package zxf\Utils\Array
+ * @version 1.0.0
+ * @license MIT
  */
 class DataArray implements
     ArrayAccess,
@@ -79,6 +83,10 @@ class DataArray implements
     /**
      * 创建只读实例
      *
+     * 只读实例的 offsetSet/offsetUnset 以及 push/set/delete 等写操作都会抛
+     * RuntimeException，适合把配置、常量表等数据传给下游时防止被意外修改。
+     * 注意只读标志不会随数组内容深拷贝，仅约束本实例的操作。
+     *
      * @param array $data 初始数组数据
      * @return static 返回只读的DataArray实例
      */
@@ -112,6 +120,10 @@ class DataArray implements
 
     /**
      * 从对象创建实例
+     *
+     * 通过 get_object_vars() 取对象的可见属性（在类外部调用时只能拿到 public 属性），
+     * $recursive 为 true 时会把嵌套对象逐层展开成数组，适合处理 DTO / stdClass；
+     * 为 false 时嵌套对象保持原样。仅遍历可见属性，私有/受保护属性不会被读取。
      *
      * @param object $object 源对象
      * @param bool $recursive 是否递归转换对象属性
@@ -223,7 +235,7 @@ class DataArray implements
     public static function fromXml(string $xml, bool $associative = true): static
     {
         $backup = libxml_use_internal_errors(true);
-        $data = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NOCDATA);
+        $data = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NOCDATA | LIBXML_NONET);
         libxml_clear_errors();
         libxml_use_internal_errors($backup);
 
@@ -282,8 +294,13 @@ class DataArray implements
     /**
      * 获取偏移量的值
      *
-     * @param mixed $offset 要获取的偏移量
-     * @return mixed 偏移量对应的值，不存在返回null
+     * 字符串键中含分隔符（默认 "."）时按点分路径取值，支持多级下钻；
+     * 其余情况按普通数组下标读取。键不存在时统一返回 null。
+     * 由于使用 null 表示缺失，无法区分「真的存了 null」与「键不存在」，
+     * 需要区分时请改用 has()。
+     *
+     * @param mixed $offset 要获取的偏移量，可为字符串路径或整数下标
+     * @return mixed 偏移量对应的值，不存在返回 null
      */
     public function offsetGet(mixed $offset): mixed
     {
@@ -297,8 +314,14 @@ class DataArray implements
     /**
      * 设置偏移量的值
      *
-     * @param mixed $offset 要设置的偏移量
+     * 只读实例会直接拒绝写入；字符串键含分隔符时按点分路径写入（中间层级
+     * 不存在会自动创建）；$offset 为 null 时等价于 push，追加到数组末尾；
+     * 其余情况按普通下标赋值（键已存在则覆盖）。
+     *
+     * @param mixed $offset 要设置的偏移量，null 表示追加
      * @param mixed $value 要设置的值
+     * @return void
+     *
      * @throws RuntimeException 只读模式下尝试修改时抛出异常
      */
     public function offsetSet(mixed $offset, mixed $value): void
@@ -322,7 +345,13 @@ class DataArray implements
     /**
      * 删除偏移量
      *
+     * 只读实例会直接拒绝删除；字符串键含分隔符时按点分路径删除（等价于
+     * delete()，中间层级缺失时静默无操作），其余情况直接 unset 该下标。
+     * 删除不存在的键不会报错。
+     *
      * @param mixed $offset 要删除的偏移量
+     * @return void
+     *
      * @throws RuntimeException 只读模式下尝试修改时抛出异常
      */
     public function offsetUnset(mixed $offset): void
@@ -345,6 +374,10 @@ class DataArray implements
 
     /**
      * 获取迭代器
+     *
+     * 返回基于内部数组的 ArrayIterator，因此可直接 foreach 该实例；
+     * 迭代的是数组的浅拷贝快照，迭代过程中修改 DataArray 不会影响当前循环。
+     * 键名保持内部数组的原始键名。
      *
      * @return Traversable 数组迭代器
      */
@@ -807,9 +840,12 @@ class DataArray implements
     /**
      * 获取多个键的值
      *
-     * @param array $keys 要获取的键名数组
+     * 逐个调用 get()，因此每个键同样支持点分隔路径与通配符；
+     * 结果以传入的键名为索引，缺失的键填入 $defaultValue，顺序与 $keys 一致。
+     *
+     * @param array $keys 要获取的键名数组，元素可为普通键或路径表达式
      * @param mixed $defaultValue 键不存在时返回的默认值
-     * @return array 键值对数组
+     * @return array 键值对数组，键为请求的原始键名
      */
     public function getMultiple(array $keys, mixed $defaultValue = null): array
     {
@@ -1031,8 +1067,13 @@ class DataArray implements
     /**
      * 批量删除多个键
      *
+     * 逐个委托 delete()，因此同样支持点分隔路径；删除不存在的键静默跳过。
+     * 只读实例在第一个键上就会抛异常（此时尚未删除任何内容）；键列表为空时不报错。
+     *
      * @param array $keys 要删除的键名数组
      * @return static 返回当前实例以支持链式操作
+     *
+     * @throws RuntimeException 只读模式下尝试修改时抛出异常
      */
     public function deleteMultiple(array $keys): static
     {
@@ -1231,10 +1272,11 @@ class DataArray implements
         $matches = [];
 
         // 将通配符模式转换为正则表达式
+        // 先用 preg_quote 转义正则元字符，再还原通配符（避免 $pattern 含 / 等元字符时生成非法正则导致静默无匹配）
         $regexPattern = '/^' . str_replace(
-                ['*', '?', '.'],
-                ['.*', '.', '\.'],
-                $pattern
+                ['\*', '\?'],
+                ['.*', '.'],
+                preg_quote($pattern, '/')
             ) . '$/';
 
         foreach ($allKeys as $key) {
@@ -1668,7 +1710,10 @@ class DataArray implements
     /**
      * 获取第一个元素
      *
-     * @return mixed 第一个元素的值
+     * 按数组内部顺序取第一个值（不依赖键名，关联数组同样适用），
+     * 空数组返回 null。本方法会重置内部指针但不会改变数组内容，只读实例也可调用。
+     *
+     * @return mixed 第一个元素的值，空数组返回 null
      */
     public function first(): mixed
     {
@@ -1723,7 +1768,11 @@ class DataArray implements
     /**
      * 弹出第一个元素
      *
-     * @return mixed 弹出的元素值
+     * 移除并返回数组开头的元素，其余元素保持原顺序；数字键会重新索引，
+     * 字符串键不受影响。空数组返回 null。只读实例会抛异常。
+     *
+     * @return mixed 弹出的元素值，空数组返回 null
+     *
      * @throws RuntimeException 只读模式下尝试修改时抛出异常
      */
     public function shift(): mixed
@@ -1890,10 +1939,21 @@ class DataArray implements
     /**
      * 比较值
      *
-     * @param mixed $itemValue
-     * @param string $operator
-     * @param mixed $value
-     * @return bool
+     * where() 系列方法的底层比较器，按 $operator 选择对应比较方式：
+     * - 等值/大小：=、==、===、!=、<>、!==、>、>=、<、<=（= == != <> 为松散比较，
+     *   === !== 为严格比较）
+     * - 集合：in、not_in（严格比较，$value 会自动转数组）
+     * - 区间：between、not_between（要求 $value 为至少 2 个元素的数组，取 [0][1] 作边界）
+     * - 字符串：like、not_like（子串匹配）、starts_with、ends_with、regex、not_regex
+     * - 状态：null、not_null、empty、not_empty、true、false（true/false 为严格比较）
+     *
+     * 未识别的操作符一律返回 false（不抛异常），因此拼错操作符会静默过滤掉全部数据。
+     * regex 系列以 $value 为正则原文，需自行包含定界符，非法正则会触发 PHP 告警。
+     *
+     * @param mixed $itemValue 待比较的元素值
+     * @param string $operator 比较操作符
+     * @param mixed $value 比较目标值
+     * @return bool 满足条件返回 true
      */
     protected function compareValues(mixed $itemValue, string $operator, mixed $value): bool
     {
@@ -2033,7 +2093,11 @@ class DataArray implements
     /**
      * 对数组进行分页
      *
-     * @param int $page 页码
+     * 页码从 1 开始，偏移量按 (page-1)*perPage 计算并下限收敛到 0，
+     * 因此传入 0 或负数会被当作第一页。切片由 slice() 完成且默认保留原键名，
+     * 返回新实例，原实例不受影响。
+     *
+     * @param int $page 页码，从 1 开始，小于 1 按 1 处理
      * @param int $perPage 每页数量
      * @return static 新的DataArray实例
      */
@@ -2046,7 +2110,12 @@ class DataArray implements
     /**
      * 根据字段排序
      *
-     * @param string $field 排序字段
+     * 先按 sortBy() 升序排序，再判断方向：严格等于 'desc' 时整体反转，
+     * 其余任意取值（含 'DESC'、'descending'）都按升序处理，因此大小写不敏感
+     * 需要调用方自行统一。排序使用松散比较，数字字符串会按数值大小比较。
+     * 返回新实例，原实例顺序不变。
+     *
+     * @param string $field 排序字段，支持点分路径从嵌套结构中取值
      * @param string $direction 排序方向：asc 或 desc
      * @return static 新的DataArray实例
      */
@@ -2126,8 +2195,13 @@ class DataArray implements
     /**
      * 获取最大值
      *
+     * 不传 $callback 时直接对内部值取 max；传字段名时先按字段（支持点分路径）
+     * 提取每个元素的对应值，传回调时用回调结果；提取后会过滤掉 null，
+     * 若过滤后为空（或数组本身为空）则返回 null。
+     * 比较使用 PHP 原生 max 规则，混合类型时按语言自身的大小规则判断。
+     *
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
-     * @return mixed 最大值
+     * @return mixed 最大值，无可比较值时返回 null
      */
     public function max(callable|string|null $callback = null): mixed
     {
@@ -2147,8 +2221,11 @@ class DataArray implements
     /**
      * 获取最小值
      *
+     * 与 max() 完全对称：不传 $callback 时对内部值取 min；传字段名或回调时
+     * 先提取再过滤 null，过滤后为空则返回 null。比较规则同 PHP 原生 min。
+     *
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
-     * @return mixed 最小值
+     * @return mixed 最小值，无可比较值时返回 null
      */
     public function min(callable|string|null $callback = null): mixed
     {
@@ -2190,8 +2267,12 @@ class DataArray implements
     /**
      * 计算中位数
      *
+     * 仅取数值元素（见 getNumericValues()，非数值项被忽略）升序排序后取中位：
+     * 奇数个取正中元素，偶数个取中间两个的均值。无有效数值时返回 0.0。
+     * 注意跳过非数值元素后样本量会变小，可能与调用方预期不一致。
+     *
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
-     * @return float 中位数
+     * @return float 中位数，无有效数值时为 0.0
      */
     public function median(callable|string|null $callback = null): float
     {
@@ -2215,8 +2296,12 @@ class DataArray implements
     /**
      * 计算众数
      *
+     * 先经 frequency() 统计出现次数，再取出出现次数最多的全部取值；
+     * 因此存在并列时返回多个元素，全部元素出现次数相同则返回全部去重值。
+     * 返回的数组下标从 0 连续排列，元素类型与原始值一致；无数据时返回空数组。
+     *
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
-     * @return array 众数数组
+     * @return array 众数数组（可能含多个并列值）
      */
     public function mode(callable|string|null $callback = null): array
     {
@@ -2233,8 +2318,13 @@ class DataArray implements
     /**
      * 计算标准差
      *
+     * 使用总体标准差公式（除以 N，而非样本标准差的 N-1）：先取数值元素，
+     * 计算各值与均值的差的平方和，再开方。无有效数值时返回 0.0。
+     * 均值与方差基于同一集合（均取自 getNumericValues()），因此数组中混入
+     * 非数值元素时不会造成分母不一致的偏差。
+     *
      * @param callable|string|null $callback 回调函数或字段名用于提取数值
-     * @return float 标准差
+     * @return float 总体标准差，无有效数值时为 0.0
      */
     public function stddev(callable|string|null $callback = null): float
     {
@@ -2244,11 +2334,12 @@ class DataArray implements
             return 0.0;
         }
 
-        $mean = $this->avg($callback);
+        // 均值必须只统计参与方差计算的那些数值，不能复用 avg()（其分母为全部元素个数）
+        $mean = array_sum($values) / count($values);
         $sum = 0.0;
 
         foreach ($values as $value) {
-            $sum += pow($value - $mean, 2);
+            $sum += pow((float) $value - $mean, 2);
         }
 
         return (float)sqrt($sum / count($values));
@@ -2257,8 +2348,13 @@ class DataArray implements
     /**
      * 获取数值数组
      *
+     * 按 $callback 提取（字段名走点分路径，回调则直接映射），未传时使用内部值；
+     * 随后用 is_numeric 过滤，仅保留可解释为数字的元素（数字字符串会保留原样，
+     * 不会被转成 int/float），非数值项（含 null、布尔、纯文本）直接丢弃。
+     * 结果保留原键名，不是重新索引的列表。
+     *
      * @param callable|string|null $callback 回调函数或字段名
-     * @return array 数值数组
+     * @return array 仅含数值元素的原数组子集（保留键名）
      */
     protected function getNumericValues(callable|string|null $callback = null): array
     {
@@ -2296,10 +2392,15 @@ class DataArray implements
     /**
      * 递归展平数组
      *
-     * @param array $array 要展平的数组
-     * @param array $result 结果数组
-     * @param string $prefix 当前前缀
-     * @param string $delimiter 分隔符
+     * flatten() 的内部实现：逐层遍历，把嵌套键用分隔符拼成扁平键
+     * （如 a.b.c）；遇到数组继续下钻，遇到叶子节点（标量/null/对象）就写入结果。
+     * 空的子数组不会产生任何键，因此展平后的元素数量可能少于原结构。
+     *
+     * @param array $array 当前层级要展平的数组
+     * @param array $result 结果数组，按引用累积（键为拼接后的路径）
+     * @param string $prefix 当前已累积的键前缀，顶层传空串
+     * @param string $delimiter 键名分隔符
+     * @return void
      */
     protected function flattenRecursive(array $array, array &$result, string $prefix, string $delimiter): void
     {
@@ -2345,8 +2446,12 @@ class DataArray implements
     /**
      * 提取指定键的值
      *
-     * @param string|array $keys 要提取的键
-     * @return static 新的DataArray实例
+     * 按传入顺序逐个检查，仅保留存在的键（用 has() 判定，因此支持点分路径），
+     * 值经 get() 读取；不存在的键会被静默忽略，不会填入 null 占位。
+     * 结果键名与请求的键名一致，返回新实例，原实例不受影响。
+     *
+     * @param string|array $keys 要提取的键，可为单个键或其数组
+     * @return static 新的DataArray实例，仅含命中的键
      */
     public function only(string|array $keys): static
     {
@@ -2365,8 +2470,12 @@ class DataArray implements
     /**
      * 排除指定键的值
      *
-     * @param string|array $keys 要排除的键
-     * @return static 新的DataArray实例
+     * 直接拷贝当前数组后逐个 unset；含分隔符的键按点分路径深层删除，
+     * 其余按键名删除。被排除的键不存在时静默跳过。
+     * 返回新实例，原实例不受影响。
+     *
+     * @param string|array $keys 要排除的键，可为单个键或其数组
+     * @return static 新的DataArray实例，不含被排除的键
      */
     public function except(string|array $keys): static
     {
@@ -2414,6 +2523,10 @@ class DataArray implements
     /**
      * 合并数组值
      *
+     * 把内部每个「数组元素」依次 array_merge 成一维数组，常用于处理
+     * [[1,2],[3]] 这类嵌套集合；非数组元素会被直接跳过（不会报错也不会保留）。
+     * 数字键会被重新索引，字符串键同名时后者覆盖前者。
+     *
      * @return static 新的DataArray实例
      */
     public function collapse(): static
@@ -2432,8 +2545,13 @@ class DataArray implements
     /**
      * 交叉连接数组
      *
+     * 对传入的各数组求笛卡尔积，结果每个元素是「按参数顺序取值」组成的数组，
+     * 总行数为各数组长度的乘积。注意本方法**不包含调用实例自身的元素**，
+     * 仅对参数中的数组做组合；不传参数时返回含一个空数组的集合（[[]]），
+     * 任一入参为空数组时结果也为空。
+     *
      * @param array ...$arrays 要交叉连接的数组
-     * @return static 新的DataArray实例
+     * @return static 新的DataArray实例，元素为组合后的数组行
      */
     public function crossJoin(array ...$arrays): static
     {
@@ -2507,7 +2625,13 @@ class DataArray implements
     /**
      * 设置分隔符
      *
-     * @param string $delimiter 分隔符
+     * 修改用于「点分路径」解析的键名分隔符（默认为 "."），会影响 get/set/
+     * has/delete/flatten 等所有依赖路径解析的方法，也会改变 offsetGet 等
+     * ArrayAccess 操作对含分隔符字符串键的处理方式。
+     * 仅影响当前实例。方法本身不校验入参，传入空串会使所有字符串键都被当作
+     * 路径处理，进而在 explode 时抛 ValueError。
+     *
+     * @param string $delimiter 分隔符，如 "."、"/"
      * @return static 返回当前实例以支持链式操作
      */
     public function setDelimiter(string $delimiter): static
@@ -2518,6 +2642,9 @@ class DataArray implements
 
     /**
      * 获取分隔符
+     *
+     * 返回当前实例用于点分路径解析的分隔符，默认为 "."，
+     * 可被 setDelimiter() 修改。
      *
      * @return string 分隔符
      */
@@ -2572,6 +2699,9 @@ class DataArray implements
     /**
      * 获取数组的深度
      *
+     * 从 1 开始计：只含标量的数组深度为 1，每多一层嵌套加 1；
+     * 空数组同样返回 1。仅统计数组嵌套，对象属性不参与计算。
+     *
      * @return int 数组的最大深度
      */
     public function depth(): int
@@ -2582,8 +2712,11 @@ class DataArray implements
     /**
      * 计算数组深度
      *
+     * 递归遍历所有子数组，取「当前层 + 1」与各子树深度的较大者；
+     * 只含标量的层级不再下钻，因此返回值即为最深嵌套层数。
+     *
      * @param array $array 要计算的数组
-     * @param int $currentDepth 当前深度
+     * @param int $currentDepth 当前深度，顶层调用应传 1
      * @return int 最大深度
      */
     protected function calculateDepth(array $array, int $currentDepth = 1): int
@@ -3020,7 +3153,10 @@ class DataArray implements
     /**
      * 创建递归迭代器
      *
-     * @return RecursiveArrayIterator
+     * 返回基于内部数组的 RecursiveArrayIterator，配合 RecursiveIteratorIterator
+     * 可遍历多层嵌套结构；迭代的是一份数组快照，迭代期间修改实例不影响当前遍历。
+     *
+     * @return RecursiveArrayIterator 递归数组迭代器
      */
     public function getRecursiveIterator(): RecursiveArrayIterator
     {
@@ -3131,9 +3267,16 @@ class DataArray implements
     /**
      * 对数组进行采样
      *
+     * 随机抽取不重复的 $sampleSize 个元素（基于 array_rand，非密码学安全）：
+     * 样本数大于等于元素总数时直接返回整个数组的副本；否则按 $preserveKeys
+     * 决定保留原键名还是重建为连续下标。采样结果的顺序是随机的，不保持原顺序。
+     * 注意 $sampleSize 必须为正，传 0 或负数会触发 ValueError。
+     *
      * @param int $sampleSize 样本大小
      * @param bool $preserveKeys 是否保留键
      * @return static 新的DataArray实例
+     *
+     * @throws \ValueError 样本数小于 1 时抛出
      */
     public function sample(int $sampleSize, bool $preserveKeys = false): static
     {
@@ -3256,11 +3399,21 @@ class DataArray implements
     /**
      * 创建数据透视表
      *
+     * 先扫描一遍收集所有行键与列键（保持首次出现顺序），用 0 初始化完整的
+     * 行列矩阵，再遍历一遍累加值；结果形如 [行值 => [列值 => 聚合值]]，
+     * 因此即使某个行列组合没有数据也会保留为 0。
+     *
+     * 聚合方式：count 统计条数；sum 求和；avg 先求和再除以该组合的条数；
+     * max/min 取该组合内的最大/最小值（空组合返回 0）。
+     * 参与聚合的值统一按 float 处理，非数值（含 null）按 0 计。
+     * 三个字段既可是字段名（支持点分路径），也可是 fn($item) 形式的回调。
+     *
      * @param string|callable $rowField 行字段
      * @param string|callable $columnField 列字段
      * @param string|callable $valueField 值字段
-     * @param string $aggregate 聚合函数：count, sum, avg, max, min
-     * @return static 新的DataArray实例
+     * @param string $aggregate 聚合函数：count, sum, avg, max, min（大小写不敏感）
+     * @return static 新的DataArray实例，二维透视结果
+     * @throws InvalidArgumentException 当 $aggregate 不在支持列表内时抛出
      */
     public function pivot(
         string|callable $rowField,
@@ -3284,42 +3437,66 @@ class DataArray implements
             }
         }
 
-        // 初始化结果数组
-        $result = [];
-        foreach ($rows as $row) {
-            $result[$row] = array_fill_keys($columns, 0);
+        // 归一化聚合方式并校验，未知取值不再静默按求和处理
+        $aggregate = strtolower(trim($aggregate));
+        if (!in_array($aggregate, ['count', 'sum', 'avg', 'max', 'min'], true)) {
+            throw new InvalidArgumentException("不支持的聚合方式: {$aggregate}（可选 count/sum/avg/max/min）");
         }
 
-        // 填充数据
+        // max/min 需要区分「尚无数据」与「值为 0」，故以 null 初始化
+        $isExtremum = $aggregate === 'max' || $aggregate === 'min';
+
+        // 初始化结果数组与计数器
+        $result = [];
+        $counts = [];
+        foreach ($rows as $row) {
+            $result[$row] = array_fill_keys($columns, $isExtremum ? null : 0);
+            $counts[$row] = array_fill_keys($columns, 0);
+        }
+
+        // 填充数据：一次遍历完成聚合，avg 用 $counts 记录分母
         foreach ($this->data as $item) {
             $rowValue = is_callable($rowField) ? $rowField($item) : $this->getValueFromItem($item, $rowField);
             $colValue = is_callable($columnField) ? $columnField($item) : $this->getValueFromItem($item, $columnField);
-            $value = is_callable($valueField) ? $valueField($item) : $this->getValueFromItem($item, $valueField);
+
+            $counts[$rowValue][$colValue]++;
 
             if ($aggregate === 'count') {
                 $result[$rowValue][$colValue]++;
+                continue;
+            }
+
+            // 非数值按 0 计，避免 "1abc" 之类值触发算术 TypeError
+            $value = (float)(is_callable($valueField) ? $valueField($item) : $this->getValueFromItem($item, $valueField));
+
+            if ($aggregate === 'max') {
+                $current = $result[$rowValue][$colValue];
+                $result[$rowValue][$colValue] = $current === null ? $value : max($current, $value);
+            } elseif ($aggregate === 'min') {
+                $current = $result[$rowValue][$colValue];
+                $result[$rowValue][$colValue] = $current === null ? $value : min($current, $value);
             } else {
                 $result[$rowValue][$colValue] += $value;
             }
         }
 
-        // 如果是平均值，需要额外处理
+        // 平均值：除以该组合实际条数，无数据的组合保持 0
         if ($aggregate === 'avg') {
-            $counts = [];
-            foreach ($rows as $row) {
-                $counts[$row] = array_fill_keys($columns, 0);
-            }
-
-            foreach ($this->data as $item) {
-                $rowValue = is_callable($rowField) ? $rowField($item) : $this->getValueFromItem($item, $rowField);
-                $colValue = is_callable($columnField) ? $columnField($item) : $this->getValueFromItem($item, $columnField);
-                $counts[$rowValue][$colValue]++;
-            }
-
             foreach ($rows as $row) {
                 foreach ($columns as $col) {
                     if ($counts[$row][$col] > 0) {
                         $result[$row][$col] /= $counts[$row][$col];
+                    }
+                }
+            }
+        }
+
+        // max/min 的空组合回落为 0，与其他聚合方式保持一致
+        if ($isExtremum) {
+            foreach ($rows as $row) {
+                foreach ($columns as $col) {
+                    if ($result[$row][$col] === null) {
+                        $result[$row][$col] = 0;
                     }
                 }
             }
@@ -3370,7 +3547,11 @@ class DataArray implements
     /**
      * 创建数据管道
      *
-     * @param callable ...$callbacks 回调函数序列
+     * 依次把上一步的结果作为唯一参数传给下一个回调，形成链式处理；
+     * 回调返回 DataArray 时直接沿用，返回数组时被包装成新的 DataArray 继续传递，
+     * 返回其它类型则会因构造参数类型不符而报错。不传回调时原样返回当前实例。
+     *
+     * @param callable ...$callbacks 回调函数序列，每个回调签名为 fn($data)
      * @return static 新的DataArray实例
      */
     public function pipeThrough(callable ...$callbacks): static
@@ -3387,7 +3568,14 @@ class DataArray implements
     /**
      * 创建数据流处理
      *
-     * @param array $operations 操作序列
+     * 按顺序执行一组操作，每项可以是：
+     * - callable：以当前结果为唯一参数直接调用；
+     * - [方法名, 参数数组]：在当前结果上调用该实例方法（参数数组会被展开，
+     *   缺省为空数组），如 ['where', ['status', 1]]。
+     * 无法识别的项会被静默跳过。若某步返回的不是 DataArray，则包装成新实例；
+     * 返回非数组类型时会因构造参数校验失败而报错。
+     *
+     * @param array $operations 操作序列，元素为 callable 或 [方法名, 参数数组]
      * @return static 新的DataArray实例
      */
     public function stream(array $operations): static

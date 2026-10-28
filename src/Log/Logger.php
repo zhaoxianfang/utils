@@ -14,9 +14,15 @@ use RuntimeException;
  * 日志级别（从低到高，RFC 5424 标准）：
  * DEBUG < INFO < NOTICE < WARNING < ERROR < CRITICAL < ALERT < EMERGENCY
  *
- * @package Log
+ * @package zxf\Utils\Log
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * $logger = new \zxf\Utils\Log\Logger(__DIR__ . '/runtime/logs');
+ * $logger->info('用户登录', ['user_id' => 1]);   // 带上下文（JSON）
+ * $logger->error('数据库连接失败');              // ERROR 级别
+ * $logger->setMinLevel(Logger::WARNING);        // 只记录 WARNING 及以上
  */
 class Logger
 {

@@ -75,6 +75,11 @@ class FormatInformation
 
     private int $dataMask;
 
+    /**
+     * 由格式信息整数解析出错误纠正级别与数据掩码
+     *
+     * @param int $formatInfo 编码后的格式信息整数
+     */
     protected function __construct(int $formatInfo)
     {
         $this->ecLevel = ErrorCorrectionLevel::forBits(($formatInfo >> 3) & 0x3);
@@ -82,7 +87,14 @@ class FormatInformation
     }
 
     /**
-     * Checks how many bits are different between two integers.
+     * 统计两个整数在二进制表示下有多少位不同（汉明距离）。
+     *
+     * 先异或得到差异位，再用“半字节置位数查表”把 32 位拆成 8 段累加，
+     * 避免逐位循环；结果用于在解码格式信息时判断与候选值的接近程度。
+     *
+     * @param int $a 参与比较的第一个整数
+     * @param int $b 参与比较的第二个整数
+     * @return int 两者不同的二进制位数（0~32）
      */
     public static function numBitsDiffering(int $a, int $b) : int
     {
@@ -101,7 +113,14 @@ class FormatInformation
     }
 
     /**
-     * Decodes format information.
+     * 解码格式信息（含容错重试）
+     *
+     * 先用传入的两份原始格式信息尝试解码；若失败，考虑到部分生成器没有
+     * 对格式位做掩码，再与 FORMAT_INFO_MASK_QR 异或后重试一次。
+     *
+     * @param int $maskedFormatInfo1 第一份（通常来自左上角）掩码后的格式信息
+     * @param int $maskedFormatInfo2 第二份（通常来自右下角/右上角）掩码后的格式信息，可与第一份相同
+     * @return self|null 解析出的格式信息；两种方式均无法匹配时返回 null
      */
     public static function decodeFormatInformation(int $maskedFormatInfo1, int $maskedFormatInfo2) : ?self
     {
@@ -120,7 +139,15 @@ class FormatInformation
     }
 
     /**
-     * Internal method for decoding format information.
+     * 在查表中寻找与输入最接近的格式信息（内部实现）
+     *
+     * 先找完全相同的候选并直接返回；否则遍历查表记录最小汉明距离，
+     * 两份输入都会参与比较。由于 32 个合法码字的最小距离为 7，
+     * 只有差异位不超过 3 时才认定匹配成功。
+     *
+     * @param int $maskedFormatInfo1 第一份待解码的格式信息
+     * @param int $maskedFormatInfo2 第二份待解码的格式信息，可与第一份相同
+     * @return self|null 匹配成功返回格式信息，差异过大时返回 null
      */
     private static function doDecodeFormatInformation(int $maskedFormatInfo1, int $maskedFormatInfo2) : ?self
     {
@@ -162,7 +189,11 @@ class FormatInformation
     }
 
     /**
-     * Returns the error correction level.
+     * 返回该格式信息中携带的错误纠正级别
+     *
+     * 级别在构造时已从格式信息的高两位解析得到，此处直接返回缓存实例。
+     *
+     * @return ErrorCorrectionLevel 错误纠正级别（L/M/Q/H 之一）
      */
     public function getErrorCorrectionLevel() : ErrorCorrectionLevel
     {
@@ -170,7 +201,12 @@ class FormatInformation
     }
 
     /**
-     * Returns the data mask.
+     * 返回该格式信息中携带的数据掩码编号
+     *
+     * 掩码编号在构造时取自格式信息的低三位，用于在解码时还原被异或
+     * 处理的模块。
+     *
+     * @return int 数据掩码编号，取值 0~7
      */
     public function getDataMask() : int
     {
@@ -178,7 +214,12 @@ class FormatInformation
     }
 
     /**
-     * Hashes the code of the EC level.
+     * 计算该格式信息的哈希值
+     *
+     * 把纠错级别比特左移 3 位后与数据掩码做按位或，还原为原始的 5 位
+     * 格式信息编码，可作为数组键或用于相等性快速比较。
+     *
+     * @return int 由纠错级别与掩码组合成的 5 位整数
      */
     public function hashCode() : int
     {
@@ -186,7 +227,13 @@ class FormatInformation
     }
 
     /**
-     * Verifies if this instance equals another one.
+     * 判断当前实例与另一个格式信息是否等价。
+     *
+     * 比较纠错级别实例与数据掩码编号是否同时相同；由于纠错级别是枚举
+     * 单例，级别部分可直接用全等判断。
+     *
+     * @param self $other 待比较的另一个格式信息实例
+     * @return bool 纠错级别与数据掩码都相同时返回 true，否则返回 false
      */
     public function equals(self $other) : bool
     {

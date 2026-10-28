@@ -389,7 +389,14 @@ class ImagickTool
     }
 
     /**
-     * 静态初始化实例
+     * 获取全局单例实例
+     *
+     * 首次调用时创建实例（构造函数会检查 imagick 扩展并初始化 Imagick 对象），
+     * 之后复用同一对象；因此实例内保存的图像状态在调用方之间共享，需要隔离时
+     * 应自行 reset()。
+     *
+     * @return self 单例实例
+     * @throws Exception imagick 扩展未加载时由构造函数抛出
      */
     public static function instance(): ?self
     {
@@ -2393,10 +2400,14 @@ class ImagickTool
     }
 
     /**
-     * 应用文字阴影
+     * 为文字绘制对象设置阴影参数
+     *
+     * 从 $shadow 中读取 color/opacity/x/y/blur（缺省分别为 #000000、50、2、2、3），
+     * 设置到 ImagickDraw 上，并把填充不透明度设为 opacity/100。注意该不透明度
+     * 会作用于后续所有绘制操作，需在填充正文前恢复。
      *
      * @param ImagickDraw $draw 绘制对象
-     * @param array $shadow 阴影设置
+     * @param array $shadow 阴影设置，支持 color、opacity(0-100)、x、y、blur
      * @return void
      */
     private function applyTextShadow(ImagickDraw $draw, array $shadow): void
@@ -2570,9 +2581,12 @@ class ImagickTool
     }
 
     /**
-     * 应用边框样式
+     * 应用非实线边框样式（占位实现）
      *
-     * @param string $style 边框样式
+     * 当前为空实现：dashed/dotted/double 与 default 分支都不执行任何绘制，
+     * 因此调用后图像不会发生变化，仅保留接口以便后续扩展。
+     *
+     * @param string $style 边框样式（dashed/dotted/double 等）
      * @param int $width 边框宽度
      * @return void
      */
@@ -3239,9 +3253,13 @@ class ImagickTool
     }
 
     /**
-     * 准备输出目录
+     * 确保输出路径的父目录存在
+     *
+     * 取 dirname 后递归创建（权限 0755）；目录已存在、路径无目录部分或并发下
+     * 被其他进程抢先创建都视为成功，仅在最终仍不可用时抛出异常。
      *
      * @param string $outputPath 输出路径
+     * @return void
      * @throws ImagickException 当目录创建失败时抛出异常
      */
     private function prepareOutputDirectory(string $outputPath): void
@@ -3254,9 +3272,13 @@ class ImagickTool
     }
 
     /**
-     * 获取字体路径
+     * 解析字体的可用路径
      *
-     * @param string|null $fontName 字体名称
+     * 传入值若本身是文件路径则直接返回；否则按「resource/font/{名称}.ttf」查找，
+     * 找不到时回退到默认字体 pmzdxx.ttf。$fontName 为空时同样按默认字体处理。
+     * 返回路径不保证文件真实存在（默认字体缺失时仍返回该路径）。
+     *
+     * @param string|null $fontName 字体名称（不含 .ttf 后缀）或完整文件路径
      * @return string 字体路径
      */
     private function getFontPath(?string $fontName = 'pmzdxx'): string
@@ -3302,7 +3324,11 @@ class ImagickTool
     }
 
     /**
-     * 标准化颜色格式
+     * 标准化颜色字符串
+     *
+     * 统一转小写并去空白；transparent 转为全透明 rgba，rgb()/rgba() 原样返回，
+     * 3 位与 6 位十六进制展开为 rgb() 形式，常见颜色名查内置映射表。
+     * 无法识别时回退为白色 rgb(255,255,255)，不抛异常。
      *
      * @param string $color 颜色字符串
      * @return string 标准化后的颜色字符串
@@ -3478,7 +3504,10 @@ class ImagickTool
     }
 
     /**
-     * 优化图像输出
+     * 优化当前图像的输出体积
+     *
+     * 剥离 EXIF 等元数据、设置逐行交错（渐进式）加载，PNG 额外改用 ZIP 压缩。
+     * 优化过程中的 ImagickException 会被吞掉，失败时保持原图不变，不向外抛错。
      *
      * @return void
      */
@@ -3498,7 +3527,10 @@ class ImagickTool
     }
 
     /**
-     * 优化图像实例
+     * 优化指定的图像实例
+     *
+     * 对传入的 Imagick 对象剥离元数据并设置渐进式交错，用于拼图等场景下的
+     * 子图；异常同样被忽略，不中断主流程。
      *
      * @param Imagick $image 图像实例
      * @return void
@@ -3625,13 +3657,18 @@ class ImagickTool
     }
 
     /**
-     * 应用渐变透明度
+     * 为画布叠加渐变透明遮罩
      *
-     * @param Imagick $canvas
-     * @param string $gradientType 渐变类型
-     * @param float $intensity 渐变强度
+     * 按渐变类型生成与画布同尺寸的黑白渐变（左右、上下、对角或径向），用
+     * intensity 乘到 alpha 通道调节强度，再以 COMPOSITE_DSTIN 合成，使画布
+     * 透明度呈现渐变过渡。未匹配的类型不会生成渐变，此时合成为空操作风险由
+     * 调用方保证（传入合法常量）。
+     *
+     * @param Imagick $canvas 目标画布，会被就地修改
+     * @param string $gradientType 渐变类型，取 GRADIENT_* 常量
+     * @param float $intensity 渐变强度，作为 alpha 乘数
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 渐变创建或合成失败时抛出
      */
     private function applyGradient(Imagick $canvas, string $gradientType, float $intensity): void
     {
@@ -3680,14 +3717,18 @@ class ImagickTool
     // ==========================================
 
     /**
-     * 创建网格拼图
+     * 将图片按网格铺设到画布
+     *
+     * 画布按 rows×cols 均分单元格，图片依序填入并等比缩略到单元格尺寸（略去
+     * spacing 间隙）。超出格子数量的图片会被忽略；round_corners>0 时加圆角，
+     * border_width>0 时加边框。
      *
      * @param array $imagePaths 图片路径数组
      * @param int $rows 行数
      * @param int $cols 列数
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing、border_width、border_color、round_corners
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取或合成失败时抛出
      */
     private function createGridCollage(array $imagePaths, int $rows, int $cols, array $options): void
     {
@@ -3730,12 +3771,16 @@ class ImagickTool
     }
 
     /**
-     * 创建圆形拼图
+     * 将图片沿圆周均匀排布成环形拼图
+     *
+     * 圆心取画布中心，半径取画布短边的 1/3，各图按 2π/n 的角度间隔均分；
+     * 每张图先缩略为半径一半的正方形，再叠加圆形蒙版得到圆形外观。
+     * $options['spacing'] 会被读取但当前未参与布局。
      *
      * @param array $imagePaths 图片路径数组
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取、蒙版绘制或合成失败时抛出
      */
     private function createCircleCollage(array $imagePaths, array $options): void
     {
@@ -3775,12 +3820,16 @@ class ImagickTool
     }
 
     /**
-     * 创建螺旋拼图
+     * 将图片沿阿基米德螺旋线排布
+     *
+     * 随序号推进，角度累计约 4 圈、半径由 0 增长到画布短边的 0.8 倍，图片
+     * 边长从 50px 线性增至 150px，形成由内向外逐渐放大的螺旋构图。
+     * $options['spacing'] 会被读取但当前未参与布局。
      *
      * @param array $imagePaths 图片路径数组
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取或合成失败时抛出
      */
     private function createSpiralCollage(array $imagePaths, array $options): void
     {
@@ -3808,22 +3857,29 @@ class ImagickTool
     }
 
     /**
-     * 创建对角线拼图
+     * 将图片沿画布对角线排布
+     *
+     * 第 i 张图按 i/(n-1) 的进度放置在从左上到右下的对角线上，图片边长为
+     * 画布短边除以 (n+1)。注意 n 为 1 时进度计算会出现除零错误。
+     * $options['spacing'] 会被读取但当前未参与布局。
      *
      * @param array $imagePaths 图片路径数组
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取或合成失败时抛出
      */
     private function createDiagonalCollage(array $imagePaths, array $options): void
     {
         $spacing = $options['spacing'] ?? 10;
         $width = $this->imagick->getImageWidth();
         $height = $this->imagick->getImageHeight();
-        $imageSize = min($width, $height) / (count($imagePaths) + 1);
+        $imageCount = count($imagePaths);
+        $imageSize = min($width, $height) / ($imageCount + 1);
+        // 仅一张图时分母为 0 会触发 DivisionByZeroError，兜底为 1
+        $denominator = max(1, $imageCount - 1);
 
         foreach ($imagePaths as $index => $path) {
-            $progress = $index / (count($imagePaths) - 1);
+            $progress = $index / $denominator;
             $x = $progress * ($width - $imageSize);
             $y = $progress * ($height - $imageSize);
 
@@ -3836,12 +3892,15 @@ class ImagickTool
     }
 
     /**
-     * 创建水平拼图
+     * 将图片水平等分排布在同一行
+     *
+     * 画布宽度扣除 spacing 间隔后按图片数均分，每张图等比缩略到该宽度并
+     * 顶对齐依次向右合成，超出画布高度的部分不裁剪。
      *
      * @param array $imagePaths 图片路径数组
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing（默认 10）
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取或合成失败时抛出
      */
     private function createHorizontalCollage(array $imagePaths, array $options): void
     {
@@ -3864,12 +3923,15 @@ class ImagickTool
     }
 
     /**
-     * 创建垂直拼图
+     * 将图片垂直等分排布在同一列
+     *
+     * 画布高度扣除 spacing 间隔后按图片数均分，每张图等比缩略到该高度并
+     * 左对齐依次向下合成，超出画布宽度的部分不裁剪。
      *
      * @param array $imagePaths 图片路径数组
-     * @param array $options 选项参数
+     * @param array $options 选项参数，支持 spacing（默认 10）
      * @return void
-     * @throws ImagickException
+     * @throws ImagickException 图片读取或合成失败时抛出
      */
     private function createVerticalCollage(array $imagePaths, array $options): void
     {
@@ -3892,9 +3954,13 @@ class ImagickTool
     }
 
     /**
-     * 应用圆角效果
+     * 为图像应用圆角（通过透明度蒙版）
      *
-     * @param Imagick $image 图像对象
+     * 生成与图像同尺寸的白色圆角矩形蒙版，以 COMPOSITE_COPYOPACITY 写入
+     * 图像 alpha 通道，使四角变透明。该效果依赖 alpha，输出为 JPEG
+     * 等不支持透明的格式时圆角会被填成背景色。异常会被忽略。
+     *
+     * @param Imagick $image 图像对象，会被就地修改
      * @param int $radius 圆角半径
      * @return void
      */
@@ -3924,9 +3990,12 @@ class ImagickTool
     }
 
     /**
-     * 应用边框效果
+     * 为图像描边加边框
      *
-     * @param Imagick $image 图像对象
+     * 以 borderImage 在四周各扩 $width 像素的边框（图像整体尺寸随之增大），
+     * 颜色经 createImagickPixel() 标准化，非法颜色会回退白色。异常会被忽略。
+     *
+     * @param Imagick $image 图像对象，会被就地修改
      * @param int $width 边框宽度
      * @param string $color 边框颜色
      * @return void
@@ -3946,7 +4015,10 @@ class ImagickTool
     // ==========================================
 
     /**
-     * 清理资源
+     * 释放临时图像资源
+     *
+     * 遍历 tempResources 逐个 clear() 并清空列表，同时把 resourceLoaded 置为
+     * false；主图像对象本身不会被清空。清理过程中的异常会被忽略。
      *
      * @return void
      */
@@ -3969,10 +4041,14 @@ class ImagickTool
     }
 
     /**
-     * 获取图像信息
+     * 获取当前图像的综合信息
      *
-     * @return array 图像信息数组
-     * @throws ImagickException 当获取信息失败时抛出异常
+     * 返回尺寸、格式、MIME、文件体积、色彩空间、压缩方式、分辨率、是否含
+     * alpha 通道、位深与帧数。调用前会校验资源是否已加载，失败统一包装为
+     * ImagickException 抛出。
+     *
+     * @return array 图像信息数组，含 width/height/format/mime_type/file_size/colorspace/compression/resolution/has_alpha/depth/number_images
+     * @throws ImagickException 资源未加载或获取信息失败时抛出异常
      */
     public function getImageInfo(): array
     {
@@ -4001,10 +4077,12 @@ class ImagickTool
     }
 
     /**
-     * 获取图像宽度
+     * 获取当前图像宽度
+     *
+     * 调用前会校验图像资源是否已加载。
      *
      * @return int 图像宽度（像素）
-     * @throws ImagickException
+     * @throws ImagickException 资源未加载时抛出异常
      */
     public function getWidth(): int
     {
@@ -4013,10 +4091,12 @@ class ImagickTool
     }
 
     /**
-     * 获取图像高度
+     * 获取当前图像高度
+     *
+     * 调用前会校验图像资源是否已加载。
      *
      * @return int 图像高度（像素）
-     * @throws ImagickException
+     * @throws ImagickException 资源未加载时抛出异常
      */
     public function getHeight(): int
     {
@@ -4025,10 +4105,12 @@ class ImagickTool
     }
 
     /**
-     * 获取图像格式
+     * 获取当前图像格式
+     *
+     * 返回 Imagick 识别的格式名（如 PNG、JPEG），调用前会校验资源是否已加载。
      *
      * @return string 图像格式
-     * @throws ImagickException
+     * @throws ImagickException 资源未加载时抛出异常
      */
     public function getFormat(): string
     {
@@ -4037,11 +4119,14 @@ class ImagickTool
     }
 
     /**
-     * 设置图像格式
+     * 设置图像输出格式
      *
-     * @param string $format 图像格式
-     * @return self
-     * @throws ImagickException
+     * 仅修改当前图像的格式标记，实际编码在写出时发生；格式名由 Imagick 解析，
+     * 不支持的值会由底层抛错。调用前会校验资源是否已加载。
+     *
+     * @param string $format 图像格式（如 PNG、JPEG、WEBP）
+     * @return self 返回当前对象实例，支持链式调用
+     * @throws ImagickException 资源未加载或格式不受支持时抛出异常
      */
     public function setFormat(string $format): self
     {
@@ -4052,6 +4137,9 @@ class ImagickTool
 
     /**
      * 重置图像状态
+     *
+     * 清理临时资源、清空底层 Imagick 对象并把加载标志置为 false，使实例可
+     * 复用打开新图；不会销毁实例本身。
      *
      * @return self 返回当前对象实例，支持链式调用
      */

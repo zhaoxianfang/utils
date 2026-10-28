@@ -112,14 +112,18 @@ class AdvancedFeatures
     /**
      * 添加文字水印
      *
+     * 使用 GD 的 TTF 接口把文字直接绘制到给定图像上，位置由 $position 决定，
+     * 四周自动留出容器尺寸 2% 的边距。字体文件不存在时不做任何绘制、原样
+     * 返回传入的图像；颜色字符串支持 Color::fromHex() 认可的十六进制格式。
+     *
      * @param GdImage $qrImage 二维码图像
      * @param string $text 水印文字
-     * @param string $fontPath 字体路径
-     * @param int $fontSize 字体大小
-     * @param string $color 颜色（十六进制）
-     * @param string $position 位置
-     * @param int $angle 旋转角度
-     * @return GdImage 添加文字水印后的图像
+     * @param string $fontPath 字体路径（需为 GD 可读取的 TTF/OTF 文件）
+     * @param int $fontSize 字体大小（磅值）
+     * @param string $color 颜色（十六进制，如 #000000）
+     * @param string $position 水印位置，支持 top-left/top-right/bottom-left/bottom-right/center
+     * @param int $angle 旋转角度（度，逆时针为正）
+     * @return GdImage 添加文字水印后的图像（与传入的是同一资源）
      */
     public static function addTextWatermark(
         GdImage $qrImage,
@@ -310,11 +314,16 @@ class AdvancedFeatures
     /**
      * 添加边框效果
      *
+     * 在图像最外沿绘制矩形描边：$borderRadius 为 0 时用一条指定粗细的
+     * 矩形框；大于 0 时改为逐层内缩、每层 1 像素的 $thickness 层描边
+     * （当前实现只做内缩，并不绘制圆角）。描边采用叠加绘制，会覆盖边缘
+     * 原有像素。
+     *
      * @param GdImage $image 图像
-     * @param string $color 边框颜色
-     * @param int $thickness 边框厚度
-     * @param int $borderRadius 圆角半径
-     * @return GdImage 添加边框后的图像
+     * @param string $color 边框颜色（十六进制，如 #000000）
+     * @param int $thickness 边框厚度（像素）
+     * @param int $borderRadius 圆角半径，0 表示直角边框；大于 0 仅切换描边方式
+     * @return GdImage 添加边框后的图像（与传入的是同一资源）
      */
     public static function addBorder(GdImage $image, string $color = '#000000', int $thickness = 2, int $borderRadius = 0): GdImage
     {
@@ -343,10 +352,14 @@ class AdvancedFeatures
     }
 
     /**
-     * 加载图片
+     * 按扩展名加载图片
+     *
+     * 仅根据路径后缀（jpeg/jpg、png、gif、webp，大小写不敏感）选择对应的
+     * GD 解码函数，不校验文件内容；后缀不在支持范围内时直接返回 false。
+     * 文件存在但内容损坏时，由对应 imagecreatefrom* 返回 false。
      *
      * @param string $path 图片路径
-     * @return GdImage|false
+     * @return GdImage|false 解码成功返回图像资源，格式不支持或解码失败返回 false
      */
     private static function loadImage(string $path)
     {
@@ -364,8 +377,13 @@ class AdvancedFeatures
     /**
      * 应用图像透明度
      *
+     * 逐像素读取 GD 的 alpha 通道（0 完全不透明 ~ 127 完全透明），按
+     * $opacity 比例把原 alpha 向 127 推进后再写回，因此 $opacity 越小
+     * 图像越透明，等于 100 时 alpha 保持不变。处理前会开启 alpha
+     * 混合与保存，适用于真彩色图像；逐像素遍历，大图开销较高。
+     *
      * @param GdImage $image 图像
-     * @param int $opacity 透明度（0-100）
+     * @param int $opacity 不透明度百分比，0 表示全透明、100 表示保持原样
      */
     private static function applyImageOpacity(GdImage $image, int $opacity): void
     {
@@ -384,13 +402,18 @@ class AdvancedFeatures
     }
 
     /**
-     * 计算位置坐标
+     * 计算水印在容器中的落点坐标
      *
-     * @param int $containerSize 容器尺寸
-     * @param int $itemSize 项目尺寸
-     * @param string $position 位置
-     * @param string $axis 轴（x或y）
-     * @return int 坐标
+     * 先取容器尺寸 2% 作为内边距，再按 $position 返回对应的起点：
+     * left 系列贴左边距，right 系列贴右并用容器尺寸减去项目尺寸，
+     * center 居中，无法识别的位置按左上角处理。实现中 $axis 仅用于
+     * 语义区分，返回值与之无关。
+     *
+     * @param int $containerSize 容器尺寸（对应轴上的总长度）
+     * @param int $itemSize 项目尺寸（水印自身的宽度或高度）
+     * @param string $position 位置标识，支持 top-left/top-right/bottom-left/bottom-right/center
+     * @param string $axis 轴标识（'x' 或 'y'），仅作语义说明
+     * @return int 该轴上的起始坐标（像素）
      */
     private static function calculatePosition(int $containerSize, int $itemSize, string $position, string $axis): int
     {

@@ -43,6 +43,11 @@ class TimeZone
      *
      * 按「实际调用类」分别缓存：旧实现用 self::$instance 单例，
      * 子类继承后首次由父类创建会把父类实例误当作子类返回（static 返回类型 → TypeError）。
+     *
+     * 同一进程内每个调用类只创建一个实例，配置（如 addTimeZoneDifferences()
+     * 添加的差值）在该类的实例间共享。
+     *
+     * @return static 当前调用类对应的单例实例
      */
     public static function instance(): static
     {
@@ -72,6 +77,7 @@ class TimeZone
      * @param  string  $fromTimeZone  $datetime的时区 eg: 'Asia/Shanghai'
      * @param  string  $toTimeZone  目标时区 eg: 'America/New_York'
      * @param  string  $format  返回时间格式 eg: 'Y-m-d H:i:s'
+     * @return string|array 单个时间返回格式化字符串；数组入参返回「键名 => 格式化字符串」的数组
      *
      * @throws Exception
      */
@@ -94,8 +100,15 @@ class TimeZone
     /**
      * 计算 $fromTimeZone 时区的 $datetime 时间在 $toTimeZone 时区的当地时间的 时间戳
      *
+     * 时间戳是绝对时刻，两种时区之间转换不会改变其值：本方法主要用于把
+     * 「源时区的本地时间字符串」按其字面值解析成对应时间戳，再换算出目标时区视角。
+     * 传入数组时逐项递归处理并保留原键名。
+     *
      * @param  string|int|array  $datetime  $fromTimeZone时区 时间字符串或者时间戳,默认为当前时间now; 支持使用数组方式同时处理多个时间
      *                                      eg: '2024-04-08 12:00:00'、'1712632337'、['2024-04-08 12:00:00','1712632337']
+     * @param  string  $fromTimeZone  $datetime 所属时区 eg: 'Asia/Shanghai'
+     * @param  string  $toTimeZone  目标时区 eg: 'America/New_York'
+     * @return int|array 单个时间返回 Unix 时间戳；数组入参返回「键名 => 时间戳」的数组
      *
      * @throws Exception
      */
@@ -118,8 +131,17 @@ class TimeZone
     /**
      * 计算 $fromTimeZone 时区的 $datetime 时间在 $toTimeZone 时区的当地时间
      *
+     * 空值（null、空串、0 等）按 "now" 处理；数值型入参被视为 Unix 时间戳，
+     * 以 UTC 纪元构造后直接切换时区（与 PHP 默认时区无关）；字符串则按
+     * 「源时区」解析其字面时间。最终统一转为目标时区返回，期间由 PHP 时区
+     * 数据库处理夏令时（DST）偏移。
      *
-     * @throws Exception
+     * @param string|int $datetime     源时区下的时间字符串或时间戳
+     * @param string     $fromTimeZone 源时区标识，如 'Asia/Shanghai'
+     * @param string     $toTimeZone   目标时区标识，如 'America/New_York'
+     * @return DateTime 已切换到目标时区的 DateTime 对象
+     *
+     * @throws Exception 时间字符串无法解析或时区标识非法时抛出
      */
     private function convertToTimeZoneDateTime(string|int $datetime, string $fromTimeZone, string $toTimeZone): DateTime
     {
@@ -173,9 +195,14 @@ class TimeZone
     /**
      * 获取两个时区的时差(小时)
      *
+     * 分别取得两时区相对 UTC 的偏移后相减：优先查内建对照表（表中为「标准时」
+     * 偏移，不含夏令时），表中没有的时区则按当前时刻实时计算 UTC 偏移。
+     * $useAbs 为 true 时返回绝对值，因此无法区分 A 比 B 早还是晚。
+     *
      * @param  string  $timeZoneA  eg: 'Asia/Shanghai'
      * @param  string  $timeZoneB  eg: 'America/New_York'
      * @param  bool  $useAbs  是否使用绝对值计算
+     * @return float|int 两时区相差的小时数；$useAbs 为 true 时恒为非负
      *
      * @throws Exception
      */
@@ -189,7 +216,11 @@ class TimeZone
     /**
      * 设置默认时区
      *
+     * 直接修改 PHP 进程级默认时区，影响所有依赖默认时区的时间函数；
+     * 不预先校验时区名，非法标识由 date_default_timezone_set() 产生 Notice 并返回 false。
+     *
      * @param  string  $timeZone  时区 eg: 'Asia/Shanghai'
+     * @return bool 设置成功返回 true，时区标识非法返回 false
      */
     public static function setTimeZone(string $timeZone = 'PRC'): bool
     {
@@ -200,8 +231,13 @@ class TimeZone
     /**
      * 格式化时间
      *
+     * 入参为 DateTimeInterface（含 DateTimeImmutable）时按其自带时区格式化，
+     * 时间戳按 PHP 默认时区解释，字符串按 PHP 默认时区解析；null 或空串取当前时间。
+     * 数组入参逐项递归处理并保留原键名，元素可为上述任意类型。
+     *
      * @param  string|int|DateTime|array  $datetime  时间字符串或者时间戳,默认为当前时间now; 支持使用数组方式同时处理多个时间 eg: '2024-04-08 12:00:00'
      * @param  string  $format  返回时间格式 eg: 'Y-m-d H:i:s'
+     * @return string|array 单个时间返回格式化字符串；数组入参返回「键名 => 格式化字符串」的数组
      *
      * @throws Exception
      */
@@ -218,7 +254,10 @@ class TimeZone
         if ($datetime instanceof DateTimeInterface) {
             // 修复：旧实现仅接受 DateTime，传 DateTimeImmutable 会因对象无法转字符串而抛
             // "Object of class DateTimeImmutable could not be converted to string"
-            $dateTimeObj = DateTime::createFromInterface($datetime);
+            // 兼容 PHP 8.2：createFromInterface 自 8.3 才提供，改用 setTimestamp + setTimezone 复刻同一时刻与时区
+            $dateTimeObj = (new DateTime())
+                ->setTimestamp($datetime->getTimestamp())
+                ->setTimezone($datetime->getTimezone());
         } else {
             if ($datetime === null || $datetime === '') {
                 // 默认为当前时间

@@ -9,12 +9,20 @@ use RuntimeException;
 
 /**
  * 安全 Base64 编解码类
- * 提供标准 Base64、URL 安全 Base64（RFC 4648）、无填充 Base64 的编解码功能
- * 支持文件 Base64 转换和 Data URI 处理
  *
- * @package Crypto
+ * 提供标准 Base64、URL 安全 Base64（RFC 4648）、无填充 Base64 的编解码，
+ * 并支持大文件分块编解码、Data URI 封装与解析、长度估算等。
+ * URL 安全变体将 "+"/"_" 替换为 "-"/"_"，常用于 JWT、令牌等不允许出现
+ * 特殊字符的场景。
+ *
+ * @package zxf\Utils\Crypto
  * @version 1.0.0
- * @license MIT
+ * @license  MIT
+ *
+ * @example
+ * // 对二进制数据进行 URL 安全编码（不含填充符，适合放入 URL / 令牌）
+ * $encoded = \zxf\Utils\Crypto\Base64::urlSafeEncode('your-secret-key');
+ * $decoded = \zxf\Utils\Crypto\Base64::urlSafeDecode($encoded);
  */
 class Base64
 {

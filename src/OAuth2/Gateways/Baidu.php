@@ -24,6 +24,13 @@ class Baidu extends Gateway
     protected $AccessTokenURL = 'https://openapi.baidu.com/oauth/2.0/token';
     protected $UserInfoURL = 'https://openapi.baidu.com/rest/2.0/passport/users/getLoggedInUser';
 
+    /**
+     * 构造方法
+     *
+     * 透传配置给父类 Gateway 完成初始化。
+     *
+     * @param array $config 网关配置（含 app_id、app_secret、callback、scope 等）
+     */
     public function __construct($config)
     {
         parent::__construct($config);

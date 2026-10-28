@@ -15,9 +15,16 @@ use RuntimeException;
  *
  * 注意：值按「单行」解析，不支持跨行的引号值；行内注释（VALUE # comment）不会被剥离。
  *
- * @package Env
+ * @package zxf\Utils\Env
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * // 加载 .env 文件并读取环境变量（自动按类型转换）
+ * Env::load(__DIR__ . '/.env');
+ * $dbHost = Env::get('DB_HOST', '127.0.0.1'); // 默认值兜底
+ * $debug  = Env::bool('APP_DEBUG', false);    // 布尔类型转换
+ * $ports  = Env::array('ALLOWED_PORTS', []);  // 逗号分隔转数组
  */
 class Env
 {
@@ -308,6 +315,12 @@ class Env
      *
      * 旧实现用 `json_decode(...) ?? $value`：合法的 JSON "null" / "false"
      * 也会被当成失败回退成字符串，这里改用异常区分。
+     *
+     * 采用严格模式（JSON_THROW_ON_ERROR），语法错误时回退为原字符串；
+     * 而 "null"、"false"、"0" 等合法字面量会正常得到 null、false、0。
+     *
+     * @param string $value 待解码的 JSON 字符串
+     * @return mixed 解码结果；不是合法 JSON 时原样返回入参字符串
      */
     private static function decodeJson(string $value): mixed
     {

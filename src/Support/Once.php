@@ -34,10 +34,21 @@ final class Once
 
     private mixed $value = null;
 
+    /**
+     * 私有构造函数，封装待执行的回调
+     *
+     * @param Closure $callback 只执行一次的回调
+     */
     private function __construct(private Closure $callback)
     {
     }
 
+    /**
+     * 创建一次性执行封装实例
+     *
+     * @param Closure $callback 待封装的回调
+     * @return static
+     */
     public static function make(Closure $callback): self
     {
         return new self($callback);
@@ -62,6 +73,8 @@ final class Once
 
     /**
      * 获取缓存值；尚未执行则返回 null（不会触发执行）
+     *
+     * @return mixed 首次执行后缓存的返回值，未执行时为 null
      */
     public function value(): mixed
     {
@@ -79,6 +92,10 @@ final class Once
 
     /**
      * 是否已执行
+     *
+     * 执行状态在首次 __invoke() 后置为 true，reset() 后重新变为 false。
+     *
+     * @return bool 已执行过返回 true，否则返回 false
      */
     public function executed(): bool
     {

@@ -189,7 +189,10 @@ class RSA
     }
 
     /**
-     * 记录调试信息
+     * 记录一条 RSA 调试日志
+     *
+     * 仅在调试模式开启时输出，否则静默丢弃。日志附带毫秒级时间戳与当前进程
+     * 内存占用（MB），便于排查密钥加载与加解密流程；不参与任何业务判断。
      *
      * @param string $message 调试消息
      * @return void
@@ -438,11 +441,14 @@ class RSA
     }
 
     /**
-     * 加载公钥
+     * 加载 PEM/DER 格式公钥
      *
-     * @param string $publicKey 公钥字符串
+     * 交由 OpenSSL 解析公钥字符串并缓存句柄，随后用 updateActualKeySize()
+     * 校准实例的密钥位数。解析失败时抛出异常，句柄保持不变。
+     *
+     * @param string $publicKey 公钥字符串，支持 PEM 及 OpenSSL 可识别的格式
      * @return void
-     * @throws RuntimeException 当公钥加载失败时抛出
+     * @throws RuntimeException 公钥无法加载或密钥位数不可获取时抛出
      * @access private
      */
     private function loadPublicKey(string $publicKey): void
@@ -487,10 +493,14 @@ class RSA
     }
 
     /**
-     * 从私钥导出公钥
+     * 从私钥导出一致的公钥句柄
+     *
+     * 通过 openssl_pkey_get_details() 取私钥对应的 PEM 公钥并重新解析，
+     * 使 publicKey 与 privateKey 严格配对。私钥缺失或详情不含 key 字段时
+     * 抛出异常。构造流程中加载私钥后会自动调用。
      *
      * @return void
-     * @throws RuntimeException 当公钥导出失败时抛出
+     * @throws RuntimeException 私钥不可用、密钥详情获取失败或公钥解析失败时抛出
      * @access private
      */
     private function derivePublicKey(): void
@@ -585,12 +595,15 @@ class RSA
     }
 
     /**
-     * 单块加密
+     * 单块加密（Base64 输出）
      *
-     * @param string $data 原始数据
-     * @param int $padding 填充方式
-     * @return string 加密结果
-     * @throws RuntimeException 当加密失败时抛出
+     * 使用公钥对不超过 getMaxEncryptBlockSize() 的数据执行一次 RSA 加密，
+     * 结果编码为 Base64 便于文本传输；OpenSSL 返回失败时抛出异常。
+     *
+     * @param string $data 原始数据，长度不得超过当前填充方式允许的单块上限
+     * @param int $padding 填充方式（OPENSSL_PKCS1_PADDING / OPENSSL_PKCS1_OAEP_PADDING）
+     * @return string Base64 编码的密文
+     * @throws RuntimeException 加密失败时抛出
      * @access private
      */
     private function encryptSingleBlock(string $data, int $padding): string
@@ -630,10 +643,14 @@ class RSA
     /**
      * 分块加密数据
      *
+     * 按 calculateOptimalChunkSize() 计算的单块上限切分明文，逐块 RSA 加密
+     * 后各自 Base64，再以 `::RSA_CHUNK::` 连接并整体 Base64 一次，得到单个
+     * 可传输字符串。任一块失败即抛出异常（含块序号）。
+     *
      * @param string $data 原始数据
-     * @param int $padding 填充方式
-     * @return string 加密结果
-     * @throws RuntimeException 当加密失败时抛出
+     * @param int $padding 填充方式（OPENSSL_PKCS1_PADDING / OPENSSL_PKCS1_OAEP_PADDING）
+     * @return string 整体 Base64 编码的分块密文
+     * @throws RuntimeException 任一块加密失败时抛出
      * @access private
      */
     private function encryptChunked(string $data, int $padding): string
@@ -709,10 +726,13 @@ class RSA
     /**
      * 单块解密
      *
-     * @param string $data 加密数据
-     * @param int $padding 填充方式
-     * @return string 解密结果
-     * @throws RuntimeException 当解密失败时抛出
+     * 使用私钥对单块密文（二进制）执行 openssl_private_decrypt，返回还原后的
+     * 明文。密文长度必须等于密钥模长，否则 OpenSSL 会失败并抛出异常。
+     *
+     * @param string $data 二进制密文，长度为密钥字节长度
+     * @param int $padding 填充方式，须与加密时一致
+     * @return string 解密后的原始数据
+     * @throws RuntimeException 解密失败时抛出
      * @access private
      */
     private function decryptSingleBlock(string $data, int $padding): string
@@ -752,10 +772,13 @@ class RSA
     /**
      * 分块解密数据
      *
-     * @param string $data 加密数据
-     * @param int $padding 填充方式
-     * @return string 解密结果
-     * @throws RuntimeException 当解密失败时抛出
+     * 按 `::RSA_CHUNK::` 拆分块串，逐块 Base64 解码后用私钥解密，再按原顺序
+     * 拼接明文。任一块解码或解密失败即抛出异常（含块序号）。
+     *
+     * @param string $data 已整体 Base64 解码的块串（块间以 `::RSA_CHUNK::` 分隔）
+     * @param int $padding 填充方式，须与加密时一致
+     * @return string 拼接后的原始明文
+     * @throws RuntimeException 块 Base64 解码或解密失败时抛出
      * @access private
      */
     private function decryptChunked(string $data, int $padding): string
@@ -926,9 +949,12 @@ class RSA
     }
 
     /**
-     * 生成AES密钥
+     * 生成随机的 AES-256 会话密钥
      *
-     * @return string AES密钥
+     * 使用 random_bytes 取 32 字节密码学安全随机数，供混合加密中加密文件
+     * 正文，之后再用 RSA 公钥封装该密钥。
+     *
+     * @return string 32 字节二进制密钥
      * @access private
      */
     private function generateAESKey(): string
@@ -937,9 +963,12 @@ class RSA
     }
 
     /**
-     * 生成AES IV
+     * 生成随机的 AES 初始化向量
      *
-     * @return string AES IV
+     * 使用 random_bytes 取 16 字节（AES 块大小）密码学安全随机数，与
+     * generateAESKey() 的会话密钥配套使用，须随密文一并保存。
+     *
+     * @return string 16 字节二进制 IV
      * @access private
      */
     private function generateAESIV(): string
@@ -948,10 +977,14 @@ class RSA
     }
 
     /**
-     * 安全删除文件
+     * 覆盖并删除文件
      *
-     * @param string $filePath 文件路径
-     * @return bool 是否成功
+     * 先用随机数据整体覆写 3 次并刷新到磁盘，再 unlink，尽量降低残留风险。
+     * 文件不存在视为已删除并返回 true；文件为空则跳过覆写直接删除。
+     * 注意：SSD、写时复制文件系统或日志型文件系统上覆写不保证物理擦除。
+     *
+     * @param string $filePath 待删除的文件路径
+     * @return bool unlink 是否成功；文件本不存在时为 true
      * @access private
      */
     private function secureDelete(string $filePath): bool
@@ -1086,12 +1119,16 @@ class RSA
     }
 
     /**
-     * 创建文件头
+     * 创建 RSA 加密文件头
      *
-     * @param array $fileInfo 文件信息
-     * @param bool $compressed 是否压缩
-     * @param bool $integrityCheck 是否完整性检查
-     * @return string 文件头数据
+     * 依次写入格式版本、密钥位数、哈希算法名、时间戳、原始大小、压缩与完整性
+     * 标志、12 字节随机填充，末尾追加前序内容的 CRC32 校验值，供 readFileHeader()
+     * 读取时做版本与完整性校验。
+     *
+     * @param array $fileInfo 文件信息，需包含 size 键（原始字节数）
+     * @param bool $compressed 正文是否经过压缩
+     * @param bool $integrityCheck 是否附加完整性校验数据
+     * @return string 二进制文件头
      * @access private
      */
     private function createFileHeader(array $fileInfo, bool $compressed, bool $integrityCheck): string
@@ -1112,10 +1149,15 @@ class RSA
     }
 
     /**
-     * 读取文件头
+     * 读取并校验 RSA 加密文件头
      *
-     * @param resource $handle 文件句柄
-     * @return array 头部信息
+     * 按固定格式逐字段读取，每段都校验实际字节数（截断文件会抛出可读异常），
+     * 并核对格式版本、哈希算法名长度（1-32）与头部 CRC32。校验通过后返回
+     * 各字段组成的关联数组，句柄停在正文起始位置。
+     *
+     * @param resource $handle 文件句柄，定位在文件头起始处
+     * @return array{version:string,key_size:int,hash_algorithm:string,timestamp:int,original_size:int,compressed:bool,integrity_check:bool,padding:string} 文件头字段
+     * @throws RuntimeException 数据截断、版本不支持、字段非法或 CRC 校验失败时抛出
      * @access private
      */
     private function readFileHeader($handle): array
@@ -1171,10 +1213,14 @@ class RSA
     }
 
     /**
-     * 验证文件头
+     * 校验已解析的文件头与当前实例是否匹配
      *
-     * @param array $header 头部信息
+     * 版本不一致直接抛异常；密钥位数不一致只记录调试日志并继续（仍尝试
+     * 用现有密钥解密），因此调用方不应依赖该检查拦截不匹配的密钥。
+     *
+     * @param array $header readFileHeader() 返回的文件头信息
      * @return void
+     * @throws RuntimeException 文件格式版本与当前实现不一致时抛出
      * @access private
      */
     private function validateFileHeader(array $header): void
@@ -1189,10 +1235,14 @@ class RSA
     }
 
     /**
-     * 获取文件信息
+     * 汇总文件的基础元信息
      *
-     * @param string $filePath 文件路径
-     * @return array 文件信息
+     * 返回文件大小、修改时间、CRC32 与 SHA-256 摘要，用于写入文件头或做
+     * 后续一致性比对。stat 失败或文件不可读时抛出异常。
+     *
+     * @param string $filePath 待读取的文件路径
+     * @return array{size:int,mtime:string,crc32:int,sha256:string} 文件大小、格式化修改时间、CRC32 与 SHA-256
+     * @throws RuntimeException 无法获取文件状态或读取内容时抛出
      * @access private
      */
     private function getFileInfo(string $filePath): array
@@ -1950,6 +2000,9 @@ class RSA
     /**
      * 重置性能统计
      *
+     * 将加/解密与签名/验签次数、累计数据量清零，并以当前时刻作为新的统计
+     * 起点；重置后 getPerformanceStats() 的耗时与吞吐指标重新累计。
+     *
      * @return void
      */
     public function resetPerformanceStats(): void
@@ -2046,11 +2099,15 @@ class RSA
     }
 
     /**
-     * 生成自签名证书
+     * 用当前私钥签发自签名 X.509 证书
      *
-     * @param array $dn 主题信息
-     * @param int $days 有效期（天）
-     * @return string 证书字符串
+     * 未提供的主题字段使用内置默认值（CN/State/City/Organization 等），
+     * 摘要算法取实例的 hashAlg。生成的证书不含 CA 链，仅适合测试与内网场景。
+     * 注意：本方法未检查 openssl_csr_new/openssl_csr_sign 的返回值是否为 false。
+     *
+     * @param array $dn 主题信息（countryName、commonName、emailAddress 等），可部分覆盖默认值
+     * @param int $days 证书有效期（天）
+     * @return string PEM 格式的证书字符串
      */
     private function generateSelfSignedCertificate(array $dn = [], int $days = 365): string
     {
@@ -2313,9 +2370,12 @@ class RSA
     }
 
     /**
-     * 获取性能评级
+     * 获取当前密钥位数的性能评级
      *
-     * @return string 性能评级
+     * 2048 位返回「高性能」、3072 位「平衡」、4096 位「高安全」、8192 位
+     * 「极高安全」，其余位数返回「未知」。评级仅用于展示，不参与安全判定。
+     *
+     * @return string 性能评级文案
      * @access private
      */
     private function getPerformanceRating(): string

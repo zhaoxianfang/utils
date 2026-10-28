@@ -29,6 +29,12 @@ final class MaskUtil
      *
      * Finds repetitive cells with the same color and gives penalty to them.
      * Example: 00000 or 11111.
+     *
+     * 按行与按列各统计一次并求和：连续同色达到 5 个即罚 N1 分，之后每多
+     * 一个再罚 1 分。
+     *
+     * @param ByteMatrix $matrix 待评估的矩阵
+     * @return int 规则 1 的罚分（水平与垂直方向之和）
      */
     public static function applyMaskPenaltyRule1(ByteMatrix $matrix) : int
     {
@@ -45,6 +51,12 @@ final class MaskUtil
      * actually equivalent to the spec's rule, which is to find MxN blocks and
      * give a penalty proportional to (M-1)x(N-1), because this is the number of
      * 2x2 blocks inside such a block.
+     *
+     * 逐格判断右下相邻的 2×2 是否四色相同，每命中一块罚 N2 分；
+     * 统计时限定在 height-1 / width-1 范围内以避免越界。
+     *
+     * @param ByteMatrix $matrix 待评估的矩阵
+     * @return int 规则 2 的罚分
      */
     public static function applyMaskPenaltyRule2(ByteMatrix $matrix) : int
     {
@@ -75,6 +87,12 @@ final class MaskUtil
      * Finds consecutive cells of 00001011101 or 10111010000, and gives penalty
      * to them. If we find patterns like 000010111010000, we give penalties
      * twice (i.e. 40 * 2).
+     *
+     * 水平与垂直方向分别扫描 1:1:3:1:1 的类定位图案，要求一侧紧邻 4 个
+     * 浅色模块，每命中一次罚 N3 分；两侧同时满足时会计两次。
+     *
+     * @param ByteMatrix $matrix 待评估的矩阵
+     * @return int 规则 3 的罚分
      */
     public static function applyMaskPenaltyRule3(ByteMatrix $matrix) : int
     {
@@ -151,6 +169,11 @@ final class MaskUtil
      *
      * Calculates the ratio of dark cells and gives penalty if the ratio is far
      * from 50%. It gives 10 penalty for 5% distance.
+     *
+     * 统计黑格占比与 50% 的偏差，按每偏离 5% 罚 N4 分向下取整计算。
+     *
+     * @param ByteMatrix $matrix 待评估的矩阵
+     * @return int 规则 4 的罚分
      */
     public static function applyMaskPenaltyRule4(ByteMatrix $matrix) : int
     {
@@ -182,6 +205,13 @@ final class MaskUtil
      *
      * See 8.8 of JISX0510:2004 for mask pattern conditions.
      *
+     * 按掩码编号对应的公式计算该坐标是否需要异或（即是否为“掩码位”），
+     * 返回 true 表示该模块应取反。编号仅支持 0~7。
+     *
+     * @param int $maskPattern 掩码编号，取值 0~7
+     * @param int $x 模块横坐标（列）
+     * @param int $y 模块纵坐标（行）
+     * @return bool 该位置需要翻转（掩码位为 1）时返回 true
      * @throws InvalidArgumentException if an invalid mask pattern was supplied
      */
     public static function getDataMaskBit(int $maskPattern, int $x, int $y) : bool
@@ -234,6 +264,13 @@ final class MaskUtil
      *
      * We need this for doing this calculation in both vertical and horizontal
      * orders respectively.
+     *
+     * 沿一个方向按行（或按列）扫描，累计每行连续同色的长度，长度达到 5
+     * 即计入 N1 + (长度 - 5) 的罚分；行尾的残余段也会单独结算。
+     *
+     * @param ByteMatrix $matrix 待评估的矩阵
+     * @param bool $isHorizontal true 表示逐行扫描，false 表示逐列扫描
+     * @return int 该方向上的规则 1 罚分
      */
     private static function applyMaskPenaltyRule1Internal(ByteMatrix $matrix, bool $isHorizontal) : int
     {

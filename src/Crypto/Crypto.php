@@ -6,11 +6,25 @@ namespace zxf\Utils\Crypto;
 
 /**
  * 统一加密门面类（Crypto Facade）
- * 提供静态快捷方法，统一访问所有加密功能，无需手动实例化具体加密类
  *
- * @package Crypto
+ * 提供静态快捷方法，统一访问所有加密功能（AES、RSA、ECC、Hash、Base64、
+ * Password、JWT、Random），无需手动实例化具体加密类。各快捷方法均委托给
+ * 对应实现类的同名方法，参数与行为保持一致。
+ *
+ * @package zxf\Utils\Crypto
  * @version 1.0.0
- * @license MIT
+ * @license  MIT
+ *
+ * @example
+ * // AES 对称加密（请勿硬编码真实密钥，以下仅为占位示例）
+ * $key = \zxf\Utils\Crypto\Random::bytes(32); // 或自行保管的 'your-secret-key'
+ * $cipher = \zxf\Utils\Crypto\Crypto::aesEncrypt('敏感数据', $key);
+ * $plain  = \zxf\Utils\Crypto\Crypto::aesDecrypt($cipher, $key);
+ *
+ * // 生成 RSA 密钥对并使用公钥加密
+ * ['private' => $priv, 'public' => $pub] = \zxf\Utils\Crypto\Crypto::rsaCreateKeyPair(2048);
+ * $cipher = \zxf\Utils\Crypto\Crypto::rsaEncrypt('hello', $pub);
+ * $plain  = \zxf\Utils\Crypto\Crypto::rsaDecrypt($cipher, $priv);
  */
 class Crypto
 {

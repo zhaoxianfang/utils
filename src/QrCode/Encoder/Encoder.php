@@ -51,6 +51,19 @@ final class Encoder
 
     /**
      * Encodes "content" with the error correction level "ecLevel".
+     *
+     * 完整执行一次编码：规范化字符集名称 → 选择模式 → 按需写入 ECI 段 →
+     * 写入模式与长度指示符 → 终止并填充比特 → 分块计算纠错码并交织 →
+     * 在 8 种掩码中挑选罚分最低者 → 生成最终矩阵。版本先按最小容量试探，
+     * 再按试探结果二次计算；指定 $forcedVersion 时只允许放大不可缩小。
+     *
+     * @param string $content 待编码的原始内容，要求为合法 UTF-8 字节序列
+     * @param ErrorCorrectionLevel $ecLevel 纠错级别（L/M/Q/H）
+     * @param string $encoding 内容的字符集名称，影响 BYTE 模式的转码与 ECI 前缀
+     * @param Version|null $forcedVersion 强制使用的版本；为 null 时按内容自动选择
+     * @param bool $prefixEci 非默认字符集时是否在数据前写入 ECI 段
+     * @return QrCode 编码结果，包含模式、级别、版本、掩码与矩阵
+     * @throws WriterException 当内容超出容量、强制版本过小或转码失败时抛出
      */
     public static function encode(
         string $content,
@@ -164,6 +177,12 @@ final class Encoder
 
     /**
      * Gets the alphanumeric code for a byte.
+     *
+     * 查 JISX0510 字母数字表，把 ASCII 字节映射为 0~44 的编码值；
+     * 表中不含该字节（控制字符、小写字母等）时返回 -1 表示不可编码。
+     *
+     * @param int $byte 待查表的字节值，取值 0~255
+     * @return int 对应的字母数字编码，不支持时返回 -1
      */
     private static function getAlphanumericCode(int $byte) : int
     {
@@ -172,6 +191,14 @@ final class Encoder
 
     /**
      * Chooses the best mode for a given content.
+     *
+     * 按优先级判定：空串固定用 BYTE；字符集为 Shift_JIS 时先尝试
+     * 双字节汉字的 KANJI 模式；纯数字用 NUMERIC；全部落在字母数字表
+     * 内用 ALPHANUMERIC；其余一律用 BYTE。单次只选一种模式，不做混合分段。
+     *
+     * @param string $content 待编码内容
+     * @param string|null $encoding 字符集名称，仅用于判定是否走 KANJI 模式
+     * @return Mode 选定的编码模式
      */
     private static function chooseMode(string $content, ?string $encoding = null) : Mode
     {
@@ -196,6 +223,12 @@ final class Encoder
 
     /**
      * Calculates the mask penalty for a matrix.
+     *
+     * 按规范的四条规则累加罚分（连续同色块、2×2 同色块、类定位图案
+     * 的 1:1:3:1:1 形态、深浅占比偏离），分值越低表示越易被识别。
+     *
+     * @param ByteMatrix $matrix 已按某个掩码生成的候选矩阵
+     * @return int 四条规则的罚分总和
      */
     private static function calculateMaskPenalty(ByteMatrix $matrix) : int
     {
@@ -209,6 +242,13 @@ final class Encoder
 
     /**
      * Checks if content only consists of double-byte kanji characters (or is empty).
+     *
+     * 先把内容转成 SHIFT-JIS，再按两字节一组检查首字节是否落在
+     * 0x81~0x9F 或 0xE0~0xEB 区间；奇数长度、转码失败或出现区间外
+     * 首字节均判定为不满足。
+     *
+     * @param string $content 待判断的内容（UTF-8）
+     * @return bool 全部为双字节日文汉字（或空串）时返回 true
      */
     private static function isOnlyDoubleByteKanji(string $content) : bool
     {
@@ -237,6 +277,12 @@ final class Encoder
 
     /**
      * Checks if content only consists of alphanumeric characters (or is empty).
+     *
+     * 通过 strspn 统计前缀中连续命中字母数字表字符的长度，与总长度相等
+     * 即认为整串都可编码；空串会得到 0 与 0 相等，因此返回 true。
+     *
+     * @param string $content 待判断的内容
+     * @return bool 全部字符都在字母数字表内（或为空串）时返回 true
      */
     private static function isOnlyAlphanumeric(string $content) : bool
     {
@@ -245,6 +291,16 @@ final class Encoder
 
     /**
      * Chooses the best mask pattern for a matrix.
+     *
+     * 依次试用 0~7 号掩码，把比特流铺进同一个 $matrix 缓冲区并计算罚分，
+     * 取罚分最小者。由于矩阵被反复覆盖，返回后 $matrix 中保留的是最后
+     * 一次（7 号掩码）的结果，调用方需用返回的掩码重新构建矩阵。
+     *
+     * @param BitArray $bits 已完成纠错交织的最终比特流
+     * @param ErrorCorrectionLevel $ecLevel 纠错级别，用于填充格式信息
+     * @param Version $version 二维码版本，决定矩阵尺寸与功能图案
+     * @param ByteMatrix $matrix 复用的矩阵缓冲区
+     * @return int 罚分最低的掩码编号，取值 0~7
      */
     private static function chooseMaskPattern(
         BitArray $bits,
@@ -323,6 +379,11 @@ final class Encoder
     /**
      * Terminates the bits in a bit array.
      *
+     * 先校验比特数未超容量，随后依次追加至多 4 个终止零位、补齐到字节边界，
+     * 再用 0xEC/0x11 交替填充剩余字节，使总长度精确等于数据容量。
+     *
+     * @param int $numDataBytes 该版本可用的数据码字总数（容量上限）
+     * @param BitArray $bits 待终止的比特流，会被就地修改
      * @throws WriterException if data bits cannot fit in the QR code
      * @throws WriterException if bits size does not equal the capacity
      */
@@ -360,7 +421,15 @@ final class Encoder
     /**
      * Gets number of data- and EC bytes for a block ID.
      *
-     * @return int[]
+     * 当码字总数不能被块数整除时，块被分为两组：前一组每块码字较少，
+     * 后一组每块多 1 个码字，但两组的纠错码字数必须相同。方法在返回前
+     * 会对分组自洽性做三项校验。
+     *
+     * @param int $numTotalBytes 该版本总码字数（数据 + 纠错）
+     * @param int $numDataBytes 该版本数据码字数
+     * @param int $numRsBlocks RS 块数
+     * @param int $blockId 目标块编号，从 0 开始，需小于 $numRsBlocks
+     * @return int[] 形如 [该块数据码字数, 该块纠错码字数]
      * @throws WriterException if block ID is too large
      * @throws WriterException if EC bytes mismatch
      * @throws WriterException if RS blocks mismatch
@@ -410,6 +479,15 @@ final class Encoder
     /**
      * Interleaves data with EC bytes.
      *
+     * 按块切分数据、逐块计算纠错码，然后先按列交织所有数据码字、再按列
+     * 交织所有纠错码字（短块跳过缺失位置），得到规范的最终比特流。
+     * 交织前后都会校验字节数与预期一致。
+     *
+     * @param BitArray $bits 已完成终止填充的数据比特流
+     * @param int $numTotalBytes 该版本总码字数
+     * @param int $numDataBytes 该版本数据码字数
+     * @param int $numRsBlocks RS 块数
+     * @return BitArray 交织后的最终比特流，长度等于 $numTotalBytes 字节
      * @throws WriterException if number of bits and data bytes does not match
      * @throws WriterException if data bytes does not match offset
      * @throws WriterException if an interleaving error occurs
@@ -486,8 +564,12 @@ final class Encoder
     /**
      * Generates EC bytes for given data.
      *
-     * @param  SplFixedArray<int> $dataBytes
-     * @return SplFixedArray<int>
+     * 把数据码字复制到长度为「数据 + 纠错」的缓冲区尾部保留零位，
+     * 再由对应参数的 Reed-Solomon 编码器算出纠错码字。
+     *
+     * @param SplFixedArray<int> $dataBytes 该块的数据码字
+     * @param int $numEcBytesInBlock 该块需要的纠错码字数
+     * @return SplFixedArray<int> 计算出的纠错码字，长度等于 $numEcBytesInBlock
      */
     private static function generateEcBytes(SplFixedArray $dataBytes, int $numEcBytesInBlock) : SplFixedArray
     {
@@ -507,6 +589,13 @@ final class Encoder
 
     /**
      * Gets an RS codec and caches it.
+     *
+     * 以「数据码字数-纠错码字数」为键缓存编码器，避免同一版本同级别下
+     * 重复构建伽罗华域查找表；参数固定为 8 位符号、本原多项式 0x11d。
+     *
+     * @param int $numDataBytes 每块的数据码字数
+     * @param int $numEcBytesInBlock 每块的纠错码字数（即生成多项式次数）
+     * @return ReedSolomonCodec 与该块参数匹配的编码器实例（可能来自缓存）
      */
     private static function getCodec(int $numDataBytes, int $numEcBytesInBlock) : ReedSolomonCodec
     {
@@ -528,6 +617,11 @@ final class Encoder
 
     /**
      * Appends mode information to a bit array.
+     *
+     * 把模式的 4 位指示符写入比特流，作为该数据段的起始标记。
+     *
+     * @param Mode $mode 要声明的编码模式
+     * @param BitArray $bits 目标比特流，会被就地追加
      */
     private static function appendModeInfo(Mode $mode, BitArray $bits) : void
     {
@@ -537,6 +631,13 @@ final class Encoder
     /**
      * Appends length information to a bit array.
      *
+     * 以该版本该模式对应的比特宽度写入字符计数，宽度由
+     * Mode::getCharacterCountBits() 决定；长度超出可表示范围时抛异常。
+     *
+     * @param int $numLetters 字符（或字节）数量，含义随模式变化
+     * @param Version $version 二维码版本，决定计数位宽
+     * @param Mode $mode 当前编码模式
+     * @param BitArray $bits 目标比特流，会被就地追加
      * @throws WriterException if num letters is bigger than expected
      */
     private static function appendLengthInfo(int $numLetters, Version $version, Mode $mode, BitArray $bits) : void
@@ -552,6 +653,15 @@ final class Encoder
 
     /**
      * Appends bytes to a bit array in a specific mode.
+     *
+     * 按模式分派到数字 / 字母数字 / 8 位字节 / 汉字四种写入实现，
+     * 未列入 match 的模式不会追加任何比特（静默跳过）。
+     *
+     * @param string $content 待写入的原始内容
+     * @param Mode $mode 编码模式，决定分派目标
+     * @param BitArray $bits 目标比特流，会被就地追加
+     * @param string $encoding 字符集名称，仅 BYTE 模式使用
+     * @throws WriterException 由具体分派方法抛出（非法字符、转码失败等）
      */
     private static function appendBytes(string $content, Mode $mode, BitArray $bits, string $encoding) : void
     {
@@ -565,6 +675,12 @@ final class Encoder
 
     /**
      * Appends numeric bytes to a bit array.
+     *
+     * 按规范做三位一组压缩：满 3 位用 10 比特、剩 2 位用 7 比特、
+     * 剩 1 位用 4 比特，直接以字符的 ASCII 码参与数值拼接。
+     *
+     * @param string $content 纯数字字符串，调用方需保证只含 0~9
+     * @param BitArray $bits 目标比特流，会被就地追加
      */
     private static function appendNumericBytes(string $content, BitArray $bits) : void
     {
@@ -596,6 +712,11 @@ final class Encoder
     /**
      * Appends alpha-numeric bytes to a bit array.
      *
+     * 两字符成对压缩为 11 比特（code1 × 45 + code2），末位单字符占 6 比特；
+     * 任一字符不在字母数字表中（查表结果为 -1）即中止并抛出异常。
+     *
+     * @param string $content 仅含字母数字表内字符的字符串
+     * @param BitArray $bits 目标比特流，会被就地追加
      * @throws WriterException if an invalid alphanumeric code was found
      */
     private static function appendAlphanumericBytes(string $content, BitArray $bits) : void
@@ -636,6 +757,9 @@ final class Encoder
      * 造成「生成时写入的字节 ≠ 解码端按声明字符集解析的字节」的静默失真，
      * 因此必须先显式校验；转码失败（目标字符集无法表示某字符）则抛 WriterException。
      *
+     * @param string $content 待写入的内容，必须为合法 UTF-8
+     * @param BitArray $bits 目标比特流，会被就地追加
+     * @param string $encoding 目标字符集名称，内容会先由 UTF-8 转码到该字符集
      * @throws WriterException if content is not valid UTF-8 or cannot be encoded to target encoding
      */
     private static function append8BitBytes(string $content, BitArray $bits, string $encoding) : void
@@ -661,6 +785,12 @@ final class Encoder
 
     /**
      * Checks whether content is a valid UTF-8 byte sequence.
+     *
+     * 用带 u 修饰符的空正则做一次匹配，PCRE 会在 UTF-8 校验失败时返回
+     * false；借助错误抑制符避免非法字节触发警告。
+     *
+     * @param string $content 待校验的字节串
+     * @return bool 是合法 UTF-8 时返回 true，否则返回 false
      */
     private static function isValidUtf8(string $content) : bool
     {
@@ -671,6 +801,12 @@ final class Encoder
      * Normalizes common character set name spellings to a canonical name
      * that is both iconv-compatible and present in the CharacterSetEci name table.
      * 无法识别的拼写保持原样（交给 iconv / ECI 名称表自行裁决）。
+     *
+     * 查找键会先转成小写，因此拼写中的大小写差异不影响结果；仅做名称
+     * 归一化，不校验目标字符集是否真的可用。
+     *
+     * @param string $encoding 调用方传入的字符集名称
+     * @return string 规范化后的字符集名称；未命中映射表时原样返回
      */
     private static function normalizeEncodingName(string $encoding) : string
     {
@@ -714,6 +850,12 @@ final class Encoder
     /**
      * Appends KANJI bytes to a bit array.
      *
+     * 先把内容转成 SHIFT-JIS，再按两字节一组的码位区间（0x8140~0x9FFC、
+     * 0xE040~0xEBBF）压缩为 13 比特；长度为奇数或码位落在区间外均视为
+     * 非 SHIFT-JIS 内容而抛异常。
+     *
+     * @param string $content 待写入的内容（UTF-8），应仅含日文汉字
+     * @param BitArray $bits 目标比特流，会被就地追加
      * @throws WriterException if content does not seem to be encoded in SHIFT-JIS
      * @throws WriterException if an invalid byte sequence occurs
      */
@@ -754,6 +896,12 @@ final class Encoder
 
     /**
      * Appends ECI information to a bit array.
+     *
+     * 先写入 ECI 模式的 4 位指示符（0x07），再以 8 位定长写入字符集的
+     * 主编号，告知解码方后续字节流使用的字符集。
+     *
+     * @param CharacterSetEci $eci 要声明的字符集
+     * @param BitArray $bits 目标比特流，会被就地追加
      */
     private static function appendEci(CharacterSetEci $eci, BitArray $bits) : void
     {

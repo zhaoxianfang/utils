@@ -260,6 +260,11 @@ class ITF14Generator extends BaseGenerator
 
     /**
      * 计算宽元素模块数：round(窄模块数 × 宽窄比)，保证宽:窄 落在 GS1 允许区间内
+     *
+     * 结果至少比窄元素宽 1 个模块，避免取整后宽窄相同；而实际比值仍受
+     * wideRatio 的 2.0-3.0 约束。
+     *
+     * @return int 宽元素占用的模块数
      */
     protected function wideModules(): int
     {
@@ -315,6 +320,8 @@ class ITF14Generator extends BaseGenerator
 
     /**
      * 获取条码类型
+     *
+     * 返回固定的类型标识，渲染器据此决定是否绘制 Bearer Bar 与文字布局。
      * 
      * @return string 返回 'ITF-14'
      */

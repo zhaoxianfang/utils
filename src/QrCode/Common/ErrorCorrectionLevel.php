@@ -22,6 +22,11 @@ final class ErrorCorrectionLevel extends AbstractEnum
     protected const Q = [0x03];
     protected const H = [0x02];
 
+    /**
+     * 构造函数：保存该纠错级别对应的比特值
+     *
+     * @param int $bits 纠错级别比特值（0=M、1=L、2=H、3=Q）
+     */
     protected function __construct(private readonly int $bits)
     {
     }
@@ -29,6 +34,11 @@ final class ErrorCorrectionLevel extends AbstractEnum
     /**
      * 通过比特值获取错误纠正级别
      *
+     * 按 QR 规范中格式信息的两比特编码映射：0→M、1→L、2→H、3→Q。
+     * 只接受 0~3，其余取值一律视为非法。
+     *
+     * @param int $bits 纠错级别比特值（0=M、1=L、2=H、3=Q）
+     * @return self 对应的纠错级别单例
      * @throws OutOfBoundsException 如果比特值无效
      */
     public static function forBits(int $bits) : self
@@ -44,6 +54,10 @@ final class ErrorCorrectionLevel extends AbstractEnum
 
     /**
      * 返回用于编码此错误纠正级别的两个比特
+     *
+     * 该值会写入二维码的格式信息区，供解码方识别容错等级。
+     *
+     * @return int 纠错级别比特值（0=M、1=L、2=H、3=Q）
      */
     public function getBits() : int
     {
@@ -52,6 +66,10 @@ final class ErrorCorrectionLevel extends AbstractEnum
 
     /**
      * 返回low级别（L的别名）
+     *
+     * 与 L() 完全等价，约可容忍 7% 的码字损坏，仅作为可读性更好的写法保留。
+     *
+     * @return self L 级别的纠错级别实例
      */
     public static function low(): self
     {
@@ -60,6 +78,10 @@ final class ErrorCorrectionLevel extends AbstractEnum
 
     /**
      * 返回medium级别（M的别名）
+     *
+     * 与 M() 完全等价，约可容忍 15% 的码字损坏，仅作为可读性更好的写法保留。
+     *
+     * @return self M 级别的纠错级别实例
      */
     public static function medium(): self
     {
@@ -68,6 +90,10 @@ final class ErrorCorrectionLevel extends AbstractEnum
 
     /**
      * 返回quartile级别（Q的别名）
+     *
+     * 与 Q() 完全等价，约可容忍 25% 的码字损坏，仅作为可读性更好的写法保留。
+     *
+     * @return self Q 级别的纠错级别实例
      */
     public static function quartile(): self
     {
@@ -76,6 +102,11 @@ final class ErrorCorrectionLevel extends AbstractEnum
 
     /**
      * 返回high级别（H的别名）
+     *
+     * 与 H() 完全等价，约可容忍 30% 的码字损坏，容错能力最强但可容纳的
+     * 数据量最少，仅作为可读性更好的写法保留。
+     *
+     * @return self H 级别的纠错级别实例
      */
     public static function high(): self
     {

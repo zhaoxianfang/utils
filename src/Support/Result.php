@@ -49,6 +49,13 @@ use Throwable;
  */
 final readonly class Result implements JsonSerializable
 {
+    /**
+     * 私有构造函数，构造一个 Result 实例
+     *
+     * @param bool           $ok   是否为成功状态（true=Ok，false=Err）
+     * @param mixed          $value 成功时持有的值
+     * @param Throwable|null $err   失败时持有的异常，成功时为 null
+     */
     private function __construct(
         private bool $ok,
         private mixed $value,
@@ -59,7 +66,9 @@ final readonly class Result implements JsonSerializable
     /**
      * 创建成功结果
      *
-     * @param T $value
+     * 以任意值构造 Ok 状态，err 恒为 null；值不会被复制或校验，原样持有。
+     *
+     * @param T $value 成功值
      * @return self<T>
      */
     public static function ok(mixed $value): self
@@ -69,6 +78,9 @@ final readonly class Result implements JsonSerializable
 
     /**
      * 创建失败结果
+     *
+     * 传入字符串时自动包装为 RuntimeException，传入 Throwable 时原样持有；
+     * 失败结果的 value 恒为 null。
      *
      * @param string|Throwable $error 错误信息或异常实例
      * @return self<never>
@@ -97,7 +109,11 @@ final readonly class Result implements JsonSerializable
     }
 
     /**
-     * 是否成功
+     * 判断结果是否处于成功（Ok）状态
+     *
+     * 成功状态持有业务值，可通过 unwrap()/value() 取出。
+     *
+     * @return bool Ok 状态返回 true，Err 状态返回 false
      */
     public function isOk(): bool
     {
@@ -106,6 +122,10 @@ final readonly class Result implements JsonSerializable
 
     /**
      * 是否失败
+     *
+     * 与 isOk() 互斥，二者必有一个返回 true。
+     *
+     * @return bool Err 状态返回 true，Ok 状态返回 false
      */
     public function isErr(): bool
     {
@@ -115,7 +135,10 @@ final readonly class Result implements JsonSerializable
     /**
      * 是否成功且满足给定条件
      *
-     * @param callable(T): bool $predicate
+     * 失败状态直接返回 false，不会执行谓词回调。
+     *
+     * @param callable(T): bool $predicate 成功值判定回调
+     * @return bool 成功且谓词为真返回 true，否则返回 false
      */
     public function isOkAnd(callable $predicate): bool
     {
@@ -125,7 +148,10 @@ final readonly class Result implements JsonSerializable
     /**
      * 是否失败且满足给定条件
      *
-     * @param callable(Throwable): bool $predicate
+     * 成功状态直接返回 false，不会执行谓词回调。
+     *
+     * @param callable(Throwable): bool $predicate 异常判定回调
+     * @return bool 失败且谓词为真返回 true，否则返回 false
      */
     public function isErrAnd(callable $predicate): bool
     {
@@ -135,7 +161,9 @@ final readonly class Result implements JsonSerializable
     /**
      * 获取成功值
      *
-     * @return T
+     * 失败状态会抛出 RuntimeException，异常消息中携带原始错误信息；需要安全取值时改用 value()/unwrapOr()。
+     *
+     * @return T 成功时持有的值
      * @throws RuntimeException 如果结果是失败状态
      */
     public function unwrap(): mixed
@@ -150,6 +178,9 @@ final readonly class Result implements JsonSerializable
     /**
      * 获取失败异常
      *
+     * 成功状态会抛出 RuntimeException；Err 状态必定返回异常实例（内部兜底不会返回 null）。
+     *
+     * @return Throwable 失败时持有的异常
      * @throws RuntimeException 如果结果是成功状态
      */
     public function unwrapErr(): Throwable
@@ -191,6 +222,10 @@ final readonly class Result implements JsonSerializable
 
     /**
      * 获取错误信息（失败时不为 null）
+     *
+     * 取自所持异常的 getMessage()；Ok 状态返回 null，不抛异常。
+     *
+     * @return string|null 错误消息，成功时为 null
      */
     public function error(): ?string
     {
@@ -199,6 +234,10 @@ final readonly class Result implements JsonSerializable
 
     /**
      * 获取异常对象
+     *
+     * 与 unwrapErr() 不同，此方法不会因状态而抛异常，Ok 时返回 null。
+     *
+     * @return Throwable|null 失败时持有的异常，成功时为 null
      */
     public function exception(): ?Throwable
     {
@@ -219,7 +258,11 @@ final readonly class Result implements JsonSerializable
     /**
      * 映射成功值，失败时返回给定默认值
      *
-     * @param callable(T): mixed $callback
+     * 注意参数顺序为「默认值在前、回调在后」；回调仅在 Ok 状态执行。
+     *
+     * @param mixed $default 失败时返回的默认值
+     * @param callable(T): mixed $callback 成功值的映射回调
+     * @return mixed 回调结果或默认值
      */
     public function mapOr(mixed $default, callable $callback): mixed
     {
@@ -230,7 +273,10 @@ final readonly class Result implements JsonSerializable
      * 映射错误值（成功则原样返回）
      *
      * 回调可返回 Throwable 或字符串，其它标量会被转为字符串，
-     * 避免回调返回类型不符时直接抛 TypeError。
+     * 避免回调返回类型不符时直接抛 TypeError；非标量返回值统一降级为 'Unknown error'。
+     *
+     * @param callable(Throwable): (Throwable|string) $callback 错误映射回调
+     * @return self 成功时返回自身，失败时返回携带映射后错误的新实例
      */
     public function mapErr(callable $callback): self
     {
@@ -273,6 +319,10 @@ final readonly class Result implements JsonSerializable
 
     /**
      * 获取成功值，失败时为 null
+     *
+     * 与 unwrap() 不同，此方法不会抛异常，适用于「有则取值、无则判空」的场景。
+     *
+     * @return T|null 成功值，失败时为 null
      */
     public function value(): mixed
     {
@@ -307,6 +357,8 @@ final readonly class Result implements JsonSerializable
      * 单独抽出的原因：构造函数签名要求 ?Throwable，
      * 而公开 API 只接受 string|Throwable，直接复用 self::err($this->err)
      * 在 err 为 null 时会触发 TypeError。
+     *
+     * @return self 持有原异常的新 Err 实例（异常缺失时使用兜底异常）
      */
     private function propagateErr(): self
     {

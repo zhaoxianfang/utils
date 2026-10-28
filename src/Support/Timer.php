@@ -28,6 +28,10 @@ class Timer
 
     /**
      * 创建并立即开始计时的新实例
+     *
+     * 等价于 new self()，内部使用 hrtime(true) 记录纳秒级起点，不带超时阈值。
+     *
+     * @return self 已开始计时、未设置超时的计时器
      */
     public static function start(): self
     {
@@ -37,9 +41,12 @@ class Timer
     /**
      * 创建带超时限制的计时器
      *
-     * @param float $seconds 超时时间（秒，必须 >= 0）
+     * 超时阈值按纳秒保存（超出 int 范围时夹取到 PHP_INT_MAX），计时从创建时开始。
      *
-     * @throws InvalidArgumentException 超时时间为负数时抛出
+     * @param float $seconds 超时时间（秒，必须 >= 0）
+     * @return self 已开始计时并设置超时阈值的计时器
+     *
+     * @throws InvalidArgumentException 超时时间为负数或 NaN 时抛出
      */
     public static function withTimeout(float $seconds): self
     {
@@ -57,6 +64,9 @@ class Timer
         return $timer;
     }
 
+    /**
+     * 构造函数，创建计时器并立即开始计时
+     */
     public function __construct()
     {
         $this->start = hrtime(true);
@@ -64,6 +74,10 @@ class Timer
 
     /**
      * 重置计时器
+     *
+     * 把起点改为当前时刻，已设置的超时阈值保持不变（即从重置时刻重新计算超时）。
+     *
+     * @return self 当前实例，便于链式调用
      */
     public function reset(): self
     {
@@ -96,7 +110,9 @@ class Timer
     /**
      * 检查是否已超时
      *
-     * @return bool
+     * 未设置超时阈值（如 start() 创建）时恒为 false；否则按「已流逝时间 >= 阈值」判断。
+     *
+     * @return bool 已超过阈值返回 true，未超时或未设置阈值返回 false
      */
     public function isTimedOut(): bool
     {
@@ -109,7 +125,12 @@ class Timer
     /**
      * 若已超时则抛出异常
      *
-     * @throws RuntimeException
+     * 结果取决于 isTimedOut()：未设置阈值时不会抛异常。
+     *
+     * @param string $message 超时时抛出的异常消息，默认「操作超时」
+     * @return void 无返回值，未超时直接返回
+     *
+     * @throws RuntimeException 已超时时抛出
      */
     public function throwIfTimedOut(string $message = '操作超时'): void
     {

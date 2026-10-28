@@ -23,6 +23,13 @@ class Csdn extends Gateway
     protected $AccessTokenURL = 'https://passport.csdn.net/v2/oauth2/token';
     protected $UserInfoURL = 'v1/user/getinfo';
 
+    /**
+     * 获取格式化后的用户信息
+     *
+     * 调用 getUserInfo() 获取原始数据并统一映射为本 SDK 的标准用户结构。
+     *
+     * @return array 标准化用户信息（含 open_id、nickname、avatar 等）
+     */
     public function userInfo()
     {
         $result = $this->getUserInfo();
@@ -39,6 +46,13 @@ class Csdn extends Gateway
         ];
     }
 
+    /**
+     * 获取 AccessToken
+     *
+     * 在 token 为空时校验 state 并请求 CSDN 令牌接口，解析后缓存到 $this->token。
+     *
+     * @throws OAuthException 当令牌请求或解析失败时抛出
+     */
     protected function getToken()
     {
         if (empty($this->token)) {

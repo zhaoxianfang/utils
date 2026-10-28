@@ -10,11 +10,25 @@ use RuntimeException;
 
 /**
  * JSON Web Token (JWT) 类
- * 支持HS/RS/ES系列算法，符合RFC 7519标准
  *
- * @package Crypto
+ * 提供 JWT 的签发与验证，支持 HS（HMAC）、RS（RSA）、ES（ECDSA）共九种算法，
+ * 符合 RFC 7519 标准。默认对算法声明做严格校验，可防御「算法混淆攻击
+ * （alg confusion）」与 alg=none 未签名令牌；HMAC 比较使用 hash_equals 防止
+ * 时序侧信道；ECDSA 签名按 RFC 7518 在 raw R||S 与 OpenSSL 的 DER 之间转换。
+ *
+ * @package zxf\Utils\Crypto
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * // HS256 对称签名（请勿硬编码真实密钥，以下用占位符 'your-secret-key'）
+ * $payload = \zxf\Utils\Crypto\JWT::buildPayload(['uid' => 123], 'my-iss', '', 'user-1', 3600);
+ * $token   = \zxf\Utils\Crypto\JWT::encode($payload, 'your-secret-key', 'HS256');
+ * $data    = \zxf\Utils\Crypto\JWT::decode($token, 'your-secret-key', 'HS256');
+ *
+ * // RS256 非对称签名（使用私钥签名、公钥验签）
+ * $token = \zxf\Utils\Crypto\JWT::encode($payload, $privateKeyPem, 'RS256');
+ * $data  = \zxf\Utils\Crypto\JWT::decode($token, $publicKeyPem, 'RS256');
  */
 class JWT
 {
@@ -39,13 +53,18 @@ class JWT
     private array $cache = [];
 
     /**
-     * 编码JWT
+     * 编码（签发）JWT
      *
-     * @param array  $payload   JWT载荷数据
-     * @param string $secret    密钥（HMAC）或私钥（RSA/ECDSA）
-     * @param string $algorithm 算法，默认HS256
-     * @param array  $headers   自定义头部
-     * @return string 编码后的JWT字符串
+     * 将 header 与 payload 分别做 URL 安全 Base64 编码，拼接后按算法计算签名，
+     * 最终返回 "header.payload.signature" 三段式字符串。
+     *
+     * @param array  $payload   JWT 载荷数据（如用户标识、权限等自定义声明）
+     * @param string $secret    密钥（HMAC 算法）或私钥 PEM（RSA/ECDSA 算法）
+     * @param string $algorithm 签名算法，默认 HS256（可选 HS、RS、ES 系列）
+     * @param array  $headers   自定义头部（会与 alg/typ 合并，勿覆盖 alg）
+     * @return string 编码后的 JWT 字符串
+     * @throws InvalidArgumentException 当算法不被支持时抛出
+     * @throws RuntimeException 当签名失败（如密钥无效）时抛出
      */
     public static function encode(array $payload, string $secret, string $algorithm = 'HS256', array $headers = []): string
     {
@@ -70,12 +89,18 @@ class JWT
     }
 
     /**
-     * 解码JWT
+     * 解码并验证 JWT
      *
-     * @param string $jwt    JWT字符串
-     * @param string $secret 密钥或公钥
-     * @param string $algorithm 期望算法（验证用），空则不验证算法
-     * @return array 解码后的payload
+     * 先拆分三段、校验头部 alg 是否经白名单校验且调用方期望一致（防算法混淆攻击），
+     * 再验签；随后校验 exp（过期）、nbf（未生效）等时间声明。仅当全部通过后返回
+     * 解码后的 payload。
+     *
+     * @param string $jwt       JWT 字符串
+     * @param string $secret    密钥（HMAC）或公钥 PEM（RSA/ECDSA）
+     * @param string $algorithm 期望算法（验证用）；为空时退而采用令牌声明的算法（仍需白名单校验）
+     * @return array 解码后的 payload（关联数组）
+     * @throws InvalidArgumentException 当令牌格式错误或头部算法缺失时抛出
+     * @throws RuntimeException 当算法不符、签名无效、已过期或尚未生效时抛出
      */
     public static function decode(string $jwt, string $secret, string $algorithm = 'HS256'): array
     {
@@ -127,10 +152,14 @@ class JWT
     }
 
     /**
-     * 解码但不验证签名（仅用于读取）
+     * 解码但不验证签名（仅用于读取/调试）
      *
-     * @param string $jwt JWT字符串
-     * @return array 包含header和payload的数组
+     * 警告：本方法完全跳过签名验证，仅解析内容，绝不应用于任何信任场景。
+     * 任何涉及身份/权限的判断都必须使用 decode() 进行验签。
+     *
+     * @param string $jwt JWT 字符串
+     * @return array{header:array,payload:array} 包含 header 和 payload 的数组
+     * @throws InvalidArgumentException 当令牌格式不合法（非三段式）时抛出
      */
     public static function decodeUnsafe(string $jwt): array
     {
@@ -164,13 +193,18 @@ class JWT
     }
 
     /**
-     * 刷新JWT（验证后重新编码，更新过期时间）
+     * 刷新 JWT（验证后重新编码，更新过期时间）
      *
-     * @param string $jwt       原JWT
-     * @param string $secret    密钥
-     * @param int    $ttl       新过期时间（秒），默认3600
-     * @param string $algorithm 算法
-     * @return string 新的JWT
+     * 先调用 decode() 完成验签与时间校验，剔除旧的 iat/exp/nbf 后重新写入当前签发
+     * 时间与新的过期时间，再编码返回。若原令牌无效则直接抛出异常。
+     *
+     * @param string $jwt       原 JWT 字符串
+     * @param string $secret    密钥（HMAC）或公钥 PEM（RSA/ECDSA）
+     * @param int    $ttl       新过期时间（秒），默认 3600
+     * @param string $algorithm 算法，默认 HS256
+     * @return string 新的 JWT 字符串
+     * @throws InvalidArgumentException 当令牌格式错误时抛出
+     * @throws RuntimeException 当验签失败或令牌已过期/未生效时抛出
      */
     public static function refresh(string $jwt, string $secret, int $ttl = 3600, string $algorithm = 'HS256'): string
     {
@@ -209,7 +243,13 @@ class JWT
     }
 
     /**
-     * 签名数据
+     * 根据算法类型对数据签名（HMAC / RSA / ECDSA 分发）
+     *
+     * @param string $data      待签名数据（signing input，即 header.payload）
+     * @param string $secret    密钥（HMAC）或私钥 PEM（RSA/ECDSA）
+     * @param string $algorithm 已校验的算法名称
+     * @return string 二进制签名
+     * @throws RuntimeException 当算法类型不支持或底层签名失败时抛出
      */
     private static function sign(string $data, string $secret, string $algorithm): string
     {
@@ -224,7 +264,14 @@ class JWT
     }
 
     /**
-     * 验证签名
+     * 根据算法类型验证签名（HMAC 时序安全比较 / RSA / ECDSA 分发）
+     *
+     * @param string $data      原始数据（signing input）
+     * @param string $signature 待验证的二进制签名
+     * @param string $secret    密钥（HMAC）或公钥 PEM（RSA/ECDSA）
+     * @param string $algorithm 已校验的算法名称
+     * @return bool 签名有效返回 true，无效返回 false
+     * @throws RuntimeException 当算法类型不支持或底层验证出错时抛出
      */
     private static function verify(string $data, string $signature, string $secret, string $algorithm): bool
     {
@@ -238,6 +285,15 @@ class JWT
         };
     }
 
+    /**
+     * 使用 RSA 私钥对数据签名（PKCS#1 v1.5）
+     *
+     * @param string $data          待签名数据（通常是 JWT 的 signing input）
+     * @param string $privateKeyPem 私钥 PEM 字符串
+     * @param string $algorithm     OpenSSL 哈希算法名（如 SHA256）
+     * @return string 二进制签名
+     * @throws RuntimeException 当私钥无效或签名失败时抛出
+     */
     private static function rsaSign(string $data, string $privateKeyPem, string $algorithm): string
     {
         $privateKey = openssl_pkey_get_private($privateKeyPem);
@@ -251,6 +307,16 @@ class JWT
         return $signature;
     }
 
+    /**
+     * 使用 RSA 公钥验证签名（PKCS#1 v1.5）
+     *
+     * @param string $data          原始数据
+     * @param string $signature     待验证的二进制签名
+     * @param string $publicKeyPem  公钥 PEM 字符串
+     * @param string $algorithm     OpenSSL 哈希算法名
+     * @return bool 签名有效返回 true，无效返回 false
+     * @throws RuntimeException 当公钥无效或底层验证出错（result=-1）时抛出
+     */
     private static function rsaVerify(string $data, string $signature, string $publicKeyPem, string $algorithm): bool
     {
         $publicKey = openssl_pkey_get_public($publicKeyPem);
@@ -264,6 +330,17 @@ class JWT
         return $result === 1;
     }
 
+    /**
+     * 使用 ECDSA 私钥对数据签名
+     *
+     * openssl_sign 返回 DER 编码签名，需按 RFC 7518 转换为定长 raw R||S 后再返回。
+     *
+     * @param string $data          待签名数据
+     * @param string $privateKeyPem 私钥 PEM 字符串
+     * @param string $algorithm     OpenSSL 哈希算法名
+     * @return string 转换后的 raw R||S 二进制签名
+     * @throws RuntimeException 当私钥无效、签名失败或 DER 转换失败时抛出
+     */
     private static function ecdsaSign(string $data, string $privateKeyPem, string $algorithm): string
     {
         $privateKey = openssl_pkey_get_private($privateKeyPem);
@@ -280,6 +357,18 @@ class JWT
         return self::derToRawSignature($signature, self::ecKeyCoordSize($privateKey));
     }
 
+    /**
+     * 使用 ECDSA 公钥验证签名
+     *
+     * 入参签名为 JWT 标准的 raw R||S，需先转回 OpenSSL 所需的 DER 编码再验签。
+     *
+     * @param string $data          原始数据
+     * @param string $signature     raw R||S 二进制签名
+     * @param string $publicKeyPem  公钥 PEM 字符串
+     * @param string $algorithm     OpenSSL 哈希算法名
+     * @return bool 签名有效返回 true，无效返回 false
+     * @throws RuntimeException 当公钥无效、DER 转换失败或底层验证出错时抛出
+     */
     private static function ecdsaVerify(string $data, string $signature, string $publicKeyPem, string $algorithm): bool
     {
         $publicKey = openssl_pkey_get_public($publicKeyPem);
@@ -295,6 +384,12 @@ class JWT
 
     /**
      * 探测 EC 密钥坐标字节长度（P-256=32 / P-384=48 / P-521=66）
+     *
+     * 用于 ECDSA 签名在 raw R||S 与 DER 之间转换时确定各分量定长，避免长度歧义。
+     *
+     * @param \OpenSSLAsymmetricKey $key OpenSSL 私钥或公钥资源
+     * @return int 单个坐标（R 或 S）的字节长度
+     * @throws RuntimeException 当无法获取密钥位数时抛出
      */
     private static function ecKeyCoordSize($key): int
     {
@@ -306,6 +401,12 @@ class JWT
         return (int) ceil($bits / 8);
     }
 
+    /**
+     * 将长度值 DER 编码（ASN.1 长度字段：短型或长型）
+     *
+     * @param int $length 待编码的长度（非负整数）
+     * @return string DER 长度字节序列
+     */
     private static function derLength(int $length): string
     {
         if ($length < 0x80) {
@@ -319,7 +420,15 @@ class JWT
         return chr(0x80 | strlen($bytes)) . $bytes;
     }
 
-    /** 将无符号整数二进制编码为 DER INTEGER（必要时补 0x00 保证为正数） */
+    /**
+     * 将无符号整数二进制编码为 DER INTEGER（必要时补 0x00 保证为正数）
+     *
+     * DER INTEGER 以补码解释首字节最高位，故当最高位为 1 时需前置 0x00 表示正数，
+     * 否则会被误判为负数导致签名解析失败。
+     *
+     * @param string $value 大端字节序的无符号整数（R 或 S 分量）
+     * @return string DER INTEGER TLV 字节序列
+     */
     private static function derInteger(string $value): string
     {
         $value = ltrim($value, "\x00");
@@ -332,7 +441,14 @@ class JWT
         return "\x02" . self::derLength(strlen($value)) . $value;
     }
 
-    /** 标准 raw R||S → OpenSSL 所需的 DER ECDSA 签名 */
+    /**
+     * 标准 raw R||S → OpenSSL 所需的 DER ECDSA 签名
+     *
+     * @param string $raw        JWT 标准定长签名（R、S 各 coordSize 字节）
+     * @param int    $coordSize 单个坐标字节长度
+     * @return string DER 编码（SEQUENCE { INTEGER r, INTEGER s }）签名
+     * @throws RuntimeException 当签名长度非法时抛出
+     */
     private static function rawToDerSignature(string $raw, int $coordSize): string
     {
         if (strlen($raw) !== $coordSize * 2) {
@@ -342,7 +458,17 @@ class JWT
         return "\x30" . self::derLength(strlen($content)) . $content;
     }
 
-    /** OpenSSL DER ECDSA 签名 → 标准 raw R||S */
+    /**
+     * OpenSSL DER ECDSA 签名 → 标准 raw R||S
+     *
+     * 解析 DER 的 SEQUENCE 与两个 INTEGER，去掉前导零后将各分量补齐到 coordSize
+     * 字节，拼接为定长 R||S（符合 RFC 7518 对 ES* 算法签名格式的要求）。
+     *
+     * @param string $der       DER 编码签名
+     * @param int    $coordSize 单个坐标字节长度
+     * @return string 定长 raw R||S 签名
+     * @throws RuntimeException 当 DER 结构非法或分量长度超限时抛出
+     */
     private static function derToRawSignature(string $der, int $coordSize): string
     {
         $derLen = strlen($der);
@@ -398,7 +524,14 @@ class JWT
     }
 
     /**
-     * 拆分JWT字符串
+     * 将 JWT 字符串拆分为 header、payload、signature 三段
+     *
+     * 校验必须为两段点号分隔的三段式；signature 段在 Base64URL 解码失败时
+     * 降级为空字符串（交由后续验签/解码统一报错），避免提前抛异常。
+     *
+     * @param string $jwt JWT 字符串
+     * @return array{header:string,payload:string,signature:string} 三段内容
+     * @throws InvalidArgumentException 当格式不是标准三段式时抛出
      */
     private static function split(string $jwt): array
     {
@@ -413,6 +546,13 @@ class JWT
         ];
     }
 
+    /**
+     * 校验 JWT 算法是否在支持列表中，否则抛出异常
+     *
+     * @param string $algorithm 算法名称（如 HS256 / RS384 / ES512）
+     * @return void
+     * @throws InvalidArgumentException 当算法不被支持时抛出
+     */
     private static function validateAlgorithm(string $algorithm): void
     {
         if (!isset(self::SUPPORTED_ALGORITHMS[$algorithm])) {
@@ -420,6 +560,13 @@ class JWT
         }
     }
 
+    /**
+     * 将数组编码为 JSON 字符串（保留非 ASCII 与斜杠，避免令牌被破坏）
+     *
+     * @param array $data 待编码的关联数组（header 或 payload）
+     * @return string JSON 字符串
+     * @throws RuntimeException 当编码失败（含不可序列化值）时抛出
+     */
     private static function jsonEncode(array $data): string
     {
         $json = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -429,6 +576,13 @@ class JWT
         return $json;
     }
 
+    /**
+     * 将 JSON 字符串解码为关联数组
+     *
+     * @param string $json JSON 字符串
+     * @return array 解码后的关联数组
+     * @throws RuntimeException 当 JSON 无效或解码结果非数组时抛出
+     */
     private static function jsonDecode(string $json): array
     {
         $data = json_decode($json, true);

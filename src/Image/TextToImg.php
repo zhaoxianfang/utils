@@ -6,6 +6,7 @@ namespace zxf\Utils\Image;
 
 use Exception;
 use GdImage;
+use InvalidArgumentException;
 
 /**
  * 文字生成图片类库
@@ -310,6 +311,15 @@ class TextToImg
     /** @var int 背景透明度（GD 特性：0 为不透明，127 为全透明） */
     private int $bgAlpha = 0;
 
+    /**
+     * 画布单边尺寸上限（像素）。
+     *
+     * imagecreatetruecolor() 按「宽 × 高 × 4 字节」分配内存，若调用方传入极端值
+     * （如 500000）会尝试分配 TB 级内存而失败。设定上限可把失败提前为明确异常，
+     * 避免资源耗尽型攻击与晦涩的 GD 分配错误。20000 对文字海报场景已极为宽裕。
+     */
+    private const MAX_CANVAS_SIZE = 20000;
+
     /** @var int 画布宽度（像素） */
     private int $width = 800;
 
@@ -448,8 +458,8 @@ class TextToImg
             throw new Exception('TextToImg 依赖 PHP GD 扩展，请先安装并启用 gd 扩展。');
         }
 
-        $this->width  = max(1, $width);
-        $this->height = max(1, $height);
+        $this->width  = self::normalizeDimension($width, '宽度');
+        $this->height = self::normalizeDimension($height, '高度');
 
         // 设置默认字体目录为本库自带的 resource/font 目录
         $this->fontDir = dirname(__FILE__, 2) . '/resource/font';
@@ -480,8 +490,8 @@ class TextToImg
         } else {
             // 复用单例时重置状态并更新尺寸
             self::$instance->resetState();
-            self::$instance->width  = $width;
-            self::$instance->height = $height;
+            self::$instance->width  = self::normalizeDimension($width, '宽度');
+            self::$instance->height = self::normalizeDimension($height, '高度');
         }
 
         return self::$instance;
@@ -594,16 +604,52 @@ class TextToImg
     /**
      * 设置画布尺寸
      *
+     * 宽高经 normalizeDimension() 归一化：不足 1 的按 1 处理，超过
+     * MAX_CANVAS_SIZE 时抛出异常，避免超大尺寸在 GD 中分配失败。
+     *
      * @param  int  $width   宽度（像素）
      * @param  int  $height  高度（像素）
      * @return $this
+     *
+     * @throws InvalidArgumentException 宽或高超过 MAX_CANVAS_SIZE 时抛出
      */
     public function setSize(int $width, int $height): static
     {
-        $this->width  = max(1, $width);
-        $this->height = max(1, $height);
+        $this->width  = self::normalizeDimension($width, '宽度');
+        $this->height = self::normalizeDimension($height, '高度');
 
         return $this;
+    }
+
+    /**
+     * 归一化画布尺寸：下限钳制为 1，超过上限时抛出明确异常。
+     *
+     * 修复前存在两处问题：一是 instance() 完全未做钳制（而构造器与 setSize()
+     * 只做了下限钳制），行为不一致；二是缺少上限，0/负值/超大值会穿透到 GD
+     * 产生晦涩的分配失败。统一在此处理。
+     *
+     * @param  int     $value  原始尺寸
+     * @param  string  $label  维度名称（用于异常提示）
+     * @return int 归一化后的尺寸（>= 1）
+     *
+     * @throws InvalidArgumentException 当尺寸超过 MAX_CANVAS_SIZE 时抛出
+     *
+     * @example
+     * ```php
+     * // 内部调用，外部不可见；等效行为：
+     * (new TextToImg(0, -5))->setSize(800, 600); // 构造时已钳制为 1
+     * TextToImg::instance(999999, 600);          // 抛出 InvalidArgumentException
+     * ```
+     */
+    private static function normalizeDimension(int $value, string $label): int
+    {
+        if ($value > self::MAX_CANVAS_SIZE) {
+            throw new InvalidArgumentException(
+                sprintf('画布%s不能超过 %d 像素，当前传入 %d。', $label, self::MAX_CANVAS_SIZE, $value)
+            );
+        }
+
+        return max(1, $value);
     }
 
     /**
@@ -770,6 +816,9 @@ class TextToImg
     /**
      * 设置文字透明度
      *
+     * 取值沿用 GD 的 alpha 语义：0 为完全不透明、127 为完全透明；超出范围
+     * 会被夹紧到 0-127，不会抛异常。
+     *
      * @param  int  $alpha  透明度（0 为不透明，127 为全透明）
      * @return $this
      */
@@ -806,6 +855,9 @@ class TextToImg
 
     /**
      * 设置背景透明度
+     *
+     * 取值沿用 GD 的 alpha 语义：0 为完全不透明、127 为完全透明；超出范围
+     * 会被夹紧到 0-127。仅影响纯色/渐变背景的填充透明度。
      *
      * @param  int  $alpha  透明度（0 为不透明，127 为全透明）
      * @return $this
@@ -893,6 +945,9 @@ class TextToImg
 
     /**
      * 设置行高
+     *
+     * 负数会被夹紧为 0；0 表示不指定固定行高，渲染时按字号自动推算
+     * （约 1.5 倍字号）。
      *
      * @param  int  $height  行高（像素），0 表示按字号自动计算（1.5 倍字号）
      * @return $this
@@ -1045,10 +1100,13 @@ class TextToImg
     /**
      * 设置渐变类型
      *
+     * 仅接受 linear（线性）或 radial（径向），其它取值抛出异常。径向渐变
+     * 不使用渐变角度，角度设置仅在 linear 下生效。
+     *
      * @param  string  $type  linear（线性）或 radial（径向）
      * @return $this
      *
-     * @throws Exception
+     * @throws Exception 类型不是 linear 或 radial 时抛出
      */
     public function setGradientType(string $type = self::GRADIENT_LINEAR): static
     {
@@ -1079,12 +1137,15 @@ class TextToImg
     /**
      * 设置边框
      *
+     * 同时设置边框宽度、颜色与圆角半径；宽度和半径的负值会被夹紧为 0，
+     * 宽度为 0 时不绘制边框。颜色支持十六进制、RGB/RGBA 数组等格式。
+     *
      * @param  int           $width   边框宽度（像素），0 表示无边框
      * @param  string|array  $color   边框颜色
      * @param  int           $radius  圆角半径（像素），0 表示直角
      * @return $this
      *
-     * @throws Exception
+     * @throws Exception 颜色格式无法解析时抛出
      */
     public function setBorder(int $width = 1, string|array $color = '000000', int $radius = 0): static
     {
@@ -1141,6 +1202,8 @@ class TextToImg
     /**
      * 清除文字阴影
      *
+     * 清空阴影配置，之后渲染不再绘制阴影；重复调用无副作用。
+     *
      * @return $this
      */
     public function clearTextShadow(): static
@@ -1178,6 +1241,8 @@ class TextToImg
 
     /**
      * 清除文字描边
+     *
+     * 清空描边配置，之后渲染不再绘制轮廓；重复调用无副作用。
      *
      * @return $this
      */
@@ -1354,6 +1419,9 @@ class TextToImg
 
     /**
      * 清除所有水印
+     *
+     * 清空图片水印与文字水印队列，之前通过 addImageWatermark()/addTextWatermark()
+     * 添加的内容都不会再绘制。
      *
      * @return $this
      */
@@ -2004,6 +2072,10 @@ class TextToImg
     /**
      * 绘制圆角矩形
      *
+     * $filled 为 true 时用两个矩形加四个实心圆拼出填充色块；为 false 时用
+     * 四条直线加四段圆弧勾出轮廓。半径会自动夹紧到宽高一半以内，避免半径
+     * 超过尺寸时图形错位。
+     *
      * @param  int    $x       左上角 X
      * @param  int    $y       左上角 Y
      * @param  int    $w       宽度
@@ -2011,6 +2083,7 @@ class TextToImg
      * @param  int    $radius  圆角半径
      * @param  int    $color   GD 颜色索引
      * @param  bool   $filled  是否填充
+     * @return void
      */
     private function drawRoundedRect(int $x, int $y, int $w, int $h, int $radius, int $color, bool $filled = true): void
     {
@@ -2108,11 +2181,16 @@ class TextToImg
     /**
      * 绘制文字阴影
      *
+     * 按配置的偏移量重复绘制同色文字；模糊半径不大于 1 时只画一次，否则在
+     * 圆形邻域内按步长稀疏采样多次叠加，离中心越远 alpha 越接近全透明，
+     * 以较少绘制次数近似模糊效果。偏移、模糊与缩放比例均按当前 scale 换算。
+     *
      * @param  string  $text   文字内容
      * @param  float   $size   字号
      * @param  int     $angle  旋转角度
      * @param  int     $x      基准 X
      * @param  int     $y      基准 Y
+     * @return void
      */
     private function drawShadow(string $text, float $size, int $angle, int $x, int $y): void
     {
@@ -2167,11 +2245,16 @@ class TextToImg
     /**
      * 绘制文字描边
      *
+     * 在八个方向上重复绘制文字形成轮廓：宽度为 1 时各方向偏移 1 像素；
+     * 宽度大于 1 时逐圈扩大偏移（只画轮廓不填充内部），从而把绘制次数从
+     * O(w²) 降到 O(w)。描边宽度会乘以当前 scale。
+     *
      * @param  string  $text   文字内容
      * @param  float   $size   字号
      * @param  int     $angle  旋转角度
      * @param  int     $x      基准 X
      * @param  int     $y      基准 Y
+     * @return void
      */
     private function drawStroke(string $text, float $size, int $angle, int $x, int $y): void
     {
@@ -2480,7 +2563,12 @@ class TextToImg
     /**
      * 绘制图片水印
      *
+     * 加载水印图后按 scale 或 width/height 计算目标尺寸（均未指定则用原尺寸），
+     * 交给 calculateWatermarkPosition() 定位，opacity 小于 100 时先整体压暗
+     * 模拟半透明，最后用 imagecopyresampled 缩放合成。水印加载失败时静默跳过。
+     *
      * @param  array  $config  水印配置
+     * @return void
      */
     private function drawImageWatermark(array $config): void
     {
@@ -2520,7 +2608,11 @@ class TextToImg
     /**
      * 绘制文字水印
      *
+     * 用 imagettfbbox 量取文字实际外框后定位，再以配置的颜色与 alpha 绘制；
+     * 起点会加上外框的左/上偏移，确保文字落在计算出的位置上。
+     *
      * @param  array  $config  水印配置
+     * @return void
      */
     private function drawTextWatermark(array $config): void
     {
@@ -2556,6 +2648,10 @@ class TextToImg
     /**
      * 计算水印位置
      *
+     * 按位置常量决定水平（左/中/右）与垂直（上/中/下）锚点，边距会乘以当前
+     * scale，最后叠加额外的 X/Y 偏移。不做边界裁剪：当水印大于画布时可能返回
+     * 负坐标，由 imagecopyresampled/imagettftext 自行裁掉超出部分。
+     *
      * @param  string  $position  位置常量
      * @param  int     $cw        画布宽度
      * @param  int     $ch        画布高度
@@ -2564,7 +2660,7 @@ class TextToImg
      * @param  int     $margin    边距
      * @param  int     $offsetX   额外 X 偏移
      * @param  int     $offsetY   额外 Y 偏移
-     * @return array{x: int, y: int}
+     * @return array{x: int, y: int} 水印左上角坐标
      */
     private function calculateWatermarkPosition(string $position, int $cw, int $ch, int $ww, int $wh, int $margin, int $offsetX, int $offsetY): array
     {
@@ -2649,6 +2745,9 @@ class TextToImg
     /**
      * 应用亮度调整
      *
+     * 通过 IMG_FILTER_BRIGHTNESS 整体增减像素亮度，取值会被夹紧到 -255~255；
+     * 画布尚未构建（image 为 null）时直接跳过，不报错。
+     *
      * @param  int  $level  亮度级别（-255 到 255，0 为不变）
      * @return $this
      */
@@ -2664,6 +2763,9 @@ class TextToImg
     /**
      * 应用对比度调整
      *
+     * 通过 IMG_FILTER_CONTRAST 调整对比度，取值夹紧到 -100~100（GD 的负值
+     * 表示提高对比度）；画布未构建时直接跳过。
+     *
      * @param  int  $level  对比度级别（-100 到 100，0 为不变）
      * @return $this
      */
@@ -2678,6 +2780,9 @@ class TextToImg
 
     /**
      * 应用高斯模糊
+     *
+     * 重复执行 IMG_FILTER_GAUSSIAN_BLUR，次数越多越模糊；次数至少按 1 次处理，
+     * 画布未构建时直接跳过。次数过大会显著增加耗时。
      *
      * @param  int  $times  模糊次数（次数越多越模糊）
      * @return $this
@@ -2696,6 +2801,9 @@ class TextToImg
     /**
      * 应用平滑处理
      *
+     * 使用 IMG_FILTER_SMOOTH 对像素做均值平滑，级别至少按 1 处理，数值越大
+     * 越平滑；画布未构建时直接跳过。
+     *
      * @param  int  $level  平滑级别（> 0）
      * @return $this
      */
@@ -2710,6 +2818,9 @@ class TextToImg
 
     /**
      * 应用像素化处理
+     *
+     * 使用 IMG_FILTER_PIXELATE 把图像按 $size 大小的方块取平均色（开启高级
+     * 模式），块大小至少按 1 处理；画布未构建时直接跳过。
      *
      * @param  int  $size  像素块大小
      * @return $this
@@ -2866,12 +2977,16 @@ class TextToImg
     }
 
     /**
-     * 保存图片到文件
+     * 将当前图像写入文件
+     *
+     * 转调 outputImage() 完成实际编码；webp/bmp 在当前 GD 未编译对应支持时
+     * 返回 false，因此会抛异常。调用方需保证 image 已构建、目标目录可写。
      *
      * @param  string  $fileName  文件路径
      * @param  string  $format    图片格式
+     * @return void
      *
-     * @throws Exception
+     * @throws Exception 当前环境不支持该格式或写入失败时抛出
      */
     private function saveToFile(string $fileName, string $format): void
     {

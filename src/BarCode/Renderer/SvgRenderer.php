@@ -26,11 +26,27 @@ class SvgRenderer extends BaseRenderer
     /** @var int 动态计算的文本Y轴偏移量 */
     protected int $dynamicTextOffset = 3;
 
+    /**
+     * 构造 SVG 渲染器
+     *
+     * @param BarcodeConfig|null $config 条码配置对象；为 null 时使用默认配置
+     */
     public function __construct(?BarcodeConfig $config = null)
     {
         parent::__construct($config);
     }
 
+    /**
+     * 将条空模式渲染为 SVG 字符串
+     *
+     * 解析模块大小与静区，动态计算长竖线位置，并以 viewBox 容纳其向下延长量，
+     * 委托 buildSvg 绘制条、Bearer Bar、文字与水印。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数=条，负数=空，绝对值为模块数）
+     * @param string $data 要在条码下方显示的文字（通常为完整编码数据）
+     * @param array<string, mixed> $config 渲染配置项，可选，会与已有配置合并
+     * @return string 完整 SVG 文档字符串
+     */
     public function render(array $barcodeData, string $data, array $config = []): string
     {
         $this->config = BarcodeConfig::fromArray(array_merge($this->config->toArray(), $config));
@@ -76,6 +92,17 @@ class SvgRenderer extends BaseRenderer
         return $this->buildSvg($barcodeData, $data, $width, $height, $longBarPositions, $marginLeft, $marginRight);
     }
 
+    /**
+     * 渲染并将 SVG 写入文件
+     *
+     * 目标目录不存在时自动递归创建。写入失败（如目录不可写）返回 false。
+     *
+     * @param array<int> $barcodeData 条空模式数组
+     * @param string $data 显示文字
+     * @param string $filename 目标 SVG 文件路径
+     * @param array<string, mixed> $config 渲染配置项，可选
+     * @return bool 写入成功返回 true，失败返回 false
+     */
     public function saveToFile(array $barcodeData, string $data, string $filename, array $config = []): bool
     {
         $svgData = $this->render($barcodeData, $data, $config);
@@ -90,6 +117,14 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 直接输出SVG到浏览器
+     *
+     * 先渲染出 SVG 字符串，再以 image/svg+xml 类型及正确 Content-Length
+     * 输出到标准输出，并附带禁止缓存的响应头。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @param string $data 原始数据（用于下方文字）
+     * @param array $config 渲染配置覆盖项
+     * @return void
      */
     public function outputToBrowser(array $barcodeData, string $data, array $config = []): void
     {
@@ -104,6 +139,19 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 构建SVG并分析条码结构
+     *
+     * 依次输出背景（透明背景下跳过）、可选渐变定义、边框、每条矩形、
+     * Bearer Bar、文字与水印。背景与条色对比度不足 3:1 时自动改写为
+     * 黑白配色，transparent 背景则跳过对比度校验。
+     *
+     * @param array<int> $barcodeData 条空模式数组（正数为条、负数为空）
+     * @param string $data 原始数据（用于下方文字）
+     * @param int $width 画布总宽度（像素）
+     * @param int $height 画布总高度（像素）
+     * @param array<int> $longBarPositions 需要加长的条下标
+     * @param int $marginLeft 左边距（像素）
+     * @param int $marginRight 右边距（像素）
+     * @return string 完整的 SVG XML 字符串
      */
     protected function buildSvg(array $barcodeData, string $data, int $width, int $height, array $longBarPositions, int $marginLeft, int $marginRight): string
     {
@@ -200,6 +248,13 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 构建 Bearer Bar SVG 元素（ITF-14 标准框型）
+     *
+     * 于条区上下各绘制一条贯通左右的粗线，并在内容区左右两端补竖线，
+     * 形成闭合外框，厚度取 bearerBarWidth。
+     *
+     * @param int $contentLeft 内容区左边界 x 坐标（像素）
+     * @param int $contentRight 内容区右边界 x 坐标（像素）
+     * @return string 组成外框的 rect 片段
      */
     protected function buildBearerBar(int $contentLeft, int $contentRight): string
     {
@@ -227,6 +282,14 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 构建水印元素
+     *
+     * 按「字符数 × 字号 × 0.6」估算文本宽度，再依 watermarkPosition 计算
+     * 九宫格锚点坐标；角度非 0 时以文本中心为轴追加 rotate 变换。
+     * 文本经 XML 转义，避免破坏 SVG 结构。
+     *
+     * @param int $width 画布宽度（像素），用于右侧/居中定位
+     * @param int $height 画布高度（像素），用于底部/居中定位
+     * @return string 水印 text 元素片段
      */
     protected function buildWatermark(int $width, int $height): string
     {
@@ -302,6 +365,13 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 构建文字元素
+     *
+     * 条码结构含长条（EAN/UPC 等）时分段逐字符定位，否则整段按对齐方式绘制，
+     * 两条路径在无区域信息时均安全回退。
+     *
+     * @param string $data 要显示的完整条码数据
+     * @param int $marginLeft 左边距（像素），用于无长条时计算文字起点
+     * @return string 文字 text 元素片段（可能为空串）
      */
     protected function buildTextElements(string $data, int $marginLeft): string
     {
@@ -314,6 +384,13 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 简单文本（无长竖线）
+     *
+     * 整段文字作为一个 text 元素绘制，纵向位置受 textPosition 影响：
+     * top 时置于条区上方且不高于字号高度，否则置于条区下方。
+     *
+     * @param string $data 要显示的完整条码数据
+     * @param int $marginLeft 左边距（像素），作为左对齐起点
+     * @return string 单个 text 元素片段
      */
     protected function buildSimpleText(string $data, int $marginLeft): string
     {
@@ -349,6 +426,13 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 分段文本（长竖线特征条码）
+     *
+     * 先确认区域信息与分段结果可用，任一缺失都回退为整段文本，避免文字
+     * 整体消失；随后按分段计算动态字号与偏移，逐段生成 text 元素。
+     *
+     * @param string $data 要显示的完整条码数据
+     * @param int $marginLeft 左边距（像素），仅在回退时使用
+     * @return string 各分段 text 元素拼接结果
      */
     protected function buildSegmentedText(string $data, int $marginLeft): string
     {
@@ -378,6 +462,11 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 确定分段策略（与 PNG/HTML 渲染器共用 BaseRenderer 的实现）
+     *
+     * 直接委托 splitDisplaySegments()，保证三种渲染器的分段规则一致。
+     *
+     * @param string $data 要显示的完整条码数据
+     * @return list<array{text: string, region: string, type: string}> 分段列表，不适用时为空数组
      */
     protected function determineSegments(string $data): array
     {
@@ -386,6 +475,14 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 计算动态参数
+     *
+     * 依据多字符分段的平均单字宽度（或回退到总宽度）在基础字号上下浮动 2px，
+     * 并限制在 10-16 之间；同时按长条溢出高度算出文字偏移，最小 3px。
+     * 结果写入 dynamicFontSize 与 dynamicTextOffset 属性。
+     *
+     * @param list<array{text: string, region: string, type: string}> $segments 文字分段列表
+     * @param array<string, array<string, int>> $regions 各区域边界（left/right/center）
+     * @return void
      */
     protected function calculateDynamicParameters(array $segments, array $regions): void
     {
@@ -437,6 +534,15 @@ class SvgRenderer extends BaseRenderer
 
     /**
      * 构建单个分段
+     *
+     * 区域内只有 1 个字符时定位到区域中心（优先使用预置 center 坐标）；
+     * 多字符时把区域宽度等分，逐字符居中排布。区域不存在或文本为空时
+     * 返回空串。字号取 calculateDynamicParameters() 算出的动态字号。
+     *
+     * @param array{text: string, region: string, type: string} $segment 单个分段
+     * @param array<string, array<string, int>> $regions 各区域边界（left/right/center）
+     * @param int $textY 文字基线 y 坐标（像素）
+     * @return string 该分段生成的 text 元素片段
      */
     protected function buildSegment(array $segment, array $regions, int $textY): string
     {

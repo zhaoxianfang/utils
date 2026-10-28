@@ -204,6 +204,12 @@ class Code128Generator extends BaseGenerator
 
     /**
      * 选择起始字符集
+     *
+     * 首字符为控制字符（0-31）时用 A 集；前 4 位均为数字且数据长度不少于 2
+     * 时用 C 集（双位数字压缩）；其余情况默认用 B 集。
+     *
+     * @param string $data 待编码的原始数据（非空）
+     * @return string 起始字符集标识，取值 A/B/C
      */
     protected function chooseStartSet(string $data): string
     {
@@ -233,6 +239,13 @@ class Code128Generator extends BaseGenerator
 
     /**
      * 检查字符是否能在指定字符集中编码
+     *
+     * 仅判断该字节码是否落在 A/B 集的可用区间内；C 集按双位数字处理，
+     * 不在此方法覆盖范围内，故传入 C 集时恒返回 false。
+     *
+     * @param int $ord 字符的 ASCII 码值
+     * @param string $set 字符集标识（A/B/C）
+     * @return bool 可在该字符集中编码返回 true，否则返回 false
      */
     protected function canEncodeInSet(int $ord, string $set): bool
     {
@@ -245,6 +258,12 @@ class Code128Generator extends BaseGenerator
 
     /**
      * 为无法在当前集编码的字符选择合适的字符集
+     *
+     * 控制字符（0-31）只能落在 A 集；96-127 之间只能落在 B 集；
+     * 其余情况均返回 B 集。调用方需自行追加切换符使新集生效。
+     *
+     * @param int $ord 字符的 ASCII 码值
+     * @return string 建议切换到的字符集标识，取值 A/B
      */
     protected function chooseFallbackSetForChar(int $ord): string
     {
@@ -264,6 +283,13 @@ class Code128Generator extends BaseGenerator
 
     /**
      * 追加字符集切换符
+     *
+     * 当前集与目标集相同时直接返回，不做任何写入；否则把对应的 CODE_A/B/C
+     * 值追加到编码序列，并同步更新 $currentSet。目标集非法时抛 RuntimeException。
+     *
+     * @param string $currentSet 当前字符集标识（A/B/C），按引用更新为目标集
+     * @param string $newSet 目标字符集标识（A/B/C）
+     * @return void
      */
     protected function appendSetSwitch(string &$currentSet, string $newSet): void
     {
@@ -389,6 +415,9 @@ class Code128Generator extends BaseGenerator
 
     /**
      * 获取完整数据
+     *
+     * Code 128 的完整数据就是原始输入本身（校验位以编码值形式参与绘制，
+     * 不拼接进可读文本），因此这里直接返回 rawData。
      *
      * @return string 返回原始编码数据
      */

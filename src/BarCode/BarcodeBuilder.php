@@ -13,16 +13,34 @@ use zxf\Utils\BarCode\Renderer\HtmlRenderer;
 
 /**
  * 条形码构建器（增强版）
- * 
- * 提供流畅的API用于生成条形码
- * 支持链式调用配置和生成
- * 
+ *
+ * 提供流畅的链式 API 用于生成条形码，统一支持 EAN-13、Code 128 等全部条码类型，
+ * 并可在渲染阶段自定义尺寸、颜色、水印、渐变、圆角、Bearer Bar 等效果。
+ *
  * 功能特性：
  * - 支持所有条码类型
  * - 支持自定义尺寸、颜色
  * - 支持直接输出到浏览器
  * - 支持跳过校验位验证
  * - 支持设置整体宽度和高度
+ *
+ * @package zxf\Utils\BarCode
+ * @version 1.0.0
+ * @license MIT
+ *
+ * @example
+ * ```php
+ * // 生成一个 EAN-13 条码并保存为 PNG
+ * use zxf\Utils\BarCode\BarcodeBuilder;
+ *
+ * BarcodeBuilder::create()
+ *     ->type('ean13')
+ *     ->data('690123456789')
+ *     ->width(300)
+ *     ->height(100)
+ *     ->showText(true)
+ *     ->savePng('/tmp/ean13.png');
+ * ```
  */
 class BarcodeBuilder
 {
@@ -107,6 +125,11 @@ class BarcodeBuilder
     /** @var string 边框颜色（十六进制） */
     protected string $borderColor = '#000000';
 
+    /**
+     * 构造函数
+     *
+     * 初始化一个使用默认配置的构建器实例。
+     */
     public function __construct()
     {
         $this->config = new BarcodeConfig();
@@ -114,6 +137,9 @@ class BarcodeBuilder
 
     /**
      * 静态创建方法
+     *
+     * 以静态方式获取构建器实例，等价于 new self()，便于书写链式调用。
+     * 每次调用都返回全新实例，实例之间不共享任何配置。
      * 
      * @return self 返回构建器实例
      */
@@ -124,6 +150,10 @@ class BarcodeBuilder
 
     /**
      * 设置条码类型
+     *
+     * 根据类型名从工厂创建对应生成器并绑定当前配置；若此前已调用
+     * skipChecksum(true)，会把跳过校验的开关同步给新生成器。
+     * 重复调用会丢弃旧生成器，之前通过 type() 传入的类型名也随之覆盖。
      * 
      * @param string $type 条码类型（ean13, code128等）
      * @return self 支持链式调用
@@ -143,6 +173,9 @@ class BarcodeBuilder
 
     /**
      * 设置数据
+     *
+     * 只记录待编码的原始字符串，此处不做格式检查、不补校验位，真正的
+     * 校验发生在 generate() 阶段。重复调用会覆盖上一次的数据。
      * 
      * @param string $data 要编码的数据
      * @return self 支持链式调用
@@ -155,6 +188,9 @@ class BarcodeBuilder
 
     /**
      * 设置配置
+     *
+     * 将传入数组与当前配置做浅合并（同名键覆盖、未传的键保持原值），
+     * 重建配置对象；若生成器已创建则同步刷新其实例配置。
      * 
      * @param array $config 配置数组
      * @return self 支持链式调用
@@ -186,6 +222,9 @@ class BarcodeBuilder
 
     /**
      * 设置条码高度
+     *
+     * 高度指条与下方文字所占区域的高度（像素），不含上下边距；
+     * 最终写入配置项 height，实际绘制高度还会受整体高度约束。
      * 
      * @param int $height 条码高度（像素）
      * @return self 支持链式调用
@@ -197,6 +236,10 @@ class BarcodeBuilder
 
     /**
      * 设置整体宽度
+     *
+     * 指最终图片的宽度（像素，含左右边距）。渲染时会先扣除边距，再把
+     * 剩余宽度按模块总数均分得到单模块宽度；与 width() 同时设置时以
+     * width() 为准。
      * 
      * @param int $width 整体宽度（像素）
      * @return self 支持链式调用
@@ -209,6 +252,9 @@ class BarcodeBuilder
 
     /**
      * 设置整体高度
+     *
+     * 指最终图片的高度（像素，含上下边距）。渲染时会扣除边距、文字高度
+     * 与 Bearer Bar 占位后得到条码区高度，结果不小于 20 像素。
      * 
      * @param int $height 整体高度（像素）
      * @return self 支持链式调用
@@ -232,6 +278,9 @@ class BarcodeBuilder
 
     /**
      * 设置背景颜色
+     *
+     * 参数为十六进制颜色值（如 #FFFFFF），原样写入配置项 bgColor；
+     * 取值合法性由渲染器在解析颜色时判断。
      * 
      * @param string $color 十六进制颜色值
      * @return self 支持链式调用
@@ -243,6 +292,9 @@ class BarcodeBuilder
 
     /**
      * 设置条颜色
+     *
+     * 参数为十六进制颜色值（如 #000000），原样写入配置项 barColor；
+     * 与背景色的对比度是否足够由渲染器在渲染前校验。
      * 
      * @param string $color 十六进制颜色值
      * @return self 支持链式调用
@@ -272,6 +324,9 @@ class BarcodeBuilder
     /**
      * 设置水印
      *
+     * 仅记录水印文本与样式，渲染阶段由 configureRenderer() 统一下发给渲染器。
+     * 透明度被夹紧到 0-100，字号不小于 1，旋转角度限制在 -180 到 180 度之间。
+     *
      * @param string $text 水印文本
      * @param int $opacity 透明度（0-100，值越大越清晰）
      * @param int $fontSize 字号（GD内置1-5，TTF≥8）
@@ -296,6 +351,8 @@ class BarcodeBuilder
 
     /**
      * 设置水印位置
+     *
+     * 位置名不在允许列表内时静默回退为 center，不会抛出异常。
      *
      * @param string $position 位置（center/top/bottom/left/right/top-left/top-right/bottom-left/bottom-right）
      * @return self 支持链式调用
@@ -359,6 +416,9 @@ class BarcodeBuilder
     /**
      * 启用圆角条
      *
+     * 开启后条的两端按给定半径绘制为圆角，半径小于 0 时按 0 处理。
+     * 该效果需要渲染器支持，不支持时自动忽略。
+     *
      * @param int $radius 圆角半径（像素）
      * @return self 支持链式调用
      */
@@ -371,6 +431,9 @@ class BarcodeBuilder
 
     /**
      * 启用渐变效果
+     *
+     * 开启后条色由起始色向结束色做线性渐变，实际渲染时覆盖 barColor；
+     * 该效果需要渲染器支持，不支持时自动退化为纯色。
      *
      * @param string $startColor 起始颜色
      * @param string $endColor 结束颜色
@@ -386,6 +449,9 @@ class BarcodeBuilder
 
     /**
      * 设置字体大小
+     *
+     * 用于条码下方的可读文字，写入配置项 fontSize；小于 8 时按 8 处理，
+     * 以保证文字仍可辨识。
      *
      * @param int $size 字体大小（像素）
      * @return self
@@ -415,6 +481,10 @@ class BarcodeBuilder
      * - margin(10, 20, 30) 上10，左右20，下30
      * - margin(10, 20, 30, 40) 上10，右20，下30，左40
      *
+     * @param int $top 上边距（像素），必填
+     * @param int|null $right 右边距（像素），省略时取 $top
+     * @param int|null $bottom 下边距（像素），省略时取 $top
+     * @param int|null $left 左边距（像素），省略时取 $right，$right 也为空则取 $top
      * @return self
      */
     public function margin(int $top, ?int $right = null, ?int $bottom = null, ?int $left = null): self
@@ -428,6 +498,9 @@ class BarcodeBuilder
 
     /**
      * 设置静区
+     *
+     * 静区是条码左右两侧的空白区，用于保证识读设备能正确定位起止符。
+     * 宽度以模块数的倍数表示，小于 0 时按 0 处理。
      *
      * @param bool $show 是否显示静区
      * @param int $width 静区宽度（模块数量的倍数）
@@ -452,6 +525,8 @@ class BarcodeBuilder
     /**
      * 设置边框
      *
+     * 边框沿图片外沿绘制，宽度为 0 或负数时不绘制边框。
+     *
      * @param int $width 边框宽度（像素），0表示无边框
      * @param string $color 边框颜色（十六进制）
      * @return self
@@ -465,8 +540,11 @@ class BarcodeBuilder
 
     /**
      * 生成条码数据
-     * 
-     * @return array<int> 条空模式数组
+     *
+     * 先校验已设置条码类型与数据，再调用对应生成器得到条空模式数组。
+     *
+     * @return array<int> 条空模式数组（正数为条、负数为空）
+     * @throws \RuntimeException 当未设置条码类型或数据为空时抛出
      */
     public function generate(): array
     {
@@ -485,6 +563,10 @@ class BarcodeBuilder
     /**
      * 渲染为PNG
      *
+     * 尚未生成条码数据时先自动调用 generate()；随后依据 width()/totalWidth()/
+     * totalHeight() 计算缩放后的配置，并把水印、渐变、圆角等样式下发给
+     * PngRenderer。依赖 GD 扩展。
+     *
      * @return string PNG二进制数据
      */
     public function toPng(): string
@@ -502,6 +584,9 @@ class BarcodeBuilder
 
     /**
      * 渲染为SVG
+     *
+     * 尚未生成条码数据时先自动调用 generate()；若开启 transparentBackground()，
+     * 会把背景色改写为 transparent。SVG 为纯文本，可直接嵌入页面或写入文件。
      *
      * @return string SVG XML字符串
      */
@@ -525,6 +610,10 @@ class BarcodeBuilder
 
     /**
      * 直接输出PNG到浏览器
+     *
+     * 以 image/png 内容类型将条码 PNG 二进制数据输出到标准输出。
+     *
+     * @return void
      */
     public function outputPng(): void
     {
@@ -541,6 +630,10 @@ class BarcodeBuilder
 
     /**
      * 直接输出SVG到浏览器
+     *
+     * 以 image/svg+xml 内容类型将条码 SVG 字符串输出到标准输出。
+     *
+     * @return void
      */
     public function outputSvg(): void
     {
@@ -628,6 +721,9 @@ class BarcodeBuilder
     /**
      * 渲染为HTML
      *
+     * 尚未生成条码数据时先自动调用 generate()；输出为纯 HTML 片段，
+     * 不含 html/body 等外层标签，可直接嵌入现有页面。
+     *
      * @return string HTML字符串
      */
     public function toHtml(): string
@@ -663,6 +759,10 @@ class BarcodeBuilder
 
     /**
      * 直接输出HTML到浏览器
+     *
+     * 以 text/html 内容类型将条码 HTML 字符串输出到标准输出。
+     *
+     * @return void
      */
     public function outputHtml(): void
     {
@@ -704,6 +804,9 @@ class BarcodeBuilder
 
     /**
      * 获取校验位
+     *
+     * 由当前生成器基于已设置的 data 计算并返回校验位字符，不修改构建器状态，
+     * 也不会把校验位回写到数据中。未设置条码类型时抛异常。
      * 
      * @return string 校验位
      */
@@ -718,6 +821,8 @@ class BarcodeBuilder
 
     /**
      * 获取生成器实例
+     *
+     * 未调用 type() 前返回 null，可用返回值判断是否已选定条码类型。
      * 
      * @return BarcodeGeneratorInterface|null 生成器实例
      */
@@ -729,7 +834,12 @@ class BarcodeBuilder
     /**
      * 统一配置渲染器
      *
+     * 把构建器上累积的样式一次性写入渲染器：条码类型与长条位置来自生成器，
+     * 其余为对齐方式、渐变、圆角、水印及其位置/字体、Bearer Bar、边框。
+     * 未开启的选项不下发，保持渲染器自身默认值。
+     *
      * @param BaseRenderer $renderer 渲染器实例
+     * @return void
      */
     protected function configureRenderer(BaseRenderer $renderer): void
     {

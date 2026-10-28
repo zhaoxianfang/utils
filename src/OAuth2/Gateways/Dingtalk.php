@@ -11,6 +11,13 @@ use zxf\Utils\OAuth2\Connector\Gateway;
 use zxf\Utils\OAuth2\Exception\OAuthException;
 use zxf\Utils\OAuth2\Helper\ConstCode;
 
+/**
+ * 钉钉 OAuth2 授权登录网关
+ *
+ * 对接钉钉开放平台（https://open.dingtalk.com/），采用 OAuth2 授权码模式
+ * 获取用户身份凭证。内置钉钉特有的 userAccessToken 获取流程（驼峰参数、JSON 提交），
+ * 并提供获取授权跳转地址、用户信息、openid、令牌刷新与校验等能力。
+ */
 class Dingtalk extends Gateway
 {
     const API_BASE = 'https://api.dingtalk.com/';
@@ -20,6 +27,12 @@ class Dingtalk extends Gateway
 
     /**
      * 得到跳转地址
+     *
+     * 以钉钉 AuthorizeURL 为基地址拼接查询参数：client_id 取配置的 app_id，
+     * redirect_uri 取 callback，scope 缺省为 openid，state 缺省为空串，
+     * 并固定携带 prompt=consent 以强制显示授权确认页。
+     *
+     * @return string 完整的授权跳转 URL，需引导用户浏览器跳转访问
      */
     public function getRedirectUrl()
     {
@@ -120,6 +133,13 @@ class Dingtalk extends Gateway
 
     /**
      * 检验授权凭证AccessToken是否有效
+     *
+     * 用该 token 请求用户信息接口，能取到 nick 字段即视为有效；
+     * 未传 $accessToken 时取当前已获取的 accessToken。
+     * 网络异常、token 失效等任何异常都会被捕获并返回 false，不向外抛出。
+     *
+     * @param string|null $accessToken 待校验的 accessToken，null 表示使用当前 token
+     * @return bool 有效返回 true，无效或请求异常返回 false
      */
     public function validateAccessToken($accessToken = null)
     {
@@ -141,6 +161,13 @@ class Dingtalk extends Gateway
 
     /**
      * 刷新AccessToken续期
+     *
+     * 以 grantType=refresh_token 调用 userAccessToken 接口换取新令牌；
+     * 成功时把返回的完整响应整体替换到当前 token 缓存，后续调用可直接复用。
+     * 响应中不含 accessToken 时不做任何改动，直接返回 false。
+     *
+     * @param string $refreshToken 刷新令牌，来自首次授权返回的 refreshToken
+     * @return bool 刷新成功返回 true，失败返回 false
      */
     public function refreshToken($refreshToken)
     {

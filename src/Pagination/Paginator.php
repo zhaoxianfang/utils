@@ -10,9 +10,15 @@ use InvalidArgumentException;
  * 分页工具类
  * 提供分页数据计算、页码范围生成、SQL 偏移量计算、HTML 导航渲染等功能
  *
- * @package Pagination
+ * @package zxf\Utils\Pagination
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * $pager = new \zxf\Utils\Pagination\Paginator(100, 10, 1); // 总数 100，每页 10
+ * $pager->offset();        // 0（SQL OFFSET）
+ * $pager->totalPages();    // 10
+ * echo $pager->render('/list?page={page}'); // 输出 HTML 分页条
  */
 class Paginator
 {
@@ -69,6 +75,9 @@ class Paginator
     /**
      * 获取总页数
      *
+     * 按 ceil(total / perPage) 向上取整，并用 max(1, …) 兜底：
+     * 即使总记录数为 0 也会返回 1 页，避免下游出现除零或空导航。
+     *
      * @return int 总页数（至少为 1）
      */
     public function totalPages(): int
@@ -89,6 +98,9 @@ class Paginator
     /**
      * 获取每页记录数
      *
+     * 返回构造时设定的每页条数，构造阶段已校验其不小于 1，
+     * 因此该值始终为正数。
+     *
      * @return int 每页记录数
      */
     public function perPage(): int
@@ -98,6 +110,9 @@ class Paginator
 
     /**
      * 获取总记录数
+     *
+     * 返回构造时传入的原始总数，不做任何修正；与 totalPages() 的兜底不同，
+     * 总数为 0 时本方法返回的仍是 0。
      *
      * @return int 总记录数
      */
@@ -119,7 +134,10 @@ class Paginator
     /**
      * 是否存在上一页
      *
-     * @return bool 存在返回 true
+     * 以「钳制后的当前页」是否大于 1 判定，因此传入超出范围的页码时
+     * 结论依然正确（如 total=0 时恒为 false）。
+     *
+     * @return bool 存在上一页返回 true
      */
     public function hasPrevious(): bool
     {
@@ -129,7 +147,10 @@ class Paginator
     /**
      * 是否存在下一页
      *
-     * @return bool 存在返回 true
+     * 以「钳制后的当前页」是否小于总页数判定，因此当前页超出范围时
+     * 会先被收敛到最后一页，结果恒为 false。
+     *
+     * @return bool 存在下一页返回 true
      */
     public function hasNext(): bool
     {
@@ -138,6 +159,9 @@ class Paginator
 
     /**
      * 获取上一页页码
+     *
+     * 基于钳制后的当前页减 1 计算；已在第一页（含总数 0 的情况）时返回 null，
+     * 调用方应据此隐藏「上一页」按钮。
      *
      * @return int|null 上一页页码；不存在返回 null
      */
@@ -149,6 +173,9 @@ class Paginator
     /**
      * 获取下一页页码
      *
+     * 基于钳制后的当前页加 1 计算；已在最后一页时返回 null。
+     * 注意当前页被传入超出总页数的值时，会先收敛到最后一页，因此同样返回 null。
+     *
      * @return int|null 下一页页码；不存在返回 null
      */
     public function nextPage(): ?int
@@ -159,6 +186,8 @@ class Paginator
     /**
      * 获取首页页码
      *
+     * 固定返回 1（即使总记录数为 0 也是如此），便于前端统一渲染「首页」入口。
+     *
      * @return int 首页页码（始终为 1）
      */
     public function firstPage(): int
@@ -168,6 +197,9 @@ class Paginator
 
     /**
      * 获取尾页页码
+     *
+     * 等价于 totalPages()，同样有「至少 1 页」的兜底；
+     * 总记录数为 0 时返回 1 而不是 0。
      *
      * @return int 尾页页码
      */

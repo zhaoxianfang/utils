@@ -157,8 +157,16 @@ class Wechat extends Gateway
     }
 
     /**
-     * @return array|mixed|null
-     * @throws OAuthException
+     * 小程序登录：用前端获取的 code 换取会话凭证
+     *
+     * 参数由 accessTokenParams() 组装（appid/secret/grant_type/code），
+     * 并把 code 另存为 js_code 以兼容 jscode2session 接口的字段要求；
+     * 请求微信 jscode2session 接口后交给 parseToken() 解析，结果同时写入
+     * $this->token 缓存并作为返回值。注意该会话返回的是 openid + session_key，
+     * 并非可调用其他接口的 access_token。
+     *
+     * @return array|mixed|null 会话数据（含 openid、session_key、unionid 等）
+     * @throws OAuthException 请求或解析失败时抛出
      */
     public function applets(){
         /** 获取参数 */

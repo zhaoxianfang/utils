@@ -43,6 +43,12 @@ final class Mode extends AbstractEnum
 
     /**
      * 返回在特定二维码版本中使用的比特数
+     *
+     * 字符计数指示符的位宽随版本区间变化：1~9 取第 0 位、
+     * 10~26 取第 1 位、27~40 取第 2 位；若某模式这三个值相同则无差别。
+     *
+     * @param Version $version 目标二维码版本对象
+     * @return int 该模式的字符计数指示符所占的比特数
      */
     public function getCharacterCountBits(Version $version) : int
     {
@@ -57,6 +63,11 @@ final class Mode extends AbstractEnum
 
     /**
      * 返回用于编码此模式的四个比特
+     *
+     * 该值是 QR 规范中模式指示符的编码（如 NUMERIC 为 0x01、BYTE 为 0x04），
+     * 会作为每段数据的起始标记写入比特流。
+     *
+     * @return int 模式指示符的比特值
      */
     public function getBits() : int
     {

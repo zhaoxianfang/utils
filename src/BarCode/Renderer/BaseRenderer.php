@@ -87,6 +87,14 @@ abstract class BaseRenderer implements RendererInterface
     /** @var string 边框颜色（十六进制） */
     protected string $borderColor = '#000000';
 
+    /**
+     * 构造渲染器基类
+     *
+     * 初始化配置对象；长竖线高度比例优先采用 config->longBarRatio（默认 1.1），
+     * 未配置时回退到基类默认值 1.15。
+     *
+     * @param BarcodeConfig|null $config 条码配置对象；为 null 时创建默认配置
+     */
     public function __construct(?BarcodeConfig $config = null)
     {
         $this->config = $config ?? new BarcodeConfig();
@@ -96,6 +104,13 @@ abstract class BaseRenderer implements RendererInterface
         }
     }
 
+    /**
+     * 获取渲染器类型标识
+     *
+     * 使用 late static binding 返回子类定义的 TYPE 常量。
+     *
+     * @return string 渲染器类型标识（如 'png'、'svg'、'html'）
+     */
     public function getType(): string
     {
         return static::TYPE;
@@ -103,6 +118,12 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置条码类型
+     *
+     * 类型名决定文字分段策略（EAN-13/UPC-A/EAN-8 等各有布局），
+     * 取值应与生成器 getType() 的返回保持一致。
+     *
+     * @param string $type 条码类型标识，如 EAN-13、UPC-A、Code 128
+     * @return self 支持链式调用
      */
     public function setBarcodeType(string $type): self
     {
@@ -112,6 +133,12 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置长竖线位置
+     *
+     * 传入的是条空数组下标（与生成器 getLongBarPositions() 一致），
+     * 整体替换原有位置表；传空数组即关闭长条绘制。
+     *
+     * @param array<int> $positions 需要加长的条在条空数组中的下标
+     * @return self 支持链式调用
      */
     public function setLongBarPositions(array $positions): self
     {
@@ -121,6 +148,11 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置文本对齐方式
+     *
+     * 仅接受 left/center/right，其余取值一律按 center 处理。
+     *
+     * @param string $align 对齐方式（left/center/right）
+     * @return self 支持链式调用
      */
     public function setTextAlign(string $align): self
     {
@@ -130,6 +162,13 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 启用渐变效果
+     *
+     * 仅登记起止色并打开开关，是否真正生效由 gradientUsable() 在渲染时
+     * 结合背景对比度二次判定，对比不足会自动回退纯色。
+     *
+     * @param string $startColor 渐变起始颜色（十六进制）
+     * @param string $endColor 渐变结束颜色（十六进制）
+     * @return self 支持链式调用
      */
     public function enableGradient(string $startColor, string $endColor): self
     {
@@ -141,6 +180,12 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 启用圆角条
+     *
+     * 打开圆角开关并记录半径；半径不做夹紧，由具体渲染器在绘制时
+     * 按条宽自行收敛，避免圆角超过条宽导致形状异常。
+     *
+     * @param int $radius 圆角半径（像素）
+     * @return self 支持链式调用
      */
     public function enableRoundedBars(int $radius = 2): self
     {
@@ -159,6 +204,7 @@ abstract class BaseRenderer implements RendererInterface
      * @param int $fontSize 字号（默认 16）
      * @param string $color 颜色（十六进制格式）
      * @param int $angle 旋转角度（-180 到 180 度）
+     * @return self 支持链式调用
      */
     public function setWatermark(
         string $text,
@@ -177,6 +223,11 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置水印位置
+     *
+     * 位置名不在九宫格允许列表内时静默回退为 center，不抛异常。
+     *
+     * @param string $position 位置（center/top/bottom/left/right 及四角）
+     * @return self 支持链式调用
      */
     public function setWatermarkPosition(string $position): self
     {
@@ -187,6 +238,11 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置水印字体路径（TTF 字体）
+     *
+     * 传入 null 或文件不存在时置空，渲染器随即回退到 GD 内置字体。
+     *
+     * @param string|null $fontPath TTF 字体文件路径；null 表示不使用自定义字体
+     * @return self 支持链式调用
      */
     public function setWatermarkFontPath(?string $fontPath): self
     {
@@ -196,6 +252,11 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 启用 Bearer Bar（ITF-14 上下边框）
+     *
+     * Bearer Bar 是 ITF-14 规范要求的上下贯通粗线，厚度不足 1 像素时按 1 处理。
+     *
+     * @param int $width 边框厚度（像素）
+     * @return self 支持链式调用
      */
     public function enableBearerBar(int $width = 2): self
     {
@@ -206,6 +267,8 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 设置边框
+     *
+     * 边框沿图像外沿绘制，宽度小于 0 时按 0 处理（即不绘制边框）。
      *
      * @param int $width 边框宽度（像素）
      * @param string $color 边框颜色（十六进制）
@@ -260,7 +323,10 @@ abstract class BaseRenderer implements RendererInterface
     /**
      * 计算长竖线位置
      *
-     * @return array<int> 长竖线索引数组
+     * 基类不重新推导，仅回显已由 setLongBarPositions() 注入的位置表；
+     * 未注入时返回空数组。各渲染器据此统一取用长条下标。
+     *
+     * @return array<int> 长竖线索引数组，无数据时为空数组
      */
     protected function calculateLongBarPositions(): array
     {
@@ -275,6 +341,8 @@ abstract class BaseRenderer implements RendererInterface
      *
      * PNG/SVG 渲染器用 config->rotateLongBars 控制，HTML 渲染器此前忽略了该开关，
      * 此处统一判定，保证三种渲染器行为一致。
+     *
+     * @return bool 配置允许且存在长条位置时返回 true
      */
     protected function longBarsEnabled(): bool
     {
@@ -290,6 +358,7 @@ abstract class BaseRenderer implements RendererInterface
      * 【注意】data 可能是补齐校验位后的完整条码（如 EAN-13 的 13 位），
      * 这里只负责「按位拆分 + 分组」，不负责显示格式的变换。
      *
+     * @param string $data 待显示的完整条码数据（含校验位）
      * @return list<array{text: string, region: string, type: string}>
      */
     protected function splitDisplaySegments(string $data): array
@@ -373,6 +442,8 @@ abstract class BaseRenderer implements RendererInterface
      *
      * 以配置的 quietZoneWidth（模块倍数）为准，但保证不低于
      * EAN/UPC 规范要求的 11 个模块宽度。
+     *
+     * @return int 静区宽度（像素），已乘以当前模块大小
      */
     protected function quietZoneWidthPx(): int
     {
@@ -383,6 +454,14 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 分析条码结构，识别保护符位置和数据区域
+     *
+     * 把全部条的几何信息与长条列表写入 barcodeStructure；长条数量达到 6 个
+     * （EAN/UPC 系列的特征）时继续推导各区域边界，否则只保留基础信息。
+     *
+     * @param list<array{x:int,width:int,isLongBar:bool,elementIndex:int}> $bars 条元素几何信息
+     * @param int $totalWidth 图像总宽度（像素）
+     * @param int $marginLeft 左边距（像素），传 0 时取配置的 marginLeft
+     * @return void
      */
     protected function analyzeBarcodeStructure(array $bars, int $totalWidth, int $marginLeft = 0): void
     {
@@ -411,6 +490,12 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 分析 EAN/UPC 系列条码结构
+     *
+     * 按 x 坐标排序后取首两个长条为起始符、末两个为终止符、中间相邻两个为
+     * 中间分隔符，据此推导左右数据区与左右静区的边界，写入 regions。
+     *
+     * @param list<array{x:int,width:int,isLongBar:bool,elementIndex:int}> $longBars 长条几何信息（至少 6 个）
+     * @return void
      */
     protected function analyzeEANStructure(array $longBars): void
     {
@@ -469,6 +554,8 @@ abstract class BaseRenderer implements RendererInterface
      * 渐变把条带从 startColor 渐变到 endColor：若任一端与背景对比不足（WCAG < 3:1），
      * 条形浅色段会被解码器当作空白（起始符/终止符丢失），整码拒读。
      * 两端任一非合法 hex 或对比不足时自动回退纯色条，保证可扫性优先。
+     *
+     * @return bool 渐变可安全启用返回 true，否则返回 false
      */
     protected function gradientUsable(): bool
     {
@@ -491,6 +578,13 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 验证颜色对比度
+     *
+     * 按 WCAG 相对亮度公式计算两色的对比度，阈值为 3:1（大字号/图形元素
+     * 的最低要求）。低于阈值时视为不可靠配色。
+     *
+     * @param string $bgColor 背景色（十六进制）
+     * @param string $barColor 条色（十六进制）
+     * @return bool 对比度达到 3:1 返回 true，否则返回 false
      */
     protected function validateContrast(string $bgColor, string $barColor): bool
     {
@@ -506,6 +600,12 @@ abstract class BaseRenderer implements RendererInterface
 
     /**
      * 获取颜色的相对亮度
+     *
+     * 按 WCAG 2.x 定义先把 sRGB 分量线性化再加权求和，结果范围 0-1，
+     * 数值越大越亮。
+     *
+     * @param string $color 颜色值（十六进制，3 位或 6 位，可带 #）
+     * @return float 相对亮度（0-1）
      */
     protected function getRelativeLuminance(string $color): float
     {
@@ -550,7 +650,10 @@ abstract class BaseRenderer implements RendererInterface
     /**
      * 十六进制颜色转换为 RGB 数组
      *
-     * @return array<int> RGB 数组 [R, G, B]
+     * 支持 3 位缩写（每位复制成两位）与 6 位写法，# 前缀可有可无。
+     *
+     * @param string $hex 十六进制颜色值
+     * @return array<int> RGB 数组 [R, G, B]，各分量 0-255
      */
     protected function hexToRgb(string $hex): array
     {

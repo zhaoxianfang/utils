@@ -133,6 +133,12 @@ class Token
 
     /**
      * 使用当前密钥创建签名
+     *
+     * 以 HMAC-SHA256 计算原始二进制摘要，再做 URL-Safe Base64 编码，
+     * 结果可直接拼进以 "." 分隔的 Token 中。密钥取构造时传入的 secret。
+     *
+     * @param string $data 待签名的原文（Token 中为「header.payload」两段拼接）
+     * @return string URL-Safe Base64 编码后的签名串
      */
     private function sign(string $data): string
     {
@@ -141,6 +147,12 @@ class Token
 
     /**
      * URL-Safe Base64 编码
+     *
+     * 把标准 Base64 中的加号换成减号、斜杠换成下划线，并去掉结尾的等号填充，
+     * 使结果可直接用于 URL 与文件名。
+     *
+     * @param string $data 原始字符串
+     * @return string 不含 "+"、"/"、"=" 的 Base64 字符串
      */
     private static function base64UrlEncode(string $data): string
     {
@@ -149,6 +161,14 @@ class Token
 
     /**
      * URL-Safe Base64 解码
+     *
+     * 先把 URL-Safe 字符还原为标准 Base64 字符，再按需补齐等号填充，
+     * 使用严格模式解码；非法字符或长度异常时抛异常而非静默返回空串。
+     *
+     * @param string $data URL-Safe Base64 字符串（通常不带等号填充）
+     * @return string 解码后的原始字符串
+     *
+     * @throws RuntimeException 内容不是合法 Base64 时抛出
      */
     private static function base64UrlDecode(string $data): string
     {

@@ -11,9 +11,20 @@ use InvalidArgumentException;
  * 提供邮箱、手机号、URL、IP、身份证、银行卡、车牌、统一社会信用代码等常见数据格式的验证
  * 支持批量管道式验证和自定义正则规则
  *
- * @package Validate
+ * @package zxf\Utils\Validate
  * @version 1.0.0
  * @license MIT
+ *
+ * @example
+ * use zxf\Utils\Validate\Validator;
+ * Validator::isEmail('a@b.com');       // true
+ * Validator::isMobile('13812345678');  // true
+ * Validator::isCreditCode('91110108MA01ABC23X'); // 统一社会信用代码
+ * // 批量验证：返回字段 => 错误信息的数组，空数组表示全部通过
+ * $errors = Validator::batch(
+ *     ['email' => 'x', 'age' => '20'],
+ *     ['email' => 'required|email', 'age' => 'required|integer|between:1,120']
+ * );
  */
 class Validator
 {
@@ -231,6 +242,9 @@ class Validator
     /**
      * 验证 QQ 号格式
      *
+     * 规则：以 1-9 开头、后续为数字，总长度为 5~11 位（即 1 位首位 + 4~10 位数字）。
+     * 仅做格式校验，不验证号码是否真实存在；空串与纯数字之外的字符都会失败。
+     *
      * @param string $qq QQ 号码
      * @return bool 格式有效返回 true
      */
@@ -241,6 +255,9 @@ class Validator
 
     /**
      * 验证微信号格式
+     *
+     * 规则：以英文字母开头，后接字母、数字、下划线或连字符，总长 6~20 位。
+     * 微信官方还要求微信号唯一且未被占用，这类业务约束需另行校验，本方法只管格式。
      *
      * @param string $wechat 微信号
      * @return bool 格式有效返回 true

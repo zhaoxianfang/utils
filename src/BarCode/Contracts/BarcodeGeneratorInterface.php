@@ -14,6 +14,10 @@ interface BarcodeGeneratorInterface
 {
     /**
      * 生成条形码数据
+     *
+     * 实现方应先校验数据格式，再按所选编码规则（含起始符、数据符、校验位
+     * 与终止符）展开为条空序列。返回数组中的元素为模块宽度单位数：正数
+     * 表示条、负数表示空，绝对值即该模块的宽度。
      * 
      * @param string $data 要编码的数据
      * @return array 返回条形码条空模式数组，每个元素表示一个条或空的宽度单位数
@@ -38,6 +42,9 @@ interface BarcodeGeneratorInterface
 
     /**
      * 计算校验位
+     *
+     * 按当前条码类型的加权规则对传入数据求校验位，返回单个字符（数字或
+     * 字母，依类型而定）。实现方通常先去除空白并按需补位后再计算。
      * 
      * @param string $data 要计算校验位的数据
      * @return string 返回计算得到的校验位（单个字符）
@@ -46,6 +53,8 @@ interface BarcodeGeneratorInterface
 
     /**
      * 设置配置对象
+     *
+     * 用传入配置整体替换生成器当前配置，后续 generate() 将按新配置行为执行。
      * 
      * @param \zxf\Utils\BarCode\DTO\BarcodeConfig $config 配置对象
      * @return self 支持链式调用

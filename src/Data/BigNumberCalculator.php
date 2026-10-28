@@ -22,7 +22,17 @@ use OverflowException;
  * 7. 内存优化和资源管理
  *
  * 使用demo
+ * $sum = BigNumberCalculator::add('12345678901234567890', '98765432109876543210');
+ * $prod = BigNumberCalculator::multiply('99999999999999999999', '88888888888888888888');
  *
+ * @example
+ * // 大数加法与乘法（支持任意精度，不受 int 范围限制）
+ * $sum  = BigNumberCalculator::add('12345678901234567890', '98765432109876543210');
+ * $prod = BigNumberCalculator::multiply('99999999999999999999', '88888888888888888888');
+ *
+ * @package zxf\Utils\Data
+ * @version 1.0.0
+ * @license MIT
  * @link https://weisifang.com/docs/doc/2_289
  */
 class BigNumberCalculator
@@ -92,6 +102,11 @@ class BigNumberCalculator
 
     /**
      * 大数加法
+     *
+     * 按十进制逐位相加并处理进位，支持任意长度的整数字符串与负号前缀；
+     * 任一操作数为负数时转交 addSigned() 按符号规则处理。结果会去掉前导零，
+     * 空串按 0 处理。结果超过 SCIENTIFIC_NOTATION_THRESHOLD 且开启
+     * autoScientific 时转换为科学计数法。
      *
      * @param string $a 被加数字符串
      * @param string $b 加数字符串
@@ -163,6 +178,10 @@ class BigNumberCalculator
     /**
      * 大数减法
      *
+     * 先比较绝对值决定结果符号与运算顺序，再借 subtractPositive() 做逐位
+     * 相减；被减数或减数为负时转换为对应的加法/取负组合。两数相等直接返回
+     * "0"，结果无前导零。
+     *
      * @param string $a 被减数字符串
      * @param string $b 减数字符串
      * @param bool $autoScientific 是否自动转换为科学计数法
@@ -224,6 +243,11 @@ class BigNumberCalculator
 
     /**
      * 大数乘法
+     *
+     * 按位数自动选择算法：双方均不超过 SIMPLE_MULTIPLY_THRESHOLD 时用
+     * simpleMultiply()，长度差异悬殊时用 asymmetricMultiply()，其余用
+     * Karatsuba。乘积按去符号后的绝对值缓存（同时写入反向键），命中则直接
+     * 复用；任一操作数为 0 时返回 "0"，为 1 时直接返回另一操作数。
      *
      * @param string $a 被乘数字符串
      * @param string $b 乘数字符串
@@ -322,6 +346,11 @@ class BigNumberCalculator
     /**
      * 大数除法
      *
+     * 除数为 0 时抛出 DivisionByZeroError；|a| < |b| 且 precision 为 0 时直接
+     * 返回 "0"，两数相等返回 "1"/"-1"。符号单独处理，数值部分按除数位数选择
+     * simpleDivide()（小除数）或 longDivide()（大除数），precision 决定保留的
+     * 小数位数，结果为截断而非四舍五入。
+     *
      * @param string $a 被除数字符串
      * @param string $b 除数字符串
      * @param int $precision 小数精度位数（默认为0，只返回整数部分）
@@ -355,7 +384,7 @@ class BigNumberCalculator
         $b = self::removeLeadingZeros($b);
 
         // 处理特殊情况
-        if ($b === '') {
+        if ($b === '' || $b === '0') {
             throw new DivisionByZeroError('Division by zero');
         }
         if ($a === '') {
@@ -399,11 +428,18 @@ class BigNumberCalculator
     /**
      * 大数幂运算
      *
+     * 使用快速幂（平方求幂）逐位处理指数，底数为负时按指数奇偶决定结果符号；
+     * 底数为空串返回 "0"，指数为 "0" 返回 "1"，底数为 "1" 时直接返回 ±1。
+     * 结果按「底数^指数」缓存；任一步结果超过 MAX_RESULT_LENGTH 抛
+     * OverflowException。指数按十进制整数逐位减半处理。
+     * 负指数结果不是整数，除底数为 1 的情形外一律抛 InvalidArgumentException。
+     *
      * @param string $base 底数字符串
      * @param string $exponent 指数字符串
      * @param bool $autoScientific 是否自动转换为科学计数法
      * @return string 幂运算结果字符串
-     * @throws InvalidArgumentException 当输入不是有效数字时抛出
+     * @throws InvalidArgumentException 当输入不是有效数字或指数为负数时抛出
+     * @throws OverflowException 当结果长度超过上限时抛出
      */
     public static function power(string $base, string $exponent, bool $autoScientific = false): string
     {
@@ -440,6 +476,12 @@ class BigNumberCalculator
         if ($base === '1') {
             self::$stats['power']['time'] += microtime(true) - $startTime;
             return $negative ? '-1' : '1';
+        }
+
+        // 负指数：结果为小数，本类只处理整数串。此处显式拒绝，
+        // 否则快速幂会把 "-" 当作数字位逐位处理而得出错误结果
+        if (self::isNegative($exponent)) {
+            throw new InvalidArgumentException('Negative exponent is not supported: ' . $exponent);
         }
 
         // 检查缓存
@@ -684,7 +726,16 @@ class BigNumberCalculator
     }
 
     /**
-     * 测试辅助方法
+     * 测试辅助方法：执行一次运算并打印性能报告
+     *
+     * 先重置统计与缓存，再调用传入的可执行体并计时，随后输出结果摘要（超长时
+     * 附带两种科学计数法表示）、耗时、结果长度以及各运算的调用次数、耗时与
+     * 缓存命中率。运算过程中抛出的异常会被捕获并打印，不会向外传播。
+     *
+     * @param string $description 测试用例描述，作为报告标题输出
+     * @param callable $operation 待测运算，需返回字符串结果
+     * @param mixed ...$args 逐个透传给 $operation 的参数
+     * @return void
      */
     public static function analysis(string $description, callable $operation, ...$args): void
     {
@@ -742,6 +793,11 @@ class BigNumberCalculator
 
     /**
      * 获取性能统计信息
+     *
+     * 返回各类运算的调用次数与累计耗时、缓存命中/未命中次数以及内存峰值与
+     * 当前占用（字节）。返回的是内部数组的副本，修改它不会影响统计状态。
+     *
+     * @return array 统计信息，含 add/subtract/multiply/divide/power/tetration、cache 与 memory 分组
      */
     public static function getStats(): array
     {
@@ -750,6 +806,11 @@ class BigNumberCalculator
 
     /**
      * 重置计算器状态
+     *
+     * 清空幂、乘法与幂塔三处缓存，把所有运算的计数与耗时归零，并在环境
+     * 支持时强制回收循环引用，使后续统计从干净状态重新累计。
+     *
+     * @return void
      */
     public static function reset(): void
     {
@@ -787,6 +848,14 @@ class BigNumberCalculator
 
     /**
      * 带符号的加法处理
+     *
+     * 按两个操作数的符号组合转换为「同号相加取负」或「异号相减」：
+     * 双负返回 -( |a|+|b| )，a 负返回 |b|-|a|，其余返回 |a|-|b|。
+     * 仅由 add() 在检测到负号时调用。
+     *
+     * @param string $a 加数，可带负号
+     * @param string $b 加数，可带负号
+     * @return string 和的结果字符串
      */
     private static function addSigned(string $a, string $b): string
     {
@@ -806,6 +875,13 @@ class BigNumberCalculator
 
     /**
      * 正数减法（a >= b）
+     *
+     * 从低位向高位逐位相减并处理借位，结果去除前导零；结果为 0 时返回 "0"。
+     * 调用方必须保证 $a 的绝对值不小于 $b，否则结果无意义。
+     *
+     * @param string $a 被减数，仅含数字且无符号
+     * @param string $b 减数，仅含数字且无符号，绝对值不得大于 $a
+     * @return string 差的绝对值字符串，无前导零
      */
     private static function subtractPositive(string $a, string $b): string
     {
@@ -832,7 +908,14 @@ class BigNumberCalculator
     }
 
     /**
-     * 简单乘法算法
+     * 简单乘法算法（竖式逐位相乘）
+     *
+     * 以长度之和的结果数组累加每位乘积与进位，时间复杂度 O(n·m)。
+     * 仅处理无符号纯数字串，结果去除前导零，全零时返回 "0"。
+     *
+     * @param string $a 被乘数，仅含数字且无符号
+     * @param string $b 乘数，仅含数字且无符号
+     * @return string 积的结果字符串
      */
     private static function simpleMultiply(string $a, string $b): string
     {
@@ -859,6 +942,13 @@ class BigNumberCalculator
 
     /**
      * 非对称乘法优化
+     *
+     * 在两个操作数长度差异悬殊时使用：先确保 $a 更长，再逐位取较短的 $b
+     * 乘以 $a 并左移相应位数后累加。$b 中为 0 的位直接跳过以减少运算。
+     *
+     * @param string $a 被乘数，仅含数字且无符号
+     * @param string $b 乘数，仅含数字且无符号
+     * @return string 积的结果字符串
      */
     private static function asymmetricMultiply(string $a, string $b): string
     {
@@ -884,7 +974,15 @@ class BigNumberCalculator
     }
 
     /**
-     * Karatsuba快速乘法算法
+     * Karatsuba 快速乘法算法
+     *
+     * 按较短操作数长度折半拆分高低位，用三次乘法（z0/z1/z2）与加减移位
+     * 组合出结果，复杂度约 O(n^1.585)。任一操作数短于 KARATSUBA_THRESHOLD
+     * 时退化为 simpleMultiply()，递归调用经由 multiply()（含缓存）。
+     *
+     * @param string $a 被乘数，仅含数字且无符号
+     * @param string $b 乘数，仅含数字且无符号
+     * @return string 积的结果字符串
      */
     private static function karatsubaMultiply(string $a, string $b): string
     {
@@ -921,7 +1019,15 @@ class BigNumberCalculator
     }
 
     /**
-     * 简单除法算法
+     * 简单除法算法（小除数）
+     *
+     * 适用于除数为单个数位量级的场景：把除数转换为 int，逐位做「余数*10+当前位」
+     * 的短除法。precision 大于 0 且有余数时继续取小数位，结果为截断而非四舍五入。
+     *
+     * @param string $a 被除数，仅含数字且无符号
+     * @param string $b 除数，仅含数字且无符号，长度需在 int 可表示范围内
+     * @param int $precision 保留的小数位数，0 表示只取整数部分
+     * @return string 商的结果字符串
      */
     private static function simpleDivide(string $a, string $b, int $precision): string
     {
@@ -959,7 +1065,16 @@ class BigNumberCalculator
     }
 
     /**
-     * 长除法算法
+     * 长除法算法（大除数）
+     *
+     * 逐位下拉被除数形成当前余数，用除数首位估算商位（上限 9）并通过乘法回
+     * 代校正，再减去乘积得到新余数；precision 大于 0 且有余数时继续下拉补零
+     * 取小数位。全程使用字符串运算，不依赖浮点。
+     *
+     * @param string $a 被除数，仅含数字且无符号
+     * @param string $b 除数，仅含数字且无符号，长度可超过 int 范围
+     * @param int $precision 保留的小数位数，0 表示只取整数部分
+     * @return string 商的结果字符串
      */
     private static function longDivide(string $a, string $b, int $precision): string
     {
@@ -1033,7 +1148,13 @@ class BigNumberCalculator
     }
 
     /**
-     * 数字左移
+     * 十进制左移（末尾补零）
+     *
+     * 相当于乘以 10^$shift；$shift 不大于 0 时原样返回，不做裁剪或报错。
+     *
+     * @param string $num 数字字符串
+     * @param int $shift 补零个数
+     * @return string 左移后的数字字符串
      */
     private static function shiftLeft(string $num, int $shift): string
     {
@@ -1041,7 +1162,12 @@ class BigNumberCalculator
     }
 
     /**
-     * 判断数字是否为奇数
+     * 判断十进制整数的末位是否为奇数
+     *
+     * 仅看最后一位字符，因此不受数字长度限制；带负号的输入同样有效。
+     *
+     * @param string $num 数字字符串
+     * @return bool 末位为 1/3/5/7/9 时返回 true
      */
     private static function isOdd(string $num): bool
     {
@@ -1049,7 +1175,13 @@ class BigNumberCalculator
     }
 
     /**
-     * 大数除以2
+     * 大数除以 2（向下取整）
+     *
+     * 逐位短除，余数进位到下一轮；结果去掉前导零，全零时返回 "0"。用于快速幂
+     * 中不断折半指数。
+     *
+     * @param string $num 被除数，仅含数字且无符号
+     * @return string 商的结果字符串
      */
     private static function divideByTwo(string $num): string
     {
@@ -1070,7 +1202,14 @@ class BigNumberCalculator
     }
 
     /**
-     * 比较两个正数的大小
+     * 比较两个非负整数的绝对值大小
+     *
+     * 先去掉前导零，再先比位数、后逐位比较：
+     * 返回 1 表示 $a > $b，-1 表示 $a < $b，0 表示两者相等。
+     *
+     * @param string $a 数字字符串，仅含数字且无符号
+     * @param string $b 数字字符串，仅含数字且无符号
+     * @return int 1（a 大）、-1（b 大）或 0（相等）
      */
     private static function compareAbsolute(string $a, string $b): int
     {
@@ -1095,7 +1234,15 @@ class BigNumberCalculator
     }
 
     /**
-     * 清理缓存
+     * 清理超限的运算缓存
+     *
+     * 对乘法、幂、幂塔三个缓存分别检查：容量超过 CACHE_LIMIT 时按保留比例
+     * 裁掉头部旧条目（$force 为 true 时保留比例降为 0.2，清理更激进）。
+     * 内置重入保护，清理过程中重复调用会立即返回，避免与 updateMemoryStats()
+     * 互递归；$force 为 true 时还会触发一次循环引用回收。
+     *
+     * @param bool $force 是否为内存告警下的强制清理
+     * @return void
      */
     private static function cleanCache(bool $force = false): void
     {
@@ -1157,7 +1304,14 @@ class BigNumberCalculator
     }
 
     /**
-     * 验证数字字符串
+     * 验证单个数字字符串
+     *
+     * 仅接受可选负号加十进制整数的形式（如 "-123"、"0"）；空串、小数、
+     * 科学计数法、含空白或非数字字符的输入都会被拒绝。
+     *
+     * @param string $num 待验证的数字字符串
+     * @return void
+     * @throws InvalidArgumentException 输入为空或格式非法时抛出
      */
     private static function validateNumber(string $num): void
     {
@@ -1171,7 +1325,13 @@ class BigNumberCalculator
     }
 
     /**
-     * 验证多个数字字符串
+     * 批量验证数字字符串
+     *
+     * 按参数顺序逐个调用 validateNumber()，遇到第一个非法值即抛出异常。
+     *
+     * @param string ...$nums 待验证的数字字符串（可变参数）
+     * @return void
+     * @throws InvalidArgumentException 任一参数为空或格式非法时抛出
      */
     private static function validateNumbers(string ...$nums): void
     {
@@ -1181,7 +1341,12 @@ class BigNumberCalculator
     }
 
     /**
-     * 判断是否为负数
+     * 判断是否以负号开头
+     *
+     * 仅检查首字符是否为 "-"，不做格式校验，也不识别 "-0" 这类语义上的零。
+     *
+     * @param string $num 数字字符串
+     * @return bool 以 "-" 开头时返回 true
      */
     private static function isNegative(string $num): bool
     {
@@ -1189,7 +1354,12 @@ class BigNumberCalculator
     }
 
     /**
-     * 取反数字
+     * 取反数字符号
+     *
+     * 零（"0"）保持为 "0"，其余正数前加 "-"、负数去掉 "-"；不处理前导零。
+     *
+     * @param string $num 数字字符串
+     * @return string 取反后的数字字符串
      */
     private static function negate(string $num): string
     {
@@ -1201,7 +1371,13 @@ class BigNumberCalculator
     }
 
     /**
-     * 移除前导零
+     * 移除数字的前导零
+     *
+     * 保留负号，去掉整数部分开头的 0；全部为 0 或去空后统一返回 "0"
+     * （因此本方法不会返回空串，调用方的空串分支实际不会命中）。
+     *
+     * @param string $num 数字字符串，可带负号
+     * @return string 去除前导零后的数字字符串，最小为 "0"
      */
     private static function removeLeadingZeros(string $num): string
     {

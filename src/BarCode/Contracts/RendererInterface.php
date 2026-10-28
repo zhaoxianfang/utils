@@ -14,6 +14,9 @@ interface RendererInterface
 {
     /**
      * 渲染条形码
+     *
+     * 由具体渲染器决定返回类型：位图渲染器返回二进制字符串，矢量/文本
+     * 渲染器返回标记文本。$config 用于单次渲染覆盖默认配置。
      * 
      * @param array  $barcodeData 条形码条空模式数组
      * @param string $data         原始数据
@@ -35,6 +38,8 @@ interface RendererInterface
 
     /**
      * 获取渲染器类型
+     *
+     * 返回小写类型名用于区分输出格式，如 png、svg、html。
      * 
      * @return string 返回渲染器类型名称（如'png'、'svg'等）
      */

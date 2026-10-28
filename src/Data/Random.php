@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace zxf\Utils\Data;
 
 use InvalidArgumentException;
-use Random\RandomException;
 use RuntimeException;
 
 /**
@@ -14,7 +13,15 @@ use RuntimeException;
  * 提供密码、颜色、UUID v4、假数据（姓名、邮箱、IP）等常用随机数据的生成。
  * 所有随机操作均基于 PHP 8.2+ 的 cryptographically secure 随机函数。
  *
- * @package Data
+ * @example
+ * // 生成一个 16 位、包含大小写字母与数字的随机密码
+ * $pwd = Random::password(16);
+ * // 生成一个标准 UUID v4
+ * $uuid = Random::uuid();
+ * // 生成一个随机中文姓名
+ * $name = Random::chineseName();
+ *
+ * @package zxf\Utils\Data
  * @version 1.0.0
  * @license MIT
  */
@@ -38,7 +45,7 @@ class Random
      * @param bool $numbers 包含数字
      * @param bool $symbols 包含特殊符号
      * @return string 生成的密码
-     * @throws RandomException
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function password(int $length = 16, bool $upper = true, bool $lower = true, bool $numbers = true, bool $symbols = true): string
     {
@@ -76,6 +83,7 @@ class Random
      *
      * @param bool $withDashes 是否包含连字符（默认 true）
      * @return string UUID 字符串
+     * @throws \Exception 当 CSPRNG（加密安全随机数生成器）不可用时抛出
      */
     public static function uuid(bool $withDashes = true): string
     {
@@ -103,6 +111,7 @@ class Random
      *
      * @param bool $withHash 是否包含 # 前缀（默认 true）
      * @return string 如 #3f7a2c
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function hexColor(bool $withHash = true): string
     {
@@ -123,7 +132,7 @@ class Random
                 'g' => random_int(0, 255),
                 'b' => random_int(0, 255),
             ];
-        } catch (RandomException $e) {
+        } catch (\Exception $e) {
             // 不允许静默吞掉异常后返回 null：方法签名声明返回 array，
             // 在严格模式下返回 null 会触发 TypeError，且调用方无法区分失败原因。
             // 直接向上抛出，让调用方决定如何处理 CSPRNG 不可用的情况。
@@ -135,6 +144,7 @@ class Random
      * 生成随机中文姓名（2-3 个字）
      *
      * @return string 如 "李明"
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function chineseName(): string
     {
@@ -150,6 +160,7 @@ class Random
      * 生成随机邮箱地址
      *
      * @return string 如 user123@example.com
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function email(): string
     {
@@ -163,6 +174,7 @@ class Random
      *
      * @param bool $private 是否允许私有地址（默认 true）
      * @return string 如 192.168.1.1
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function ipv4(bool $private = true): string
     {
@@ -185,6 +197,7 @@ class Random
      *
      * @param string $separator 分隔符（默认 :）
      * @return string 如 00:1a:2b:3c:4d:5e
+     * @throws \Exception 当 CSPRNG 不可用时抛出
      */
     public static function mac(string $separator = ':'): string
     {
@@ -202,6 +215,7 @@ class Random
      * @param string $start  起始日期
      * @param string $end    结束日期
      * @return string
+     * @throws InvalidArgumentException 当日期范围字符串无法解析时抛出
      */
     public static function dateTime(string $format = 'Y-m-d H:i:s', string $start = '-1 year', string $end = 'now'): string
     {
@@ -220,6 +234,7 @@ class Random
      * @template T
      * @param array<T> $array 输入数组
      * @return T
+     * @throws InvalidArgumentException 当数组为空时抛出
      */
     public static function pick(array $array): mixed
     {
@@ -236,6 +251,7 @@ class Random
      * @param array<T> $array  输入数组
      * @param int      $count  抽取数量
      * @return array<T>
+     * @throws InvalidArgumentException 当数组为空或抽取数量超出合法范围时抛出
      */
     public static function pickMany(array $array, int $count): array
     {
@@ -261,6 +277,7 @@ class Random
      * @param int    $length  长度
      * @param string $charset 字符集
      * @return string
+     * @throws InvalidArgumentException 当长度小于 1 或字符集为空时抛出
      */
     public static function string(int $length = 16, string $charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'): string
     {

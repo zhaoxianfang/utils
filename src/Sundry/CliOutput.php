@@ -91,6 +91,11 @@ class CliOutput
 
     const ANSI_HIDDEN = "\033[8m";
 
+    /**
+     * 构造命令行输出器，非 CLI 环境下直接抛出异常
+     *
+     * @throws \RuntimeException 当前不是命令行环境时抛出
+     */
     public function __construct()
     {
         // 检查环境
@@ -167,7 +172,13 @@ class CliOutput
     }
 
     /**
-     * 提示
+     * 输出提示信息
+     *
+     * 以「指定颜色 + 加粗」样式打印一行文本并换行，默认绿色，用于常规成功/提示类输出。
+     *
+     * @param  string  $test  要输出的提示文本
+     * @param  string  $color  文本颜色对应的 ANSI 颜色代码，默认绿色（ANSI_GREEN）
+     * @return void 无返回值，直接写入标准输出
      */
     public function info(string $test, $color = self::ANSI_GREEN)
     {
@@ -175,7 +186,12 @@ class CliOutput
     }
 
     /**
-     * 错误
+     * 输出错误信息
+     *
+     * 以红色加粗样式打印一行文本并换行，用于错误提示；仅影响终端显示，不中断程序执行。
+     *
+     * @param  string  $test  要输出的错误文本
+     * @return void 无返回值，直接写入标准输出
      */
     public function error(string $test)
     {
@@ -183,7 +199,12 @@ class CliOutput
     }
 
     /**
-     * 警告
+     * 输出警告信息
+     *
+     * 以黄色加粗样式打印一行文本并换行，用于风险/异常提醒；仅影响终端显示，不中断程序执行。
+     *
+     * @param  string  $test  要输出的警告文本
+     * @return void 无返回值，直接写入标准输出
      */
     public function warning(string $test)
     {
@@ -191,10 +212,13 @@ class CliOutput
     }
 
     /**
-     *  闪烁文字
+     * 输出闪烁文本
      *
-     * @param  string  $test  闪烁文字
-     * @param  string  $color  色闪烁文字的颜色,默认黄色
+     * 以 ANSI 闪烁样式打印一行文本并换行；终端不支持闪烁控制符时退化为普通彩色文本。
+     *
+     * @param  string  $test  要输出的文本
+     * @param  string  $color  文本颜色对应的 ANSI 颜色代码，默认黄色（ANSI_YELLOW）
+     * @return void 无返回值，直接写入标准输出
      */
     public function blink(string $test, string $color = self::ANSI_YELLOW): void
     {
@@ -253,7 +277,10 @@ class CliOutput
     /**
      * 计算单元格的显示宽度（中文等全角字符按 2 个英文字符宽度计）
      *
+     * 宽度 = UTF-8 字符数 + 中文汉字个数，非字符串标量会先转为字符串再计算。
+     *
      * @param  mixed  $cell  单元格内容
+     * @return int 终端显示列宽
      */
     private static function displayWidth(mixed $cell): int
     {

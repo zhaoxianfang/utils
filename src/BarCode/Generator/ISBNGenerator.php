@@ -64,6 +64,12 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 清理输入：去除连字符、空格和其他分隔符
+     *
+     * 只保留数字与字母 X（ISBN-10 校验位可能为 X），并统一转大写。
+     * 其余字符全部丢弃，因此本方法不会因输入含分隔符而报错。
+     *
+     * @param string $data 原始输入，可含连字符、空格等分隔符
+     * @return string 仅由 0-9 与 X 组成的清洗结果
      */
     protected function cleanInput(string $data): string
     {
@@ -72,6 +78,12 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 判断是否为 ISBN-10 格式（9位数字+可选校验位）
+     *
+     * 入参须已由 cleanInput() 清洗。10 位时要求前 9 位为数字、末位为数字或 X；
+     * 9 位时要求全为数字（视为缺校验位、待补全）。
+     *
+     * @param string $cleaned 已清洗的候选数据
+     * @return bool 符合 ISBN-10 格式返回 true，否则返回 false
      */
     protected function isIsbn10Format(string $cleaned): bool
     {
@@ -86,6 +98,12 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 判断是否为 ISBN-13 格式（12位数字+可选校验位）
+     *
+     * 入参须已由 cleanInput() 清洗。长度为 12 位（待补校验位）或 13 位
+     * （含校验位）且全为数字时才算合法。
+     *
+     * @param string $cleaned 已清洗的候选数据
+     * @return bool 符合 ISBN-13 格式返回 true，否则返回 false
      */
     protected function isIsbn13Format(string $cleaned): bool
     {
@@ -97,6 +115,13 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 规范化 ISBN-10：9位数据自动计算并补全校验位
+     *
+     * 9 位输入直接补算校验位；10 位输入则校验末位是否与模 11 计算结果一致，
+     * 不一致即视为数据错误并终止流程。
+     *
+     * @param string $cleaned 已清洗的 9 位或 10 位数据
+     * @return string 补全后的 10 位 ISBN-10
+     * @throws InvalidDataException 已有校验位与计算结果不符时抛出
      */
     protected function normalizeIsbn10(string $cleaned): string
     {
@@ -116,6 +141,13 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 规范化 ISBN-13：12位数据自动计算并补全校验位
+     *
+     * 12 位输入直接按 EAN-13 模 10 规则补算校验位；13 位输入校验末位，
+     * 不一致时视为数据错误并终止流程。
+     *
+     * @param string $cleaned 已清洗的 12 位或 13 位数据
+     * @return string 补全后的 13 位 ISBN-13
+     * @throws InvalidDataException 已有校验位与计算结果不符时抛出
      */
     protected function normalizeIsbn13(string $cleaned): string
     {
@@ -261,6 +293,12 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * ISBN-10 启发式格式化
+     *
+     * 按 1-3-5-1 的固定切分把 10 位 ISBN-10 拼成带连字符的形式。切分位置
+     * 基于常见书号分布推测，不查询出版者号段表，仅用于展示。
+     *
+     * @param string $isbn10 完整的 10 位 ISBN-10（不作长度校验）
+     * @return string 形如 X-XXX-XXXXX-X 的格式化结果
      */
     protected function formatIsbn10Heuristic(string $isbn10): string
     {
@@ -271,12 +309,30 @@ class ISBNGenerator extends BaseGenerator
         return "{$group}-{$publisher}-{$title}-{$check}";
     }
 
+    /**
+     * 校验 ISBN 数据格式是否合法
+     *
+     * 合法要求：去除连字符/空格等分隔符后为 9-10 位（ISBN-10）或 12-13 位（ISBN-13）纯数字，
+     * 且 ISBN-10 末位可为 X。仅检查格式，不校验具体校验位正确性。
+     *
+     * @param string $data 待校验的 ISBN 数据（可含连字符/空格）
+     * @return bool 合法返回 true，否则返回 false
+     */
     public function validate(string $data): bool
     {
         $cleaned = $this->cleanInput($data);
         return $this->isIsbn10Format($cleaned) || $this->isIsbn13Format($cleaned);
     }
 
+    /**
+     * 计算 ISBN 数据的校验位
+     *
+     * 根据输入判别为 ISBN-10 或 ISBN-13，分别调用对应模 11 / 模 10 算法补算校验位。
+     *
+     * @param string $data 待计算的 ISBN 数据（9-10 位或 12-13 位，可含连字符）
+     * @return string 校验位字符（ISBN-10 可能为 'X'）
+     * @throws InvalidDataException 输入格式无法识别为 ISBN-10 或 ISBN-13 时抛出
+     */
     public function calculateChecksum(string $data): string
     {
         $cleaned = $this->cleanInput($data);
@@ -294,6 +350,11 @@ class ISBNGenerator extends BaseGenerator
         throw new InvalidDataException('无法为无效的 ISBN 格式计算校验位');
     }
 
+    /**
+     * 获取条码类型标识
+     *
+     * @return string 固定返回 'ISBN'
+     */
     public function getType(): string
     {
         return self::TYPE;
@@ -301,6 +362,11 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 获取完整数据（总是返回 ISBN-13，因为条码编码使用的是 ISBN-13）
+     *
+     * 即使原始输入是 ISBN-10，此处也返回转换后的 ISBN-13，以便与条空
+     * 模式实际承载的内容保持一致。未调用 generate() 前返回空串。
+     *
+     * @return string 13 位 ISBN-13
      */
     public function getFullData(): string
     {
@@ -309,6 +375,10 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 获取 ISBN-13 格式数据
+     *
+     * 返回最近一次 generate() 规范化后的 13 位 ISBN-13（含校验位）。
+     *
+     * @return string 13 位 ISBN-13，尚未生成时为空串
      */
     public function getIsbn13(): string
     {
@@ -317,6 +387,11 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 获取 ISBN-10 格式数据（如果原始输入是 ISBN-10）
+     *
+     * 仅当原始输入为 ISBN-10（9 位或 10 位）时返回补全后的 10 位结果；
+     * 输入本身就是 ISBN-13 时返回 null。
+     *
+     * @return string|null 10 位 ISBN-10；原始输入为 ISBN-13 时为 null
      */
     public function getIsbn10(): ?string
     {
@@ -325,6 +400,11 @@ class ISBNGenerator extends BaseGenerator
 
     /**
      * 获取 ISBN 条码的数字布局信息
+     *
+     * 把 ISBN-13 按前缀、组号、出版者号、书名号、校验位切开，供渲染器
+     * 在条码下方分段排版。切分按固定位置进行（3-1-3-5-1），不查号段表。
+     *
+     * @return array{type: string, isbn13: string, isbn10: string|null, prefix: string, group: string, publisher: string, title: string, check: string} 布局信息
      */
     public function getDigitLayout(): array
     {

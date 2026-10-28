@@ -234,6 +234,9 @@ class ISSNGenerator extends BaseGenerator
 
     /**
      * 设置补充码
+     *
+     * 补充码用于标识期刊期号，参与构造 EAN-13 扩展数据。不足 2 位时在
+     * 左侧补 0，超过 2 位不截断（调用方需自行保证长度 ≤ 2）。
      * 
      * @param string $code 2位补充码（期号）
      * @return self 支持链式调用

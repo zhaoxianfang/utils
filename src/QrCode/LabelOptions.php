@@ -134,9 +134,13 @@ class LabelOptions
     /**
      * 创建标签配置
      *
+     * 构造并返回一个新的标签配置对象，未指定字体时由构造函数回退到
+     * 默认字体（内置 xingkai），文本为空表示不启用标签。
+     *
      * @param string $text 标签文本
-     * @param string|null $fontPath 字体路径
-     * @return self
+     * @param string|null $fontPath 字体路径或内置字体名（如 lishu）；null 表示使用默认字体
+     * @return self 新建的标签配置对象
+     * @throws InvalidArgumentException 当字体无法解析时抛出
      */
     public static function create(string $text, ?string $fontPath = null): self
     {
@@ -146,8 +150,11 @@ class LabelOptions
     /**
      * 设置标签文本
      *
+     * 直接覆盖原文本，支持用 \n 换行；传入空串时 isEnabled() 会返回
+     * false，相当于关闭标签显示。
+     *
      * @param string $text 文本内容
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function text(string $text): self
     {
@@ -158,8 +165,11 @@ class LabelOptions
     /**
      * 设置字体路径
      *
+     * 先按完整文件路径判断，再按内置字体名在 resource/font 下拼 .ttf 查找；
+     * 传入空值时回退到内置默认字体 xingkai，两者都找不到则抛异常。
+     *
      * @param string|null $fontPath 字体文件路径或者内置字体的名称（如：lishu）
-     * @return self
+     * @return self 当前对象，便于链式调用
      * @throws InvalidArgumentException 如果字体文件不存在
      */
     public function fontPath(?string $fontPath): self
@@ -193,8 +203,11 @@ class LabelOptions
     /**
      * 设置字体大小
      *
-     * @param int $fontSize 字体大小
-     * @return self
+     * 数值会被钳制为最小 1，避免传入 0 或负数导致后续文本测量异常；
+     * 若已设置的行高小于新字号，行高不会自动跟随（lineHeight() 才会处理）。
+     *
+     * @param int $fontSize 字体大小（磅值）
+     * @return self 当前对象，便于链式调用
      */
     public function fontSize(int $fontSize): self
     {
@@ -205,8 +218,11 @@ class LabelOptions
     /**
      * 设置文本颜色
      *
+     * 传入字符串时按十六进制解析（支持 #RGB/#RGBA/#RRGGBB/#RRGGBBAA），
+     * 传入 Color 对象则直接使用；非法十六进制由 Color::fromHex() 抛异常。
+     *
      * @param Color|string $color 颜色对象或十六进制颜色值
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function color($color): self
     {
@@ -221,8 +237,11 @@ class LabelOptions
     /**
      * 设置背景色
      *
+     * 字符串会按十六进制解析为 Color；未设置时标签区域背景透明，
+     * 渲染时不会额外填充底色。
+     *
      * @param Color|string $color 颜色对象或十六进制颜色值
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function backgroundColor($color): self
     {
@@ -237,8 +256,11 @@ class LabelOptions
     /**
      * 设置边框颜色
      *
+     * 字符串会按十六进制解析为 Color；仅在 borderWidth() 大于 0 时才会
+     * 真正绘制边框。未设置时标签区域不描边。
+     *
      * @param Color|string $color 颜色对象或十六进制颜色值
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function borderColor($color): self
     {
@@ -253,8 +275,10 @@ class LabelOptions
     /**
      * 设置边框宽度
      *
+     * 负数会被钳制为 0（表示不绘制边框）；宽度按像素计，加在标签区域四周。
+     *
      * @param int $width 边框宽度（像素）
-     * @return self
+     * @return self 当前对象，便于链式调用
      */
     public function borderWidth(int $width): self
     {
@@ -329,8 +353,10 @@ class LabelOptions
     /**
      * 设置上内边距
      *
-     * @param int $padding 上内边距
-     * @return self
+     * 内边距位于标签背景内部、文本之外；负数会被钳制为 0。
+     *
+     * @param int $padding 上内边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function paddingTop(int $padding): self
     {
@@ -341,8 +367,10 @@ class LabelOptions
     /**
      * 设置下内边距
      *
-     * @param int $padding 下内边距
-     * @return self
+     * 内边距位于标签背景内部、文本之外；负数会被钳制为 0。
+     *
+     * @param int $padding 下内边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function paddingBottom(int $padding): self
     {
@@ -353,8 +381,10 @@ class LabelOptions
     /**
      * 设置左内边距
      *
-     * @param int $padding 左内边距
-     * @return self
+     * 内边距位于标签背景内部、文本之外；负数会被钳制为 0。
+     *
+     * @param int $padding 左内边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function paddingLeft(int $padding): self
     {
@@ -365,8 +395,10 @@ class LabelOptions
     /**
      * 设置右内边距
      *
-     * @param int $padding 右内边距
-     * @return self
+     * 内边距位于标签背景内部、文本之外；负数会被钳制为 0。
+     *
+     * @param int $padding 右内边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function paddingRight(int $padding): self
     {
@@ -377,8 +409,10 @@ class LabelOptions
     /**
      * 设置上边距
      *
-     * @param int $marginTop 上边距
-     * @return self
+     * 外边距位于标签区域之外，用于与二维码或其他元素留白；负数会被钳制为 0。
+     *
+     * @param int $marginTop 上边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function marginTop(int $marginTop): self
     {
@@ -389,8 +423,10 @@ class LabelOptions
     /**
      * 设置下边距
      *
-     * @param int $marginBottom 下边距
-     * @return self
+     * 外边距位于标签区域之外，用于与二维码或其他元素留白；负数会被钳制为 0。
+     *
+     * @param int $marginBottom 下边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function marginBottom(int $marginBottom): self
     {
@@ -401,8 +437,10 @@ class LabelOptions
     /**
      * 设置左边距
      *
-     * @param int $marginLeft 左边距
-     * @return self
+     * 外边距位于标签区域之外，用于与二维码或其他元素留白；负数会被钳制为 0。
+     *
+     * @param int $marginLeft 左边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function marginLeft(int $marginLeft): self
     {
@@ -413,8 +451,10 @@ class LabelOptions
     /**
      * 设置右边距
      *
-     * @param int $marginRight 右边距
-     * @return self
+     * 外边距位于标签区域之外，用于与二维码或其他元素留白；负数会被钳制为 0。
+     *
+     * @param int $marginRight 右边距（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function marginRight(int $marginRight): self
     {
@@ -425,8 +465,11 @@ class LabelOptions
     /**
      * 设置所有边距
      *
-     * @param int $margin 边距值
-     * @return self
+     * 把同一个值应用到上、下、左、右四个方向，内部逐个调用对应的
+     * marginXxx()，因此同样会把负数钳制为 0。
+     *
+     * @param int $margin 四边统一的边距值（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function margin(int $margin): self
     {
@@ -436,8 +479,11 @@ class LabelOptions
     /**
      * 设置行高
      *
-     * @param int $lineHeight 行高
-     * @return self
+     * 行高不允许小于当前字号（取 fontSize 与传入值中的较大者），以保证
+     * 多行文本不会上下重叠。
+     *
+     * @param int $lineHeight 行高（像素）
+     * @return self 当前对象，便于链式调用
      */
     public function lineHeight(int $lineHeight): self
     {
@@ -464,7 +510,9 @@ class LabelOptions
     /**
      * 获取标签文本
      *
-     * @return string|null
+     * 返回原始文本（可能含 \n 换行），未设置时为 null。
+     *
+     * @return string|null 标签文本；未设置返回 null
      */
     public function getText(): ?string
     {
@@ -474,7 +522,10 @@ class LabelOptions
     /**
      * 获取字体路径
      *
-     * @return string|null
+     * 返回的是已被解析过的绝对路径（构造函数会回退到默认字体），
+     * 因此正常情况下不会为 null。
+     *
+     * @return string|null 字体文件的绝对路径
      */
     public function getFontPath(): ?string
     {
@@ -484,7 +535,10 @@ class LabelOptions
     /**
      * 获取字体大小
      *
-     * @return int
+     * 返回当前生效的磅值，fontSize() 已将其钳制为不小于 1；行高不会随
+     * 字号自动变化，需要更大的行距时应另行调用 lineHeight()。
+     *
+     * @return int 字体大小（磅值）
      */
     public function getFontSize(): int
     {
@@ -494,7 +548,10 @@ class LabelOptions
     /**
      * 获取文本颜色
      *
-     * @return Color
+     * 构造函数中会把该值初始化为黑色，因此任何时刻都有值；color() 只做
+     * 整体替换，不会返回 null。
+     *
+     * @return Color 当前文本颜色对象
      */
     public function getColor(): Color
     {
@@ -504,7 +561,10 @@ class LabelOptions
     /**
      * 获取上边距
      *
-     * @return int
+     * 返回标签区域上方与二维码之间的留白像素数，由 marginTop() 设置，
+     * 默认 10 像素，负数在设置时已被钳制为 0。
+     *
+     * @return int 上边距（像素）
      */
     public function getMarginTop(): int
     {
@@ -514,7 +574,10 @@ class LabelOptions
     /**
      * 获取下边距
      *
-     * @return int
+     * 返回标签区域下方的留白像素数，由 marginBottom() 设置，默认 10 像素，
+     * 负数在设置时已被钳制为 0。
+     *
+     * @return int 下边距（像素）
      */
     public function getMarginBottom(): int
     {
@@ -524,7 +587,10 @@ class LabelOptions
     /**
      * 获取左边距
      *
-     * @return int
+     * 返回标签区域左侧的留白像素数，由 marginLeft() 设置，默认为 0
+     * （标签默认铺满二维码宽度）。
+     *
+     * @return int 左边距（像素）
      */
     public function getMarginLeft(): int
     {
@@ -534,7 +600,10 @@ class LabelOptions
     /**
      * 获取右边距
      *
-     * @return int
+     * 返回标签区域右侧的留白像素数，由 marginRight() 设置，默认为 0
+     * （标签默认铺满二维码宽度）。
+     *
+     * @return int 右边距（像素）
      */
     public function getMarginRight(): int
     {
@@ -544,7 +613,9 @@ class LabelOptions
     /**
      * 获取行高
      *
-     * @return int
+     * 返回多行文本每一行所占的垂直像素数，已保证不小于字号。
+     *
+     * @return int 行高（像素）
      */
     public function getLineHeight(): int
     {
@@ -554,7 +625,10 @@ class LabelOptions
     /**
      * 获取对齐方式
      *
-     * @return string
+     * 返回文本在标签区域内的水平对齐方式，默认 center，仅可能是
+     * left、center、right 三者之一。
+     *
+     * @return string 对齐方式标识
      */
     public function getAlignment(): string
     {
@@ -564,7 +638,9 @@ class LabelOptions
     /**
      * 获取背景色
      *
-     * @return Color|null
+     * 未调用 backgroundColor() 时返回 null，表示标签区域不填充底色。
+     *
+     * @return Color|null 背景色；未设置返回 null
      */
     public function getBackgroundColor(): ?Color
     {
@@ -574,7 +650,9 @@ class LabelOptions
     /**
      * 获取边框颜色
      *
-     * @return Color|null
+     * 未调用 borderColor() 时返回 null；实际是否描边还需边框宽度大于 0。
+     *
+     * @return Color|null 边框颜色；未设置返回 null
      */
     public function getBorderColor(): ?Color
     {
@@ -584,7 +662,10 @@ class LabelOptions
     /**
      * 获取边框宽度
      *
-     * @return int
+     * 返回标签区域描边的像素宽度，0 表示不绘制边框；颜色是否设置不影响
+     * 该值，但宽度为 0 时即使设置了边框颜色也不会描边。
+     *
+     * @return int 边框宽度（像素）
      */
     public function getBorderWidth(): int
     {
@@ -604,7 +685,10 @@ class LabelOptions
     /**
      * 获取上内边距
      *
-     * @return int
+     * 返回标签背景内部、文本上方的空白像素数，默认 5 像素，参与标签整体
+     * 高度的计算。
+     *
+     * @return int 上内边距（像素）
      */
     public function getPaddingTop(): int
     {
@@ -614,7 +698,10 @@ class LabelOptions
     /**
      * 获取下内边距
      *
-     * @return int
+     * 返回标签背景内部、文本下方的空白像素数，默认 5 像素，参与标签整体
+     * 高度的计算。
+     *
+     * @return int 下内边距（像素）
      */
     public function getPaddingBottom(): int
     {
@@ -624,7 +711,10 @@ class LabelOptions
     /**
      * 获取左内边距
      *
-     * @return int
+     * 返回标签背景内部、文本左侧的空白像素数，默认 10 像素，用于避免文字
+     * 紧贴边框。
+     *
+     * @return int 左内边距（像素）
      */
     public function getPaddingLeft(): int
     {
@@ -634,7 +724,10 @@ class LabelOptions
     /**
      * 获取右内边距
      *
-     * @return int
+     * 返回标签背景内部、文本右侧的空白像素数，默认 10 像素，用于避免文字
+     * 紧贴边框。
+     *
+     * @return int 右内边距（像素）
      */
     public function getPaddingRight(): int
     {
@@ -654,7 +747,10 @@ class LabelOptions
     /**
      * 获取阴影颜色
      *
-     * @return Color|null
+     * 未调用 textShadow() 时返回 null；即使已设置颜色，仍需
+     * hasTextShadow() 为 true 才会真正绘制阴影。
+     *
+     * @return Color|null 阴影颜色；未设置返回 null
      */
     public function getShadowColor(): ?Color
     {
@@ -694,7 +790,10 @@ class LabelOptions
     /**
      * 获取描边颜色
      *
-     * @return Color|null
+     * 未调用 textStroke() 时返回 null；即使已设置颜色，仍需
+     * hasTextStroke() 为 true 才会真正绘制描边。
+     *
+     * @return Color|null 描边颜色；未设置返回 null
      */
     public function getStrokeColor(): ?Color
     {
@@ -704,7 +803,9 @@ class LabelOptions
     /**
      * 获取描边宽度
      *
-     * @return int
+     * 返回文本描边的像素宽度，通过 textStroke() 设置时保证不小于 1。
+     *
+     * @return int 描边宽度（像素）
      */
     public function getStrokeWidth(): int
     {

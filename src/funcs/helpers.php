@@ -4,138 +4,145 @@ declare(strict_types=1);
 
 if (! function_exists('uuid')) {
     /**
-     * 极速并发 UUID 生成器（定长、短、高并发唯一）
+     * 生成 10 位 Base61 分布式有序 ID
      *
-     * 设计目标：
-     * 1. 返回长度尽量短 —— 默认 base62 编码，固定 11 个字符（最短的可定长安全长度）。
-     * 2. 高并发请求下的唯一性 —— 采用「毫秒时间 + 节点 + 序列」的雪花（Snowflake）结构，
-     *    在节点 ID 不冲突的前提下可保证绝对唯一（不依赖概率）。
-     * 3. 不溢出 —— 整体 63 bit，恰好放入有符号 64 位整数（绝不会超过 PHP_INT_MAX）。
-     * 4. 可排序 —— 高位为毫秒时间戳，按字典序/数值升序即时间顺序。
-     * 5. 类型安全与健壮性 —— 校验字符集；序列号耗尽时“忙等真实时间前进”而非借用伪造时间戳。
+     * 基于「时间戳 + 进程/Worker + 序列号」组合编码为 10 位 Base61 字符串，
+     * 具备时间有序、分布式不重复、时钟回拨钳制等特性，适用于分布式主键或追踪 ID。
      *
-     * 位布局（共 63 bit）：
-     *   [62..23] 40 bit 毫秒时间戳（自 2025-01-01 起，可用约 35 年，至 ~2060 年）
-     *   [22.. 7] 16 bit 节点 ID（由 16 位随机 ^ PID 派生，区分不同并发进程/Worker）
-     *   [ 6.. 0]  7 bit 序列号（同一毫秒、同一节点内自增，最多 128 个/毫秒）
-     *
-     * 并发唯一性说明：
-     *  - 同一 PHP 进程内：请求是串行执行的，时间戳 + 序列号保证绝对不重复；
-     *    单节点吞吐上限约 128 个/毫秒（≈ 12.8W 个/秒），超出时生成器会忙等至下一毫秒，
-     *    绝不产生重复 ID（也不会伪造未来时间戳去冒险碰撞）。日常请求远低于此上限。
-     *  - 不同进程（FPM 子进程 / Swoole Worker）：通过节点 ID 区分；
-     *    节点 ID 由「16 位密码学随机 ^ PID」得到（65536 空间），单机/单集群进程数
-     *    远小于 65536 时冲突概率极低。若需跨大规模集群的绝对唯一，可调用
-     *    uuid_node_id() 显式设置一个全局唯一的节点 ID。
-     *
-     * @param string $charset 自定义字符集（默认 base62，最短）。字符集越长返回字符串越长。
-     * @return string 定长唯一 ID（base62 下为 11 字符）
-     * @throws InvalidArgumentException 字符集非法时
+     * @return string 10 位 Base61 编码的字符串 ID
+     * @throws \RuntimeException 系统时间早于 2026-10-25 或时间戳超出编码容量时抛出
      */
-    function uuid(string $charset = ''): string
+    function uuid(): string
     {
-        static $base62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-        static $nodeId = null;  // 进程级节点标识（16 bit），首次调用时生成一次
-        static $seq = 0;        // 同一毫秒内的自增序列（7 bit）
-        static $lastMs = -1;    // 上次生成所用的时间戳（毫秒），用于驱动序列
+        static $chars        = '123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+        static $epochMs      = 1_792_886_400_000;           // 2026-10-25 00:00:00 UTC
+        static $seqPerMs     = 226_981;                     // 61^3
+        static $seqPerWorker = 3_721;                       // 226981 / 61
+        static $workers      = 61;
+        static $maxCode      = 713_342_911_662_882_600;     // 61^10 - 1
+        static $lastMs       = -1;
+        static $seq          = -1;
+        static $lastPid      = -1;
+        static $workerId     = -1;
 
-        // —— 字符集：默认 base62（信息密度最高、长度最短） ——
-        $charsetToUse = $charset !== '' ? $charset : $base62;
-        $base = strlen($charsetToUse);
-        if ($base < 2) {
-            throw new InvalidArgumentException('uuid() 字符集长度至少为 2');
+        $pid = getmypid();
+        if ($pid !== $lastPid) {
+            // fork 或 pid 变化：完全重置
+            $lastMs   = -1;
+            $seq      = -1;
+            $lastPid  = $pid;
+            $workerId = $pid % $workers;   // 0..60
         }
 
-        // —— 节点 ID：仅在当前进程首次调用时生成一次 ——
-        // 优先使用 uuid_node_id() 显式设置的全局唯一节点 ID（集群部署推荐）；
-        // 否则由「16 位密码学随机 ^ PID（低 16 位）」派生，使不同并发进程
-        // （即便 PID 相同/被复用）也极大概率获得不同的节点 ID；
-        // 这是跨进程保证唯一性的关键区分字段。
-        if ($nodeId === null) {
-            $configured = $GLOBALS['__uuid_node_id__'] ?? null;
-            if (is_int($configured) && $configured >= 0 && $configured <= 0xFFFF) {
-                $nodeId = $configured;
-            } else {
-                $nodeId = (unpack('v', random_bytes(2))[1] ^ (getmypid() & 0xFFFF)) & 0xFFFF;
-            }
+        ['sec' => $sec, 'usec' => $usec] = gettimeofday();
+        $nowMs = $sec * 1000 + intdiv($usec, 1000) - $epochMs;
+
+        if ($nowMs < 0) {
+            throw new \RuntimeException('系统时间早于 2026-10-25，拒绝生成');
+        }
+        if ($nowMs < $lastMs) {
+            $nowMs = $lastMs;              // 时钟回拨：钳制，不倒退
         }
 
-        // —— 毫秒时间戳（单调递增，基于 hrtime 避免系统时钟回拨影响） ——
-        // 基准 epoch：2025-01-01 00:00:00 UTC（毫秒）。40 bit 可覆盖约 35 年。
-        $epochMs = 1_735_689_600_000;
-        $ms = intdiv(hrtime(true), 1_000_000);
-        $ts = ($ms - $epochMs) & 0xFFFFFFFFFF; // 仅保留低 40 bit（0xFFFFFFFFFF = 2^40-1）
-
-        // —— 序列号：同毫秒内自增；耗尽则忙等真实时间前进 ——
-        if ($ts === $lastMs) {
-            $seq = ($seq + 1) & 0x7F; // 7 bit，0..127
-            if ($seq === 0) {
-                // 1 毫秒内序列号耗尽（极端高并发，超过 ≈12.8W 个/秒）：
-                // 必须等待 hrtime 真正进入下一毫秒，再使用“真实”时间戳。
-                // 注意：绝不使用“借用 +1 毫秒”之类的伪造时间戳，
-                // 否则伪造的未来时间随后变为真实时间时会产生 ID 碰撞。
-                while ($ts === $lastMs) {
-                    $ms = intdiv(hrtime(true), 1_000_000);
-                    $ts = ($ms - $epochMs) & 0xFFFFFFFFFF;
-                }
-                // 时间已前进：序列从随机起点开始，避免与上一毫秒尾部序列可预测重合
-                $seq = random_int(0, 0x7F);
-                $lastMs = $ts;
+        if ($nowMs === $lastMs) {
+            $seq++;
+            if ($seq >= $seqPerWorker) {
+                // 本毫秒 seq 耗尽 → 等下一毫秒
+                do {
+                    usleep(100);
+                    ['sec' => $sec, 'usec' => $usec] = gettimeofday();
+                    $nowMs = $sec * 1000 + intdiv($usec, 1000) - $epochMs;
+                } while ($nowMs <= $lastMs);
+                $seq = 0;
             }
         } else {
-            // 新毫秒：序列从随机起点开始
-            $seq = random_int(0, 0x7F);
-            $lastMs = $ts;
+            $seq = random_int(0, $seqPerWorker - 1);
+        }
+        $lastMs = $nowMs;
+
+        $globalSeq = $workerId * $seqPerWorker + $seq;
+        $code      = $nowMs * $seqPerMs + $globalSeq;
+
+        if ($code < 0 || $code > $maxCode) {
+            throw new \RuntimeException('时间戳超出 10 位 Base61 编码容量');
         }
 
-        // —— 组装 63 bit ID：40 位时间 | 16 位节点 | 7 位序列 ——
-        // 最大值 = (2^40-1)<<23 | (2^16-1)<<7 | (2^7-1) = 2^63 - 1 = PHP_INT_MAX，
-        // 因此任意情况下都不会发生整数溢出，可安全放入有符号 64 位整数。
-        $id = (($ts << 23) | ($nodeId << 7) | $seq);
-
-        // —— 编码为定长字符串 ——
-        // 先按“满位最大值”计算定长位数，再对实际值编码并左补位，
-        // 保证无论数值大小都输出一致长度（便于存储、索引与排序）。
-        $maxId = ((0xFFFFFFFFFF << 23) | (0xFFFF << 7) | 0x7F);
-        $len = 1;
-        $tmp = $maxId;
-        while ($tmp >= $base) {
-            $tmp = intdiv($tmp, $base);
-            $len++;
+        $out = '1111111111';
+        for ($i = 9; $i >= 0; $i--) {
+            $q       = intdiv($code, 61);
+            $out[$i] = $chars[$code - $q * 61];
+            $code    = $q;
         }
-
-        $result = '';
-        $num = $id;
-        while ($num > 0) {
-            $result = $charsetToUse[$num % $base] . $result;
-            $num = intdiv($num, $base);
-        }
-
-        // 左补字符集首字符到定长（高位补 0 的等价写法）
-        return str_pad($result, $len, $charsetToUse[0], STR_PAD_LEFT);
+        return $out;
     }
+}
 
+
+if (!function_exists('parse_uuid')) {
     /**
-     * 获取/设置全局节点 ID（用于跨大规模集群时保证 uuid() 绝对唯一）
+     * 将 uuid() 生成的 10 位 Base61 字符串解析为结构化信息
      *
-     * 默认情况下 uuid() 会自动由「随机 ^ PID」派生一个 16 位节点 ID，
-     * 对于单实例 / 少量进程的场景已足够。但若部署了大量（接近 65536）个并发进程
-     * 或跨多台机器，建议在首次调用 uuid() 之前用本函数设置一个全局唯一的节点 ID
-     * （例如 FPM 的 pool 编号、Swoole WorkerId、或配置中心分配的值）。
+     * 反向解码出生成时间戳、Unix 时间、Worker ID、序列号等字段，
+     * 可选 $strictRange 校验是否落在合法时间窗口内。
      *
-     * @param int|null $nodeId 要设置的节点 ID（0–65535）；传 null 表示仅读取当前配置。
-     * @return int 当前生效的节点 ID 配置（未设置时返回 -1）
-     * @throws InvalidArgumentException 节点 ID 超出 0–65535 范围时
+     * @param string $uuid       10 位 Base61 字符串
+     * @param bool   $strictRange 是否校验时间窗口（2026-10-25 ~ 2076-10-25）
+     * @return array 包含 uuid、时间、seq、worker_id 等字段的关联数组
+     * @throws \InvalidArgumentException UUID 长度/字符非法或超出窗口时抛出
      */
-    function uuid_node_id(?int $nodeId = null): int
+    function parse_uuid(string $uuid, bool $strictRange = false): array
     {
-        if ($nodeId !== null) {
-            if ($nodeId < 0 || $nodeId > 0xFFFF) {
-                throw new InvalidArgumentException('uuid_node_id() 必须在 0–65535 之间');
-            }
-            $GLOBALS['__uuid_node_id__'] = $nodeId;
+        static $chars        = '123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+        static $epochMs      = 1_792_886_400_000;
+        static $windowMs     = 1_577_923_200_000;
+        static $seqPerMs     = 226_981;
+        static $seqPerWorker = 3_721;
+        static $lookup       = null;
+
+        $lookup ??= array_flip(str_split($chars));
+
+        if (strlen($uuid) !== 10) {
+            throw new \InvalidArgumentException('UUID 必须是 10 位 Base61 字符串');
         }
-        return $GLOBALS['__uuid_node_id__'] ?? -1;
+
+        $code = 0;
+        for ($i = 0; $i < 10; $i++) {
+            $c = $uuid[$i];
+            if (!isset($lookup[$c])) {
+                // ✅ {$var} 花括号，防止全角字符被吞入变量名
+                throw new \InvalidArgumentException(
+                    "UUID 含非法字符 '{$c}'（位置 {$i}）"
+                );
+            }
+            $code = $code * 61 + $lookup[$c];
+        }
+
+        $timeMs = intdiv($code, $seqPerMs);
+        $seq    = $code - $timeMs * $seqPerMs;
+        $unixMs = $timeMs + $epochMs;
+        $inWin  = $timeMs >= 0 && $timeMs < $windowMs;
+
+        if ($strictRange && !$inWin) {
+            throw new \InvalidArgumentException(sprintf(
+                'UUID 时间 %d ms 超出 2026-10-25 ~ 2076-10-25 窗口', $timeMs
+            ));
+        }
+
+        $sec = intdiv($unixMs, 1000);
+        $ms  = $unixMs % 1000;
+
+        return [
+            'uuid'           => $uuid,
+            'time_ms'        => $timeMs,
+            'unix_ms'        => $unixMs,
+            'datetime'       => gmdate('Y-m-d H:i:s', $sec) . sprintf('.%03d UTC', $ms),
+            'datetime_local' => date('Y-m-d H:i:s', $sec) . sprintf('.%03d CST', $ms),
+            'seq'            => $seq,
+            'worker_id'      => intdiv($seq, $seqPerWorker),
+            'local_seq'      => $seq % $seqPerWorker,
+            'seq_permille'   => intdiv($seq * 1000, $seqPerMs),
+            'in_window'      => $inWin,
+        ];
     }
 }
 
@@ -605,8 +612,13 @@ if (! function_exists('tree_to_array')) {
 }
 
 if (! function_exists('show_json')) {
-    /*
-     * 对json数据格式化输入展示 [转化为json格式，并格式化样式]
+    /**
+     * 将任意数据格式化为带样式缩进的 JSON 字符串
+     *
+     * 兼容数组、对象与 JSON 字符串输入；空数据时返回空字符串。
+     *
+     * @param mixed $data 待格式化的数据，支持数组、对象或 JSON 字符串
+     * @return string 美化后的 JSON 字符串
      */
     function show_json(mixed $data = []): string
     {
@@ -623,8 +635,13 @@ if (! function_exists('show_json')) {
 }
 
 if (! function_exists('string_to_utf8')) {
-    /*
-     * 字符串自动转utf8编码
+    /**
+     * 将字符串自动转换为 UTF-8 编码
+     *
+     * 借助 mb_convert_encoding 自动探测源编码并转换为 UTF-8。
+     *
+     * @param string $str 待转换的字符串
+     * @return array|bool|string|null 转换后的字符串（失败返回 false）
      */
     function string_to_utf8(string $str = ''): array|bool|string|null
     {
@@ -633,8 +650,13 @@ if (! function_exists('string_to_utf8')) {
 }
 
 if (! function_exists('string_to_gbk')) {
-    /*
-     * 字符串自动转gbk编码
+    /**
+     * 将字符串自动转换为 GBK 编码
+     *
+     * 借助 mb_convert_encoding 自动探测源编码并转换为 GBK。
+     *
+     * @param string $str 待转换的字符串
+     * @return array|bool|string|null 转换后的字符串（失败返回 false）
      */
     function string_to_gbk(string $str = ''): array|bool|string|null
     {
@@ -672,6 +694,10 @@ if (! function_exists('truncate')) {
 
         $string = detach_html($string);
         $strLen = mb_strlen($string, $encoding);
+
+        if ($start >= $strLen) {
+            return '';
+        }
 
         if ($length === 0 || $length >= $strLen - $start) {
             return $string;
@@ -761,6 +787,14 @@ if (! function_exists('detach_html')) {
 if (! function_exists('zxf_substr')) {
     /**
      * 字符串截取
+     *
+     * 先去除字符串中的全部空格，再按 UTF-8 字符截取（优先 mb_substr，其次 iconv_substr，
+     * 均不可用时退化为按字节手工扫描处理多字节字符）。
+     *
+     * @param  string  $string  待截取的字符串
+     * @param  int  $start  起始字符位置（从 0 开始），默认 0
+     * @param  int  $length  截取的字符数，默认 5
+     * @return string 截取后的字符串（去除了空格）
      */
     function zxf_substr($string, $start = 0, $length = 5): bool|string
     {
@@ -819,13 +853,20 @@ if (! function_exists('is_json')) {
 }
 
 if (! function_exists('is_xml')) {
-    // 检查是否是有效的 XML 字符串
+    /**
+     * 判断字符串是否为有效的 XML
+     *
+     * 借助 SimpleXML 加载校验，并禁用外部实体（LIBXML_NONET）以防 XXE 攻击。
+     *
+     * @param string $string 待校验的 XML 字符串
+     * @return bool 有效 XML 返回 true，否则返回 false
+     */
     function is_xml(string $string): bool
     {
         try {
             // 尝试加载字符串为 XML
             libxml_use_internal_errors(true); // 启用内部错误处理
-            simplexml_load_string($string);
+            simplexml_load_string($string, 'SimpleXMLElement', LIBXML_NONET);
 
             // 如果发生解析错误，返回 false
             if (libxml_get_errors()) {
@@ -936,6 +977,12 @@ if (! function_exists('is_mobile')) {
 if (! function_exists('parse_json')) {
     /**
      * 解析json字符串、json 数组和数组 返回数据，其他的返回false
+     *
+     * 数组直接返回；字符串按首字符区分路径：`{`/`[` 走 json_decode（对象还支持把单引号
+     * 替换为双引号后重试），其他按 Base64 解码后再尝试 JSON 解析。所有失败分支返回 false。
+     *
+     * @param  mixed  $data  待解析的数据（数组 / JSON 字符串 / Base64 编码的 JSON 字符串）
+     * @return array|false 解析得到的数组，无法解析时返回 false
      */
     function parse_json(mixed $data): array|false
     {
@@ -1005,6 +1052,7 @@ if (! function_exists('get_raw_input')) {
      * @param  bool  $getDataType  是否获取数据类型；默认为 false；
      *                             true:返回数据类型；
      *                             false:只返回请求数据；
+     * @return array|string|null 原始内容 / 解析后的数组 / 数据类型；无请求体时为 null
      */
     function get_raw_input(bool $returnOriginal = true, bool $getDataType = false): array|string|null
     {
@@ -1018,10 +1066,11 @@ if (! function_exists('convert_underline')) {
     /**
      * 下划线转驼峰
      *
+     * 把 `_x` 或 `-x` 形式的连接符与其后的单个字母转换为大写字母（如 user_name → userName），
+     * 大小写不敏感匹配，不支持数字开头的情况。
      *
-     * @DateTime 2018-08-29
-     *
-     * @return array|string|null [type]       [description]
+     * @param  string  $str  待转换的字符串
+     * @return string 转换后的字符串
      */
     function convert_underline(string $str): array|string|null
     {
@@ -1035,10 +1084,11 @@ if (! function_exists('underline_convert')) {
     /**
      * 驼峰转下划线
      *
+     * 在小写字母后紧跟的大写字母前插入下划线并整体转小写（如 userName → user_name）；
+     * 连续大写或开头大写（如 IDCard）不会被拆分为词边界。
      *
-     * @DateTime 2018-08-29
-     *
-     * @return string [description]
+     * @param  string  $str  待转换的字符串
+     * @return string 转换后的下划线风格字符串
      */
     function underline_convert(string $str): string
     {
@@ -1069,24 +1119,28 @@ if (! function_exists('buildRequestFormAndSend')) {
         $data = obj_to_arr($data);
         $method = strtolower($method) == 'post' ? 'POST' : 'GET';
         $formId = 'requestForm_'.time().'_'.random_int(2383280, 14776335);
-        $html = "<form id='".$formId."' action='".$url."' method='".$method."'>";
-        $html .= ! empty($methodIsMorph) ? '<input type="hidden" name="_method" value="'.$methodIsMorph.'" />' : '';
-        // 遍历子数组
-        function traverseChildArr($arr, $namePrefix = ''): string
-        {
+        // 对输出做 HTML 转义，防止 action / 字段名 / 字段值中的特殊字符造成属性逃逸与反射型 XSS
+        $action = htmlspecialchars($url, ENT_QUOTES);
+        $methodAttr = htmlspecialchars($method, ENT_QUOTES);
+        $html = "<form id='".htmlspecialchars($formId, ENT_QUOTES)."' action='".$action."' method='".$methodAttr."'>";
+        $html .= ! empty($methodIsMorph) ? "<input type='hidden' name='_method' value='".htmlspecialchars($methodIsMorph, ENT_QUOTES)."' />" : '';
+        // 遍历子数组（使用闭包，避免每次调用都重复声明全局函数导致重声明致命错误）
+        $traverseChildArr = function (array $arr, string $namePrefix = ''): string {
             $arr = obj_to_arr($arr);
             $htmlStr = '';
             foreach ($arr as $key => $item) {
-                $name = empty($namePrefix) ? $key : $namePrefix.'['.$key.']';
-                $htmlStr .= is_array($item) ? traverseChildArr($item, $name) : "<input type='hidden' name='".$name."' value='".$item."' />";
+                $name = empty($namePrefix) ? (string) $key : $namePrefix.'['.(string) $key.']';
+                $htmlStr .= is_array($item)
+                    ? $traverseChildArr($item, $name)
+                    : "<input type='hidden' name='".htmlspecialchars($name, ENT_QUOTES)."' value='".htmlspecialchars((string) $item, ENT_QUOTES)."' />";
             }
 
             return $htmlStr;
-        }
+        };
 
-        $html .= traverseChildArr($data, '');
+        $html .= $traverseChildArr($data, '');
         $html .= "<input type='submit' value='确定' style='display:none;'></form>";
-        $html .= "<script>document.forms['".$formId."'].submit();</script>";
+        $html .= "<script>document.forms['".htmlspecialchars($formId, ENT_QUOTES)."'].submit();</script>";
 
         return $html;
     }
@@ -1097,8 +1151,11 @@ if (! function_exists('obj_to_arr')) {
     /**
      * 对象转数组
      *
+     * 递归处理：对象先强转为数组（仅一层可见属性），数组的每个值继续递归转换，
+     * 其它类型原样返回。
      *
-     * @return array|mixed
+     * @param  mixed  $array  待转换的对象 / 数组 / 标量
+     * @return mixed 转换后的数组或原始值
      */
     function obj_to_arr($array): mixed
     {
@@ -1126,6 +1183,7 @@ if (! function_exists('str_en_code')) {
      *                              支持格式:
      *                              int 缓存多少秒，例如 90 表示缓存90秒，如果小于等于0，则用0替换
      *                              string: 时间字符串格式,例如:+1 day、2023-01-01 09:00:02 等 strtotime 支持的格式均可
+     * @param  string  $key  加密密钥（必填，禁止为空；该算法为遗留 XOR 流密码，无完整性保护，敏感数据请改用 Crypto\AES）
      * @return false|string
      */
     function str_en_code(string $string, string $operation = 'en', int|string $expiry = 312206400, string $key = ''): bool|string
@@ -1135,8 +1193,11 @@ if (! function_exists('str_en_code')) {
         $string = $operation == 'DECODE' ? str_replace(['_'], ['/'], $string) : $string;
         // 动态密匙长度，相同的明文会生成不同密文就是依靠动态密匙
         $ckey_length = 4;
-        // 密匙
-        $key = md5(! empty($key) ? $key : 'wei_si_fang');
+        // 密匙（禁止硬编码默认密钥，避免“无密钥”等价于明文）
+        if ($key === '') {
+            throw new InvalidArgumentException('加密密钥不能为空，必须显式传入');
+        }
+        $key = md5($key);
         // 密匙a会参与加解密
         $keya = md5(substr($key, 0, 16));
         // 密匙b会用来做数据完整性验证
@@ -1149,7 +1210,10 @@ if (! function_exists('str_en_code')) {
         // 明文，前10位用来保存时间戳，解密时验证数据有效性，10到26位用来保存$keyb(密匙b)，
         // 解密时会通过这个密匙验证数据完整性
         // 如果是解码的话，会从第$ckey_length位开始，因为密文前$ckey_length位保存 动态密匙，以保证解密正确
-        $expiry = (is_numeric($expiry) || empty($expiry)) ? time() + (int) $expiry : strtotime($expiry);
+        // 过期时间：数值表示「相对当前的有效秒数」，0 表示永不过期；字符串按日期解析为绝对时间戳
+        $expiry = (is_numeric($expiry) || empty($expiry))
+            ? ((int) $expiry === 0 ? 0 : time() + (int) $expiry)
+            : strtotime($expiry);
         $string = $operation == 'DECODE' ? base64_decode(substr($string, $ckey_length)) : sprintf('%010d', $expiry).substr(md5($string.$keyb), 0, 16).$string;
         $string_length = strlen($string);
         $result = '';
@@ -1178,7 +1242,9 @@ if (! function_exists('str_en_code')) {
         }
         if ($operation == 'DECODE') {
             // 验证数据有效性，请看未加密明文的格式
-            if ((substr($result, 0, 10) == 0 || substr($result, 0, 10) - time() > 0) && substr($result, 10, 16) == substr(md5(substr($result, 26).$keyb), 0, 16)) {
+            $validUntil = (int) substr($result, 0, 10);
+            if (($validUntil === 0 || $validUntil - time() > 0)
+                && substr($result, 10, 16) === substr(md5(substr($result, 26) . $keyb), 0, 16)) {
                 return substr($result, 26);
             } else {
                 return '';
@@ -1197,6 +1263,13 @@ if (! function_exists('str_en_code')) {
 if (! function_exists('get_protected_value')) {
     /**
      * 打印对象里面受保护属性的值
+     *
+     * 通过把对象强转为数组后读取 `"\0*\0属性名"` 键，绕过可见性限制取得 protected 属性；
+     * 属性不存在时会触发未定义索引警告并返回 null，调用前请自行确认属性存在。
+     *
+     * @param  object  $obj  目标对象
+     * @param  string  $name  受保护属性名（不含前缀）
+     * @return mixed 属性当前值
      */
     function get_protected_value($obj, $name): mixed
     {
@@ -1211,8 +1284,14 @@ if (! function_exists('set_protected_value')) {
     /**
      * 使用反射 修改对象里面受保护属性的值
      *
+     * 先尝试按静态属性写入，失败后回退为实例属性写入（两者都会绕过可见性限制）。
      *
-     * @throws ReflectionException
+     * @param  object  $obj  目标对象
+     * @param  string  $filed  属性名
+     * @param  mixed  $value  要写入的值
+     * @return void 无返回值
+     *
+     * @throws ReflectionException 属性不存在或无法反射时抛出
      */
     function set_protected_value($obj, $filed, $value): void
     {
@@ -1281,6 +1360,12 @@ if (! function_exists('json_decode_plus')) {
 
     /**
      * 修复常见的JSON格式问题
+     *
+     * 依次处理：剔除控制字符、单引号转双引号、裸换行转义、删除数组/对象末尾多余逗号、
+     * 为未加引号的键名补引号。仅做字符级修补，不校验修复结果是否合法。
+     *
+     * @param  string  $json  待修复的 JSON 字符串
+     * @return string 修复后的字符串
      */
     function repairJson(string $json): string
     {
@@ -1306,9 +1391,14 @@ if (! function_exists('url_conversion')) {
     /**
      * 把 ./ 和 ../ 开头的资源地址转换为绝对地址
      *
+     * 入参本身是 `/`、`./`、`../` 开头时直接走 url_conversion_to_prefix_path()；
+     * 否则按 $linkAttr 找出 HTML 中引号包裹的相对地址并批量替换，避免同一路径被重复替换。
+     * $string 或 $prefixString 为空时原样返回。
+     *
      * @param  string  $string  需要转换的字符串
      * @param  string  $prefixString  拼接的前缀字符
      * @param  array  $linkAttr  需要转换的标签属性，例如：href、src、durl
+     * @return string 转换后的字符串
      */
     function url_conversion(string $string = '', string $prefixString = '', array $linkAttr = ['href', 'src']): string
     {
@@ -1463,6 +1553,11 @@ if (! function_exists('is_string_value_array')) {
      *         ['name'=>['foo']]:false
      *         [['name','foo']]:false
      *         ['name'=>new stdClass()]:false
+     *
+     * 判定条件：不是顺序列表（array_is_list 为 false）且所有值均为标量（is_scalar）。
+     *
+     * @param  array  $array  待检查的数组
+     * @return bool 满足「关联数组 + 全部标量值」返回 true，否则返回 false
      */
     function is_string_value_array(array $array): bool
     {
@@ -1472,7 +1567,14 @@ if (! function_exists('is_string_value_array')) {
 
 
 if (! function_exists('json_string_to_array')) {
-    // 判断一个字符串是否为json格式,并返回json数组
+    /**
+     * 判断字符串是否为 JSON 并返回解析后的数组
+     *
+     * 数组原样返回；JSON 字符串成功解码为数组则返回，否则回退返回原字符串。
+     *
+     * @param mixed $string 待判断的字符串（或数组）
+     * @return mixed 解析后的数组或原字符串
+     */
     function json_string_to_array($string)
     {
         if (is_array($string)) {
@@ -1489,7 +1591,14 @@ if (! function_exists('json_string_to_array')) {
 }
 
 if (! function_exists('json_array_to_string')) {
-    // 判断json格式转换为字符串
+    /**
+     * 将数组转换为 JSON 字符串
+     *
+     * 非数组数据原样返回，便于在不确定入参类型时统一序列化。
+     *
+     * @param mixed $array 待转换的数组（或其他类型）
+     * @return mixed 序列化后的 JSON 字符串或原数据
+     */
     function json_array_to_string($array)
     {
         return is_array($array) ? json_encode($array) : $array;
@@ -1503,6 +1612,12 @@ if (! function_exists('before_calling_methods')) {
      *
      * 适用场景：
      *   在路由调用控制器方法之前，先执行 initialize 方法，并传入依赖关系参数，需要在构造函数中调用本方法
+     *
+     * 示例说明（以下代码为示范用法，并非本文件中的真实函数）：
+     *   示例类 WebBaseController 的 __construct() 负责在构造阶段调用本函数完成注册；
+     *   initialize() 是构造函数中指定、由本函数自动执行的初始化方法，用于演示参数依赖注入；
+     *   test() 是借助 $args 传入普通参数（如 $name/$age）的普通方法示例。
+     *
      *      eg:
      *          class WebBaseController
      *              public function __construct(Request $request)
@@ -1590,7 +1705,11 @@ if (! function_exists('class_basename')) {
     /**
      * 获取类名
      *
+     * 把命名空间分隔符统一为 `/` 后取最后一段，并去掉可能存在的 `.php` 后缀，
+     * 因此同时适用于「完整类名」与「类文件路径」两种入参。
+     *
      * @param  string  $className  类名 eg: \Test\Abc, get_class($this) 等
+     * @return string 不含命名空间的短类名
      */
     function class_basename(string $className): string
     {
@@ -1598,7 +1717,7 @@ if (! function_exists('class_basename')) {
         $fullClassName = str_replace('/', '\\', $className); // 确保类名中的分隔符统一为反斜线
 
         // 使用 basename 函数提取路径的最后一部分，相当于提取类名
-        return basename($fullClassName, '.php'); // 如果类名字符串以 ".php" 结尾，这会移除它
+        return basename(str_replace('\\', '/', $className), '.php');
     }
 }
 
@@ -1606,13 +1725,30 @@ if (! function_exists('class_basename')) {
 if (! function_exists('relative_path')) {
     /**
      * 获取文件相对于项目根目录的相对路径
+     *
+     * 以本文件所在目录为基准，截取到 `vendor` 之前的路径作为项目根目录；
+     * 文件真实路径位于根目录内时返回去掉该前缀（并去掉开头的 `public/`）的相对路径，
+     * 否则原样返回真实路径。注意：realpath() 失败时返回 false，会参与后续字符串比较。
+     *
+     * @param  string  $filePath  文件路径（相对或绝对）
+     * @return string 相对项目根目录的路径或原始真实路径
      */
     function relative_path(string $filePath): string
     {
         // 相对路径
         $dir = dirname(__DIR__);
-        $prefixPath = substr($dir, 0, strpos($dir, 'vendor'));
+        $vendorPos = strpos($dir, 'vendor');
+        $prefixPath = $vendorPos === false ? '' : substr($dir, 0, $vendorPos);
         $realPath = realpath($filePath); // 获取真实路径
+
+        // realpath() 失败（文件不存在等）时返回 false，直接参与字符串函数会触发 TypeError
+        if ($realPath === false) {
+            return $filePath;
+        }
+
+        if ($prefixPath === '') {
+            return $realPath;
+        }
 
         return str_starts_with($realPath, $prefixPath) ? ltrim(substr($realPath, strlen($prefixPath)), 'public/') : $realPath;
     }
@@ -1719,6 +1855,8 @@ if (!function_exists('stream_output')) {
      * ```
      *
      * 10. 在未初始化时安全调用（使用 nullsafe 操作符）
+     *     示例类 Test 的 demo() 仅用于演示：stream_print() 在未初始化时返回 null，`?->` 会安全跳过；
+     *     待 stream_output() 初始化后再调用，则正常输出内容。
      * ```php
      * class Test {
      *     public function demo() {
@@ -1870,6 +2008,11 @@ if (!function_exists('stream_output')) {
                 'default' => ['cli' => "\033[37m", 'browser' => '#666666']  // 默认（灰色）
             ];
 
+            /**
+             * 构造函数：根据运行环境初始化颜色与换行符
+             *
+             * @param bool $isCli 是否为 CLI 环境（决定换行符与颜色支持）
+             */
             public function __construct(bool $isCli)
             {
                 $this->isCli = $isCli;
@@ -2056,10 +2199,15 @@ if (! function_exists('is_resource_file')) {
     /**
      * 判断是否是资源文件[文件后缀判断]
      *
+     * 解析 URL 的路径部分并取其扩展名：布尔模式下按内置后缀表判断，
+     * 无扩展名时退化为识别 `captcha/`、`tn_code/` 这类验证码路由；传入数组时仅比对自定义后缀。
+     *
+     * @param  string  $url  待判断的 URL 或路径
      * @param  bool|array  $simpleOrCustomExt  仅判断简单的几种资源文件
      *                                         true(默认): 仅判断简单的几种资源文件
      *                                         false: 会判断大部分的资源文件
      *                                         array: 仅判断自定义的这些后缀
+     * @return bool 是资源文件返回 true，否则返回 false（URL 无路径部分时同样返回 false）
      */
     function is_resource_file(string $url, bool|array $simpleOrCustomExt = true): bool
     {
@@ -2394,7 +2542,7 @@ if (! function_exists('img_to_base64')) {
     function img_base64($image_file): string
     {
         $image_info = getimagesize($image_file);
-        $image_data = fread(fopen($image_file, 'r'), filesize($image_file));
+        $image_data = file_get_contents($image_file);
 
         return 'data:'.$image_info['mime'].';base64,'.chunk_split(base64_encode($image_data));
     }
@@ -2404,12 +2552,25 @@ if (! function_exists('base64_to_image')) {
     /**
      * base64图片转文件图片
      * base64_to_image($row['cover'],'./uploads/images')
+     *
+     * 仅接受白名单内的图片 MIME（png/jpg/jpeg/gif/webp/bmp/wbmp/xbm/ico），
+     * 按「$path/年月日/」创建子目录并以随机文件名写盘，返回去掉开头 `.` 的相对路径；
+     * 格式不匹配、类型不在白名单或写盘失败时返回 false。
+     *
+     * @param  string  $base64_image_content  data:image/xxx;base64,... 形式的图片内容
+     * @param  string  $path  图片保存的根目录
+     * @return bool|string 成功返回文件相对路径，失败返回 false
      */
     function base64_to_image($base64_image_content, $path): bool|string
     {
+        // 仅允许图片扩展名，杜绝 data:image/php 之类写入 .php webshell
+        $allowedTypes = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'wbmp', 'xbm', 'ico'];
         // 匹配出图片的格式
         if (preg_match('/^(data:\s*image\/(\w+);base64,)/', $base64_image_content, $result)) {
-            $type = $result[2];
+            $type = strtolower($result[2]);
+            if (! in_array($type, $allowedTypes, true)) {
+                return false;
+            }
             $new_file = $path.'/'.date('Ymd', time()).'/';
             if (! file_exists($new_file)) {
                 // 检查是否有该文件夹，如果没有就创建，并给予最高权限
@@ -2446,7 +2607,16 @@ if (! function_exists('show_img')) {
 }
 
 if (! function_exists('parse_files')) {
-    // 解析文件上传数据
+    /**
+     * 解析文件上传数据
+     *
+     * 把 PHP 原生 $_FILES 的「按字段聚合」结构（name/type/tmp_name/error/size 各自为数组）
+     * 重排为「每个字段一个文件数组」或「每个字段一组文件数组」的形式，便于遍历处理；
+     * 多文件场景下缺失的下标以 null 填充。
+     *
+     * @param  array  $files  $_FILES 形式的上传数据（单文件或多文件）
+     * @return array 按字段重排后的文件结构
+     */
     function parse_files(array $files): array
     {
         $parsedFiles = [];
@@ -2481,6 +2651,11 @@ if (! function_exists('parse_files')) {
 if (! function_exists('is_laravel')) {
     /**
      * 检测是否在 Laravel 环境中
+     *
+     * 三选一命中即为真：定义了 LARAVEL_START 常量、存在 Illuminate\Foundation\Application 类、
+     * 或全局 app() 返回 Illuminate 应用实例（仅在前两者都不满足时才会真正调用 app()）。
+     *
+     * @return bool 处于 Laravel 环境返回 true，否则返回 false
      */
     function is_laravel(): bool
     {
@@ -2494,8 +2669,11 @@ if (! function_exists('obj2Arr')) {
     /**
      * 对象转数组
      *
+     * 与 obj_to_arr() 逻辑一致（本文件受 function_exists 保护，先定义者生效）：
+     * 对象强转为数组、数组逐项递归，其它类型原样返回。
      *
-     * @return array|mixed
+     * @param  mixed  $array  待转换的对象 / 数组 / 标量
+     * @return mixed 转换后的数组或原始值
      */
     function obj2Arr($array): mixed
     {
@@ -2517,9 +2695,12 @@ if (! function_exists('url_conversion')) {
     /**
      * 把 ./ 和 ../ 开头的资源地址转换为绝对地址
      *
+     * 与前面同名函数逻辑一致（本文件受 function_exists 保护，先定义者生效）。
+     *
      * @param  string  $string  需要转换的字符串
      * @param  string  $prefixString  拼接的前缀字符
      * @param  array  $linkAttr  需要转换的标签属性，例如：href、src、durl
+     * @return string 转换后的字符串
      */
     function url_conversion(string $string = '', string $prefixString = '', array $linkAttr = ['href', 'src']): string
     {
@@ -2570,6 +2751,13 @@ if (! function_exists('url_conversion')) {
 if (! function_exists('url_conversion_to_prefix_path')) {
     /**
      * 把 $url 中的 相对路径 转换为$prefix前缀路径, 建议调用 url_conversion() 方法
+     *
+     * 已是 http 开头的地址原样返回；`/` 开头时拼到前缀的域名（或首段目录）之后；
+     * 其余情况按 `../` 的层数回退前缀目录层级，再拼接去掉 `../`、`./` 的剩余路径。
+     *
+     * @param  string  $url  待转换的相对路径
+     * @param  string  $prefix  前缀路径或完整域名 URL
+     * @return string 拼接后的绝对路径（或原样返回）
      */
     function url_conversion_to_prefix_path(string $url = '', string $prefix = ''): string
     {
@@ -2610,9 +2798,13 @@ if (! function_exists('array_keys_search')) {
     /**
      * 从二维数组中搜索指定的键名，返回键名对应的值
      *
+     * onlyExists 为 true 时只保留数组中真实存在的键；为 false 时以 $keys 为准补齐结果，
+     * 缺失的键填 null。入参为空时直接返回空数组。
+     *
      * @param  array  $array  二维数组
      * @param  array  $keys  键名数组
      * @param  bool  $onlyExists  是否只返回存在的键名对应的值
+     * @return array 键名 => 值 的结果数组
      */
     function array_keys_search(array $array = [], array $keys = [], bool $onlyExists = false): mixed
     {
@@ -2642,8 +2834,12 @@ if (! function_exists('get_trace_data')) {
     /**
      * 获取 Throwable 异常信息的关键数据，方便记录到库
      *
+     * 过滤掉 vendor 目录下的调用帧；$includeArgs 为 true 时把对象参数压缩为
+     * 「类名:主键」或「类名」字符串，避免把整个对象写入存储。
+     *
      * @param  Throwable  $exception  异常信息
      * @param  bool  $includeArgs  是否包含参数
+     * @return array{message: string, code: int|string, file: string, line: int, trace: array} 异常关键字段与过滤后的调用栈
      */
     function get_trace_data(Throwable $exception, bool $includeArgs = true): array
     {
@@ -2840,6 +3036,12 @@ if (! function_exists('to_full_text_search_str')) {
 
     /**
      * 辅助函数：判断 token 是否已经是短语或包含通配符，避免重复添加 *
+     *
+     * 首字符为双引号（短语）或 token 内已含 `*` 时视为无需再追加通配符。
+     * 注意：传入空字符串会因访问下标 0 而触发告警。
+     *
+     * @param  string  $token  待判断的搜索词片段
+     * @return bool 已是短语或已含通配符返回 true，否则返回 false
      */
     function isPhraseOrWildcard(string $token): bool
     {
@@ -2940,6 +3142,11 @@ if (! function_exists('base_convert_any')) {
 if (! function_exists('from60to10')) {
     /**
      * 60进制转10进制
+     *
+     * 使用去掉易混字符 o/O 的自定义字典逐位加权求和，返回不带千分位的十进制字符串。
+     *
+     * @param  string  $str  60 进制字符串
+     * @return string 十进制结果（纯数字字符串）
      */
     function from60to10($str): string
     {
@@ -2960,6 +3167,11 @@ if (! function_exists('from60to10')) {
 if (! function_exists('from10to60')) {
     /**
      * 10进制转60进制
+     *
+     * 反复取模 60 查自定义字典（去掉易混字符 o/O）拼接结果，除到 0 为止。
+     *
+     * @param  int|string  $dec  十进制数值
+     * @return string 60 进制字符串
      */
     function from10to60($dec): string
     {
@@ -2981,6 +3193,7 @@ if (! function_exists('dict_convert_ten')) {
      *
      * @param  string  $string  根据自定义字典 $dict 生成的字符串
      * @param  int  $fromBase  源进制
+     * @return int|string 十进制结果（超长数值可能以字符串返回）
      *
      * @throws Exception
      */
@@ -2991,7 +3204,15 @@ if (! function_exists('dict_convert_ten')) {
 }
 
 if (! function_exists('remove_str_emoji')) {
-    // 移除字符串中的 emoji 表情
+    /**
+     * 移除字符串中的 emoji 表情
+     *
+     * 逐字符判断，字节长度 >= 4 的字符被丢弃（emoji 多为 4 字节）；
+     * 因此同样会被误删的还有部分 4 字节汉字（如扩展 B 区字符）。
+     *
+     * @param  string  $str  待处理的字符串
+     * @return string 移除 emoji 后的字符串
+     */
     function remove_str_emoji($str): string
     {
         $mbLen = mb_strlen($str);
@@ -3009,7 +3230,15 @@ if (! function_exists('remove_str_emoji')) {
 }
 
 if (! function_exists('check_str_exists_emoji')) {
-    // 判断字符串中是否含有 emoji 表情
+    /**
+     * 判断字符串中是否含有 emoji 表情
+     *
+     * 逐字符检查字节长度，发现任一 >= 4 字节的字符即判定为含 emoji；
+     * 与 remove_str_emoji() 的判定口径一致，同样会把部分 4 字节汉字误判为表情。
+     *
+     * @param  string  $str  待检查的字符串
+     * @return bool 含 emoji 返回 true，否则返回 false
+     */
     function check_str_exists_emoji($str): bool
     {
         $mbLen = mb_strlen($str);
@@ -3029,8 +3258,13 @@ if (! function_exists('del_dir')) {
     /**
      * 删除文件夹
      *
+     * 使用递归迭代器按「先子后父」顺序删除目录内所有文件与子目录，
+     * $delSelf 为 true 时最后删除目录本身；路径不是目录时直接返回 false。
+     * 注意：删除失败时不会中断，仍可能返回 true。
+     *
      * @param  string  $dirname  目录
      * @param  bool  $delSelf  是否删除自身
+     * @return bool 目标不是目录返回 false，否则返回 true（不校验每个条目的删除结果）
      */
     function del_dir(string $dirname, bool $delSelf = true): bool
     {
@@ -3055,20 +3289,33 @@ if (! function_exists('del_dir')) {
 if (! function_exists('dir_is_empty')) {
     /**
      * 判断文件夹是否为空
+     *
+     * 打开目录并跳过 `.`、`..`；不存在其它条目即为空。
+     *
+     * @param  string  $dir  目录路径
+     * @return bool 目录为空（或无法打开）时返回 true，存在任一有效条目时返回 false
      */
     function dir_is_empty(string $dir): bool
     {
-        $res = false;
-        if ($handle = opendir($dir)) {
-            while (! $res && ($item = readdir($handle))) {
-                if ($item != '.' && $item != '..') {
-                    $res = true;
+        $handle = @opendir($dir);
+        if ($handle === false) {
+            // 目录不存在或无权限读取，按「空」处理，避免 closedir(false) 触发 TypeError
+            return true;
+        }
+
+        $isEmpty = true;
+        try {
+            while (($item = readdir($handle)) !== false) {
+                if ($item !== '.' && $item !== '..') {
+                    $isEmpty = false;
+                    break;
                 }
             }
+        } finally {
+            closedir($handle);
         }
-        closedir($handle);
 
-        return $res;
+        return $isEmpty;
     }
 }
 
@@ -3076,8 +3323,11 @@ if (! function_exists('create_dir')) {
     /**
      * 递归创建目录
      *
+     * 目录已存在即视为成功；否则先递归创建父级再用 mkdir 创建自身（已开启 recursive）。
+     *
      * @param  string  $dir  目录
      * @param  int  $permissions  权限
+     * @return bool 目录最终存在（或创建成功）返回 true，否则返回 false
      */
     function create_dir(string $dir, int $permissions = 0755): bool
     {
@@ -3089,27 +3339,58 @@ if (! function_exists('create_dir_or_filepath')) {
     /**
      * 创建文件夹或文件
      *
+     * 空路径返回 false；以分隔符结尾视为目录目标（递归 mkdir），否则按文件目标处理：
+     * 先确保父目录存在，再 touch 出空文件，若实际上该路径是目录则退化为创建目录。
+     *
      * @param  string  $path  文件夹或者文件路径
+     * @param  int  $permissions  创建目录时使用的权限，默认 0755
+     * @return bool 目标已存在或创建成功返回 true，创建失败返回 false
      */
     function create_dir_or_filepath(string $path = '', int $permissions = 0755): bool
     {
-        // 如果路径不存在，则尝试创建它
-        if (! file_exists($path)) {
-            // 创建目录（如果不存在）
-            $dir = dirname($path);
-            if (! is_dir($dir) && ! mkdir($dir, $permissions, true) && ! is_dir($dir)) {
-                // 创建文件夹失败
-                return false;
-            }
-            // 如果不是现有目录，则尝试创建文件
-            if (! is_dir($path) && ! touch($path)) {
-                // 创建文件失败
-                return false;
-            }
+        if ($path === '') {
+            return false;
         }
 
-        // 路径已存在或成功创建
-        return true;
+        // 去掉结尾的目录分隔符后再判断，避免 dirname() 在“目录路径/”时
+        // 把目标目录本身误当作最后一级而剥离，从而错误计算出祖父级目录、
+        // 导致后续 touch 在目录路径上失败、目标目录始终无法创建。
+        $normalized = rtrim($path, '/\\');
+
+        if ($normalized === '' || $normalized === '.') {
+            // 指向当前目录，必然已存在
+            return true;
+        }
+
+        if (file_exists($normalized)) {
+            return true;
+        }
+
+        // 调用方以分隔符结尾（如 base64_to_image 传入的“目录/”）→ 目标为目录
+        $isDirectoryTarget = $path !== $normalized;
+
+        if ($isDirectoryTarget) {
+            return mkdir($normalized, $permissions, true) || is_dir($normalized);
+        }
+
+        // 文件目标：确保父目录存在
+        $dir = dirname($normalized);
+        if (! is_dir($dir) && ! mkdir($dir, $permissions, true) && ! is_dir($dir)) {
+            // 创建父文件夹失败
+            return false;
+        }
+
+        // 创建空文件占位；若该路径实为目录（无扩展名等边界情况）则退化为创建目录
+        if (file_exists($normalized)) {
+            return true;
+        }
+
+        if (@touch($normalized)) {
+            return true;
+        }
+
+        // touch 失败（目标本应是目录）时退化为创建目录
+        return mkdir($normalized, $permissions, true) || is_dir($normalized);
     }
 }
 
@@ -3122,6 +3403,7 @@ if (! function_exists('num_to_cn')) {
      * @param  float|int|string  $number  需要转换的数字
      * @param  bool  $mode  模式[true:金额（默认）,false:普通数字表示]
      * @param  bool  $sim  使用小写（默认）
+     * @return string 中文大写/小写数字，金额模式带「元」及角分单位，普通模式带「点」和小数位
      *
      * @throws Exception
      */
@@ -3223,7 +3505,11 @@ if (! function_exists('num_to_word')) {
     /**
      * 数字转换为英文
      *
+     * 借助 intl 扩展的 NumberFormatter（en / SPELLOUT）把数字读成英文单词；
+     * 依赖 intl 扩展，未安装时构造 NumberFormatter 会失败。
+     *
      * @param  float|int|string  $number  需要转换的数字
+     * @return string 英文读法
      *
      * @throws Exception
      */
@@ -3238,9 +3524,13 @@ if (! function_exists('num_to_word')) {
 
 if (! function_exists('num_to_zhCN')) {
     /**
-     * 数字转换为英文
+     * 数字转换为中文（简体）
+     *
+     * 借助 intl 扩展的 NumberFormatter（zh_cn / SPELLOUT）读成中文数字，
+     * 并把其中的「〇」统一替换为「零」；依赖 intl 扩展。
      *
      * @param  float|int|string  $number  需要转换的数字
+     * @return string 中文读法
      *
      * @throws Exception
      */
@@ -3259,8 +3549,8 @@ if (! function_exists('str_rand')) {
     /**
      * 生成随机字符串
      *
-     *
-     * @DateTime 2017-06-28
+     * 从「大小写字母 + 数字 + 自定义附加值」组成的字符集中逐位取随机字符，
+     * 使用 random_int() 保证随机性；字符集内不含 l、I、0、2 等易混字符。
      *
      * @param  int  $length  字符串长度
      * @param  string  $tack  附加值
@@ -3281,25 +3571,55 @@ if (! function_exists('str_rand')) {
 
 if (! function_exists('download_url_file')) {
     /**
-     * 下载url文件
+     * 以附件形式流式下载本地文件到浏览器
+     *
+     * 安全约束：
+     * - 不再从 $_GET['url'] 自动读取，必须由调用方显式传入路径，避免任意文件读取 / SSRF；
+     * - 拒绝远程地址（含协议 scheme，如 http://、ftp://），仅允许本地文件路径；
+     * - 若传入 $allowedBaseDir，则落盘路径必须位于该目录内部（防目录穿越）；
+     * - 文件名经净化，防响应头注入（CRLF / 引号）。
+     *
+     * @param string $url            待下载的本地文件路径（绝对或相对）
+     * @param string $allowedBaseDir 可选，允许下载的根目录；命中后路径必须落在其内部
+     * @return never
+     * @throws \RuntimeException 路径为空、无法打开或超出允许目录范围时
      */
-    function download_url_file(string $url = ''): never
+    function download_url_file(string $url = '', string $allowedBaseDir = ''): never
     {
-        $filename = ! empty($url) ? $url : (! empty($_GET['url'] ?? '') ? $_GET['url'] : '');
-        $title = substr($filename, (int) strrpos($filename, '/') + 1);
-        $file = fopen($filename, 'rb');
-        if ($file === false) {
-            throw new RuntimeException("无法打开文件: {$filename}");
+        if ($url === '') {
+            throw new RuntimeException('必须显式传入待下载的文件路径');
         }
-        header('Content-type:application/octet-stream');
-        header('Accept-Ranges:bytes');
-        header("Content-Disposition:attachment;filename={$title}");
-        while (! feof($file)) {
-            echo fread($file, 8192);
-            ob_flush();
-            flush();
+
+        // 拒绝远程地址（SSRF 防护）
+        if (preg_match('#^[a-zA-Z][a-zA-Z0-9+.\-]*://#', $url) === 1) {
+            throw new RuntimeException('仅支持下载本地文件，拒绝远程地址');
         }
-        fclose($file);
+
+        $realPath = realpath($url);
+        if ($realPath === false || ! is_file($realPath)) {
+            throw new RuntimeException("无法打开文件: {$url}");
+        }
+
+        // 目录穿越防护：若指定了允许根目录，则必须落在其内部
+        if ($allowedBaseDir !== '') {
+            $base = realpath($allowedBaseDir);
+            $basePrefix = $base === false ? '' : $base . DIRECTORY_SEPARATOR;
+            if ($base === false || $basePrefix === '' || strncmp($realPath, $basePrefix, strlen($basePrefix)) !== 0) {
+                throw new RuntimeException('文件超出允许下载的目录范围');
+            }
+        }
+
+        $title = basename($realPath);
+        // 净化文件名，防 CRLF / 引号等响应头注入
+        $title = (string) preg_replace('/[\r\n"]/', '', $title);
+        if ($title === '') {
+            $title = 'download';
+        }
+
+        header('Content-Type: application/octet-stream');
+        header('Accept-Ranges: bytes');
+        header('Content-Disposition: attachment; filename="' . $title . '"');
+        readfile($realPath);
         exit;
     }
 }
