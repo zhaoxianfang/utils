@@ -16,7 +16,8 @@
   "require": {
     "php": ">=8.2",
     "ext-json": "*",
-    "ext-mbstring": "*"
+    "ext-mbstring": "*",
+    "zxf/res": "*"
   },
   "suggest": {
     "ext-curl": "启用 Http\\Curl 与 OAuth2 各网关的网络请求能力",

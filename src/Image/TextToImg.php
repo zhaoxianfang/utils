@@ -7,6 +7,8 @@ namespace zxf\Utils\Image;
 use Exception;
 use GdImage;
 use InvalidArgumentException;
+use zxf\res\AssetLocator;
+use zxf\res\AssetType;
 
 /**
  * 文字生成图片类库
@@ -104,7 +106,6 @@ use InvalidArgumentException;
  * |------|------|
  * | `setFontFile($file)` | 加载外部 TTF/OTF 字体文件 |
  * | `setFontStyle($style)` | 使用内置字体（resource/font 目录） |
- * | `setFontDir($dir)` | 修改字体扫描目录 |
  * | `getAvailableFonts()` | 获取所有可用内置字体名称列表 |
  *
  * ### 颜色设置（支持 HEX/RGB/RGBA）
@@ -404,9 +405,6 @@ class TextToImg
     /** @var bool 是否清除输出图片的元数据（EXIF 等） */
     private bool $clearExif = false;
 
-    /** @var string 字体目录路径 */
-    private string $fontDir = '';
-
     /** @var array 可用字体文件名缓存 */
     private array $availableFonts = [];
 
@@ -461,14 +459,8 @@ class TextToImg
         $this->width  = self::normalizeDimension($width, '宽度');
         $this->height = self::normalizeDimension($height, '高度');
 
-        // 设置默认字体目录为本库自带的 resource/font 目录
-        $this->fontDir = dirname(__FILE__, 2) . '/resource/font';
-
-        // 初始化默认字体文件（庞门正道标题体）
-        $defaultFont = $this->fontDir . '/pmzdxx.ttf';
-        if (is_file($defaultFont)) {
-            $this->fontFile = $defaultFont;
-        }
+        // 初始化默认字体文件（录书体）
+        $this->fontFile = AssetLocator::resolve('fonts', 'lishu.ttf');
     }
 
     /**
@@ -680,28 +672,21 @@ class TextToImg
      *
      * 字体文件需存放于本库 resource/font/ 目录下，仅需传入文件名（不含扩展名）。
      *
-     * @param  string  $style  字体名称，例如 'pmzdxx'（庞门正道标题体）
+     * @param  string  $fileName  字体名称，例如 'pmzdxx'（庞门正道标题体）
      * @return $this
      *
      * @throws Exception 字体不存在时抛出异常
      */
-    public function setFontStyle(string $style = 'pmzdxx'): static
+    public function setFontStyle(string $fileName = 'pmzdxx'): static
     {
-        $file = $this->fontDir . '/' . $style . '.ttf';
-        if (! is_file($file)) {
-            // 尝试 otf 扩展名
-            $file = $this->fontDir . '/' . $style . '.otf';
-            if (! is_file($file)) {
-                throw new Exception('不支持的字体样式: ' . $style . '，请确保字体文件存在于 ' . $this->fontDir);
-            }
-        }
-        $this->fontFile = $file;
+        $this->fontFile  = AssetLocator::resolve('fonts', $fileName.'.ttf');
 
         return $this;
     }
 
     /**
      * 设置字体目录
+     * @deprecated
      *
      * 用于修改本库默认字体扫描路径，设置后 setFontStyle 将在新目录中查找字体。
      *
@@ -712,11 +697,6 @@ class TextToImg
      */
     public function setFontDir(string $dir): static
     {
-        if (! is_dir($dir)) {
-            throw new Exception('字体目录不存在: ' . $dir);
-        }
-        $this->fontDir = rtrim($dir, '/\\');
-
         return $this;
     }
 
@@ -1638,13 +1618,12 @@ class TextToImg
             return $this->availableFonts;
         }
 
-        if (! is_dir($this->fontDir)) {
-            return [];
-        }
-
         $fonts = [];
-        foreach (glob($this->fontDir . '/*.{ttf,otf}', GLOB_BRACE) as $file) {
-            $fonts[] = pathinfo($file, PATHINFO_FILENAME);
+        foreach (AssetLocator::iterateAll(AssetType::Font) as $key => $absolute) {
+            // $key     形如 "fonts/regular.woff2"
+            // $absolute 字体文件绝对路径
+            // echo "{$key} => {$absolute}\n";
+            $fonts[] = pathinfo($absolute, PATHINFO_FILENAME);
         }
         $this->availableFonts = $fonts;
 

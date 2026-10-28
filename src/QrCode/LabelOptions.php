@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace zxf\Utils\QrCode;
 
 use InvalidArgumentException;
+use zxf\res\AssetLocator;
 use zxf\Utils\QrCode\Color\Color;
 
 /**
@@ -122,7 +123,7 @@ class LabelOptions
         }
 
         // 尝试作为字体名称查找
-        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        $fontByName = AssetLocator::resolve('fonts', $fontPath.'.ttf');
         if (is_file($fontByName)) {
             self::$defaultFontPath = $fontByName;
             return;
@@ -175,23 +176,10 @@ class LabelOptions
     public function fontPath(?string $fontPath): self
     {
         if (empty($fontPath)) {
-            // 使用默认字体
-            $defaultFont = dirname(__FILE__, 2) . '/resource/font/xingkai.ttf';
-            if (is_file($defaultFont)) {
-                $this->fontPath = $defaultFont;
-                return $this;
-            }
-            throw new InvalidArgumentException('默认字体文件不存在');
+            $fontPath = 'lishu';
         }
 
-        // 首先尝试直接作为完整路径使用
-        if (is_file($fontPath)) {
-            $this->fontPath = $fontPath;
-            return $this;
-        }
-
-        // 尝试作为字体名称查找
-        $fontByName = dirname(__FILE__, 2) . '/resource/font/' . $fontPath . '.ttf';
+        $fontByName = AssetLocator::resolve('fonts', $fontPath.'.ttf');
         if (is_file($fontByName)) {
             $this->fontPath = $fontByName;
             return $this;

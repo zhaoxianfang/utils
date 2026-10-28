@@ -9,6 +9,7 @@ use Imagick;
 use ImagickDraw;
 use ImagickException;
 use ImagickPixel;
+use zxf\res\AssetLocator;
 
 /**
  * 高级图像处理工具类 (ImagickTool)
@@ -1486,7 +1487,7 @@ class ImagickTool
      *                                  GRADIENT_DIAGONAL_LEFT, GRADIENT_DIAGONAL_RIGHT
      * @param float $gradientIntensity 渐变强度，0-1，默认0.5
      * @param string|null $outputPath 输出路径，null时返回 本类
-     * @return string|self
+     * @return ImagickTool
      * @throws ImagickException 当合并失败时抛出异常
      */
     public function mergeImages(
@@ -1497,7 +1498,7 @@ class ImagickTool
         ?string $gradientType = null,
         float $gradientIntensity = 0.5,
         ?string $outputPath = null
-    ):string|self
+    ): ImagickTool
     {
         // 验证参数
         if (empty($imagePaths)) {
@@ -3291,11 +3292,7 @@ class ImagickTool
         }
 
         // 构建字体路径
-        $fontPath = dirname(__DIR__, 1).'/resource/font/'.$fontName.'.ttf';
-        // 如果字体文件不存在，使用默认字体
-        if (!is_file($fontPath)) {
-            $fontPath = dirname(__DIR__, 1).'/resource/font/pmzdxx.ttf';
-        }
+        $fontPath = AssetLocator::resolve('fonts', $fontName.'.ttf');
 
         return $fontPath;
     }
