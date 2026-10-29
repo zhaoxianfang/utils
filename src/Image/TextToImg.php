@@ -7,8 +7,6 @@ namespace zxf\Utils\Image;
 use Exception;
 use GdImage;
 use InvalidArgumentException;
-use zxf\res\AssetLocator;
-use zxf\res\AssetType;
 
 /**
  * 文字生成图片类库
@@ -460,7 +458,7 @@ class TextToImg
         $this->height = self::normalizeDimension($height, '高度');
 
         // 初始化默认字体文件（录书体）
-        $this->fontFile = AssetLocator::resolve('fonts', 'lishu.ttf');
+        $this->fontFile = xf_res_path('fonts', 'lishu.ttf');
     }
 
     /**
@@ -679,7 +677,7 @@ class TextToImg
      */
     public function setFontStyle(string $fileName = 'pmzdxx'): static
     {
-        $this->fontFile  = AssetLocator::resolve('fonts', $fileName.'.ttf');
+        $this->fontFile  = xf_res_path('fonts', $fileName.'.ttf');
 
         return $this;
     }
@@ -1619,7 +1617,8 @@ class TextToImg
         }
 
         $fonts = [];
-        foreach (AssetLocator::iterateAll(AssetType::Font) as $key => $absolute) {
+        $allFonts = xf_res_fonts();
+        foreach ($allFonts as $key => $absolute) {
             // $key     形如 "fonts/regular.woff2"
             // $absolute 字体文件绝对路径
             // echo "{$key} => {$absolute}\n";

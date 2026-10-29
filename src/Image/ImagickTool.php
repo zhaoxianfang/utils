@@ -9,7 +9,6 @@ use Imagick;
 use ImagickDraw;
 use ImagickException;
 use ImagickPixel;
-use zxf\res\AssetLocator;
 
 /**
  * 高级图像处理工具类 (ImagickTool)
@@ -3292,7 +3291,7 @@ class ImagickTool
         }
 
         // 构建字体路径
-        $fontPath = AssetLocator::resolve('fonts', $fontName.'.ttf');
+        $fontPath = xf_res_path('fonts', $fontName.'.ttf');
 
         return $fontPath;
     }

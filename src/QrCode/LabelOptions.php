@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace zxf\Utils\QrCode;
 
 use InvalidArgumentException;
-use zxf\res\AssetLocator;
 use zxf\Utils\QrCode\Color\Color;
 
 /**
@@ -123,7 +122,7 @@ class LabelOptions
         }
 
         // 尝试作为字体名称查找
-        $fontByName = AssetLocator::resolve('fonts', $fontPath.'.ttf');
+        $fontByName =  xf_res_path('fonts', $fontPath.'.ttf');
         if (is_file($fontByName)) {
             self::$defaultFontPath = $fontByName;
             return;
@@ -179,7 +178,7 @@ class LabelOptions
             $fontPath = 'lishu';
         }
 
-        $fontByName = AssetLocator::resolve('fonts', $fontPath.'.ttf');
+        $fontByName = xf_res_path('fonts', $fontPath.'.ttf');
         if (is_file($fontByName)) {
             $this->fontPath = $fontByName;
             return $this;
